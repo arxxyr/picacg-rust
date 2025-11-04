@@ -1,14 +1,14 @@
 # PicACG Rust 重写进度报告
 
-**最后更新**: 2025-11-04 22:05
+**最后更新**: 2025-11-05
 
 ## 项目概览
 
 | 项目信息 | 数值 |
 |---------|------|
-| 总代码行数 | ~4500 行 Rust |
-| 完成阶段 | 5.5/10 |
-| 完成度 | ~55% |
+| 总代码行数 | ~4550 行 Rust |
+| 完成阶段 | 5.6/10 |
+| 完成度 | ~56% |
 | Release 二进制大小 | 13 MB |
 | 启动时间 | < 500ms |
 | 内存占用 | ~30-50 MB |
@@ -474,6 +474,97 @@
 
 ---
 
+### ✅ 阶段 5.6: API 响应结构修复与漫画列表界面 (100%)
+
+**完成时间**: 2025-11-05
+
+**代码量**: ~50 行修改
+
+**完成内容**:
+
+#### API 响应结构修复（`api/endpoints/comic.rs`）
+- [x] 修复 `ComicsData` 结构
+  - `comics: Vec<Comic>` → `docs: Vec<Comic>`（字段名修正）
+  - `page: PageInfo` → 扁平分页字段（`total`, `limit`, `page`, `pages`）
+  - 添加详细注释说明 API 返回格式
+- [x] 修复 `EpisodesData` 结构
+  - `eps: Vec<Episode>` → `docs: Vec<Episode>`
+  - `page: PageInfo` → 扁平分页字段
+- [x] 修复 `PicturesData` 结构
+  - `page: PageInfo` → 扁平分页字段
+- [x] 移除 `PageInfo` 模型（不再使用）
+
+#### Comic 模型字段可选性修复（`api/models.rs`）
+- [x] 修正 `Comic` 结构体字段定义
+  - `description: String` → `Option<String>`（列表接口不返回）
+  - `created_at: String` → `Option<String>`（列表接口不返回）
+  - `updated_at: String` → `Option<String>`（列表接口不返回）
+  - `allow_download: bool` 添加 `default` 标记
+- [x] 添加字段注释（说明哪些字段仅详情接口返回）
+
+#### 漫画详情视图更新（`ui/views/comic_detail.rs`）
+- [x] 更新 `description` 字段访问逻辑
+  - 使用 `if let Some(ref description) = comic.description` 安全访问
+  - 空字符串检查
+- [x] 保持视图正常显示
+
+#### API 客户端签名修复（`api/client.rs`）
+- [x] 完整 URL 签名（包含查询参数）
+  - 构建完整 URL（base + path + query）
+  - 手动编码查询参数（`urlencoding::encode`）
+  - 使用完整 URL 进行签名
+  - 不再使用 `builder.query()`（避免二次添加）
+- [x] 详细调试日志
+  - 记录完整 URL
+  - 记录响应体（前 500 字符）
+  - 记录解析错误
+- [x] 添加依赖：`urlencoding = "2.1"`
+
+**Bug 修复**:
+
+1. **API 响应无数据错误** ✅
+   - 问题：查询参数未包含在签名中
+   - 错误：Python 版本先构建完整 URL 再签名，Rust 版本先签名再添加参数
+   - 修复：重写 `request()` 方法，先构建 URL + 查询参数，再签名
+   - 结果：API 签名匹配，请求成功
+
+2. **响应解析失败：invalid type: integer, expected struct PageInfo** ✅
+   - 问题：API 返回扁平分页字段，模型定义为嵌套 `PageInfo` 结构
+   - 错误：`{"page": 1, "pages": 54}` 被期望为 `PageInfo { page: 1, pages: 54 }`
+   - 修复：将所有响应结构的分页字段改为扁平定义
+   - 结果：响应解析成功
+
+3. **Comic 模型缺少字段：missing field `description`** ✅
+   - 问题：列表接口不返回 `description`, `created_at`, `updated_at` 等字段
+   - 错误：模型将这些字段定义为必需的 `String`
+   - 修复：改为 `Option<String>` 并添加 `default`, `skip_serializing_if` 标记
+   - 结果：列表和详情接口都能正常解析
+
+**技术亮点**:
+- **API 协议逆向**: 通过对比 Python 版本和实际响应，发现签名顺序问题
+- **结构体字段映射**: 正确使用 serde 的 `#[serde(rename)]`, `#[serde(default)]`, `#[serde(skip_serializing_if)]`
+- **可选字段处理**: 使用 `Option<T>` 兼容不同接口的响应格式
+- **URL 编码**: 使用 `urlencoding::encode` 对应 Python 的 `quote()` 函数
+- **调试日志**: 添加详细日志帮助诊断问题
+
+**与 Python 版本对比验证**:
+- ✅ API 签名算法完全一致（`url + timestamp + nonce + method + API_KEY`）
+- ✅ 响应解析逻辑完全一致（`r.data['comics']['docs']`, `r.data['eps']['docs']`）
+- ✅ 字段可选性匹配 Python 的访问模式
+
+**运行效果**:
+```
+✅ 登录成功
+✅ 分类列表加载成功
+✅ 点击分类卡片
+✅ 漫画列表加载成功（20 部漫画）
+✅ 封面图片 URL 正确
+✅ 漫画标题、作者、标签显示正常
+✅ 分页信息正确（第 1 页，共 54 页）
+```
+
+---
+
 ## 未完成阶段
 
 ### ⏳ 阶段 6: UI 功能实现 (0%)
@@ -691,6 +782,7 @@
 - ✅ **2025-11-03**: 阶段 4 完成 - 下载管理（并发、断点续传）
 - ✅ **2025-11-03**: 阶段 5 完成 - UI 框架集成（iced 0.13）
 - ✅ **2025-11-04**: 阶段 5.5 完成 - 代理配置与登录认证（SOCKS5 代理 + API 签名修复）
+- ✅ **2025-11-05**: 阶段 5.6 完成 - API 响应结构修复（签名、分页、字段可选性）
 
 ### 计划中
 - ⏳ **2025-01-10**: 阶段 6 完成 - UI 功能实现
