@@ -163,18 +163,20 @@ pub fn view<'a>(state: &'a ComicDetailState, image_cache: &'a crate::ui::image_l
     }
 
     // 简介
-    if !comic.description.is_empty() {
-        right_column = right_column.push(
-            column![
-                text("简介:")
-                    .size(16)
-                    .color(Color::from_rgb(0.9, 0.9, 0.9)),
-                text(&comic.description)
-                    .size(14)
-                    .color(Color::from_rgb(0.8, 0.8, 0.8)),
-            ]
-            .spacing(8),
-        );
+    if let Some(ref description) = comic.description {
+        if !description.is_empty() {
+            right_column = right_column.push(
+                column![
+                    text("简介:")
+                        .size(16)
+                        .color(Color::from_rgb(0.9, 0.9, 0.9)),
+                    text(description)
+                        .size(14)
+                        .color(Color::from_rgb(0.8, 0.8, 0.8)),
+                ]
+                .spacing(8),
+            );
+        }
     }
 
     // 创建左右布局

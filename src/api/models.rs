@@ -58,15 +58,16 @@ pub struct Comic {
     pub views_count: i64,
     #[serde(rename = "commentsCount", default)]
     pub comments_count: i64,
-    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,  // 列表接口不返回，只在详情接口返回
     #[serde(rename = "chineseTeam", skip_serializing_if = "Option::is_none")]
     pub chinese_team: Option<String>,
-    #[serde(rename = "created_at")]
-    pub created_at: String,
-    #[serde(rename = "updated_at")]
-    pub updated_at: String,
-    #[serde(rename = "allowDownload")]
-    pub allow_download: bool,
+    #[serde(rename = "created_at", skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,  // 列表接口不返回
+    #[serde(rename = "updated_at", skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,  // 列表接口不返回
+    #[serde(rename = "allowDownload", default)]
+    pub allow_download: bool,  // 列表接口不返回，使用默认值false
     #[serde(
         rename = "allowComment",
         default,
