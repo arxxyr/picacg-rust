@@ -1,7 +1,10 @@
-use crate::api::client::ApiRequest;
-use crate::api::models::{Comment, PageInfo};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+use crate::api::{
+    client::ApiRequest,
+    models::{Comment, PageInfo},
+};
 
 // 获取漫画评论列表
 #[derive(Debug, Serialize)]

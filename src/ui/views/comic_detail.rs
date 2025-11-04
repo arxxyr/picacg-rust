@@ -1,10 +1,15 @@
-use crate::ui::message::Message;
-use crate::ui::state::ComicDetailState;
-use iced::widget::{button, column, container, image, row, scrollable, text};
-use iced::{Alignment, Color, Element, Length};
+use iced::{
+    Alignment, Color, Element, Length,
+    widget::{button, column, container, image, row, scrollable, text},
+};
+
+use crate::ui::{message::Message, state::ComicDetailState};
 
 /// 漫画详情界面视图
-pub fn view<'a>(state: &'a ComicDetailState, image_cache: &'a crate::ui::image_loader::ImageCache) -> Element<'a, Message> {
+pub fn view<'a>(
+    state: &'a ComicDetailState,
+    image_cache: &'a crate::ui::image_loader::ImageCache,
+) -> Element<'a, Message> {
     // 如果正在加载
     if state.is_loading {
         let loading_text = text("正在加载漫画详情...")
@@ -128,13 +133,20 @@ pub fn view<'a>(state: &'a ComicDetailState, image_cache: &'a crate::ui::image_l
 
     // 章节和页数
     right_column = right_column.push(
-        text(format!("章节: {} | 页数: {}", comic.eps_count, comic.pages_count))
-            .size(14)
-            .color(Color::from_rgb(0.7, 0.7, 0.7)),
+        text(format!(
+            "章节: {} | 页数: {}",
+            comic.eps_count, comic.pages_count
+        ))
+        .size(14)
+        .color(Color::from_rgb(0.7, 0.7, 0.7)),
     );
 
     // 完结状态
-    let status_text = if comic.finished { "已完结" } else { "连载中" };
+    let status_text = if comic.finished {
+        "已完结"
+    } else {
+        "连载中"
+    };
     let status_color = if comic.finished {
         Color::from_rgb(0.5, 0.9, 0.5)
     } else {
@@ -167,9 +179,7 @@ pub fn view<'a>(state: &'a ComicDetailState, image_cache: &'a crate::ui::image_l
         if !description.is_empty() {
             right_column = right_column.push(
                 column![
-                    text("简介:")
-                        .size(16)
-                        .color(Color::from_rgb(0.9, 0.9, 0.9)),
+                    text("简介:").size(16).color(Color::from_rgb(0.9, 0.9, 0.9)),
                     text(description)
                         .size(14)
                         .color(Color::from_rgb(0.8, 0.8, 0.8)),

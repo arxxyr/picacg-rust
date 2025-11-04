@@ -1,7 +1,9 @@
-use crate::ui::message::Message;
-use crate::ui::state::LoginState;
-use iced::widget::{button, column, container, row, text, text_input};
-use iced::{Alignment, Color, Element, Length};
+use iced::{
+    Alignment, Color, Element, Length,
+    widget::{button, column, container, row, text, text_input},
+};
+
+use crate::ui::{message::Message, state::LoginState};
 
 // 定义输入框 ID 常量
 pub const USERNAME_INPUT_ID: &str = "username_input";
@@ -53,10 +55,11 @@ pub fn view<'a>(state: &'a LoginState) -> Element<'a, Message> {
     };
 
     // 代理设置按钮
-    let proxy_settings_button = button(text("代理设置").align_x(iced::alignment::Horizontal::Center))
-        .on_press(Message::NavigateToProxySettings)
-        .width(Length::Fill)
-        .padding(10);
+    let proxy_settings_button =
+        button(text("代理设置").align_x(iced::alignment::Horizontal::Center))
+            .on_press(Message::NavigateToProxySettings)
+            .width(Length::Fill)
+            .padding(10);
 
     // 错误信息
     let error_message = if let Some(ref error) = state.error {

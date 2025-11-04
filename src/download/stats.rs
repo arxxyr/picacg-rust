@@ -1,7 +1,10 @@
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use parking_lot::RwLock;
-use std::collections::VecDeque;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 /// 下载速度样本
 #[derive(Debug, Clone, Copy)]

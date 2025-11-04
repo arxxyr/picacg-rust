@@ -1,8 +1,11 @@
-use hmac::{Hmac, Mac};
-use reqwest::header::{HeaderMap, HeaderValue};
-use reqwest::Method;
-use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use hmac::{Hmac, Mac};
+use reqwest::{
+    Method,
+    header::{HeaderMap, HeaderValue},
+};
+use sha2::Sha256;
 use uuid::Uuid;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -34,26 +37,25 @@ impl Signer {
         // 提取相对路径（去掉 BASE_URL 前缀）
         // Python 版本：_url.replace(config.Url, "")
         // 例如："https://picaapi.picacomic.com/auth/sign-in" -> "auth/sign-in"
-        let relative_path = url
-            .strip_prefix(BASE_URL)
-            .unwrap_or_else(|| {
-                // 如果不以 BASE_URL 开头，尝试只去掉域名部分
-                url.strip_prefix("https://picaapi.picacomic.com/")
-                    .unwrap_or(url)
-            });
+        let relative_path = url.strip_prefix(BASE_URL).unwrap_or_else(|| {
+            // 如果不以 BASE_URL 开头，尝试只去掉域名部分
+            url.strip_prefix("https://picaapi.picacomic.com/")
+                .unwrap_or(url)
+        });
 
         // 构造签名源字符串
         // Python 版本：__ConFromNative 只使用部分参数！
-        // datas = [config.Url, relative_path, now, nonce, method, ApiKey, Version, BuildVersion]
-        // 但 __ConFromNative 只拼接：datas[1] + datas[2] + datas[3] + datas[4] + datas[5]
-        // 即：relative_path + now + nonce + method + ApiKey
+        // datas = [config.Url, relative_path, now, nonce, method, ApiKey, Version,
+        // BuildVersion] 但 __ConFromNative 只拼接：datas[1] + datas[2] +
+        // datas[3] + datas[4] + datas[5] 即：relative_path + now + nonce +
+        // method + ApiKey
         let src = format!(
             "{}{}{}{}{}",
-            relative_path,  // datas[1]: "auth/sign-in"
-            now,            // datas[2]: 时间戳
-            nonce,          // datas[3]: UUID
-            method.as_str(),// datas[4]: "POST"
-            API_KEY,        // datas[5]: API密钥
+            relative_path,   // datas[1]: "auth/sign-in"
+            now,             // datas[2]: 时间戳
+            nonce,           // datas[3]: UUID
+            method.as_str(), // datas[4]: "POST"
+            API_KEY,         // datas[5]: API密钥
         );
 
         // HMAC-SHA256 签名
@@ -71,16 +73,13 @@ impl Signer {
         );
         headers.insert("app-channel", HeaderValue::from_static("3"));
         headers.insert("time", HeaderValue::from_str(&now).unwrap());
-        headers.insert("app-uuid", HeaderValue::from_static(APP_UUID));  // 添加 app-uuid
+        headers.insert("app-uuid", HeaderValue::from_static(APP_UUID)); // 添加 app-uuid
         headers.insert("nonce", HeaderValue::from_str(&nonce).unwrap());
         headers.insert("signature", HeaderValue::from_str(&signature).unwrap());
         headers.insert("app-version", HeaderValue::from_static(VERSION));
         headers.insert("image-quality", HeaderValue::from_static("original"));
         headers.insert("app-platform", HeaderValue::from_static("android"));
-        headers.insert(
-            "app-build-version",
-            HeaderValue::from_static(BUILD_VERSION),
-        );
+        headers.insert("app-build-version", HeaderValue::from_static(BUILD_VERSION));
         headers.insert("user-agent", HeaderValue::from_static("okhttp/3.8.1"));
 
         if method == Method::POST || method == Method::PUT {

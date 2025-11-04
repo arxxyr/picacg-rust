@@ -1,7 +1,12 @@
-use crate::ui::message::Message;
-use crate::ui::state::{AppState, Route};
-use iced::widget::{button, column, container, row, text};
-use iced::{Element, Length};
+use iced::{
+    Element, Length,
+    widget::{button, column, container, row, text},
+};
+
+use crate::ui::{
+    message::Message,
+    state::{AppState, Route},
+};
 
 /// 主界面布局视图（包含侧边栏和内容区域）
 pub fn view<'a>(state: &'a AppState, content: Element<'a, Message>) -> Element<'a, Message> {
@@ -11,9 +16,7 @@ pub fn view<'a>(state: &'a AppState, content: Element<'a, Message>) -> Element<'
         .height(Length::Fill)
         .padding(20);
 
-    row![sidebar, main_content]
-        .spacing(0)
-        .into()
+    row![sidebar, main_content].spacing(0).into()
 }
 
 /// 创建侧边栏

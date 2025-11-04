@@ -1,7 +1,7 @@
-use crate::api::client::ApiRequest;
-use crate::api::models::Category;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+use crate::api::{client::ApiRequest, models::Category};
 
 // 获取分类列表
 #[derive(Debug, Serialize)]

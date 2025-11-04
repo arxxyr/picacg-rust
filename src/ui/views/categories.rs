@@ -1,7 +1,9 @@
-use crate::ui::message::Message;
-use crate::ui::state::CategoriesState;
-use iced::widget::{button, column, container, image, row, scrollable, text};
-use iced::{Alignment, Color, Element, Length};
+use iced::{
+    Alignment, Color, Element, Length,
+    widget::{button, column, container, image, row, scrollable, text},
+};
+
+use crate::ui::{message::Message, state::CategoriesState};
 
 /// 分类浏览界面视图
 pub fn view<'a>(state: &'a CategoriesState) -> Element<'a, Message> {
@@ -57,7 +59,9 @@ pub fn view<'a>(state: &'a CategoriesState) -> Element<'a, Message> {
     }
 
     // 显示分类网格
-    let title = text("浏览分类").size(24).color(Color::from_rgb(0.9, 0.9, 0.9));
+    let title = text("浏览分类")
+        .size(24)
+        .color(Color::from_rgb(0.9, 0.9, 0.9));
 
     // 创建分类网格（每行 3 个）
     let mut grid = column![title].spacing(20).padding(20);

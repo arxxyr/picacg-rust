@@ -1,7 +1,10 @@
-use crate::api::client::ApiRequest;
-use crate::api::models::{Comment, Game, PageInfo};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+use crate::api::{
+    client::ApiRequest,
+    models::{Comment, Game, PageInfo},
+};
 
 // 获取游戏列表
 #[derive(Debug, Serialize)]

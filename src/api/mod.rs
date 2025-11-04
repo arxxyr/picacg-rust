@@ -4,6 +4,6 @@ pub mod signer;
 
 pub mod endpoints;
 
-pub use client::{ApiClient, ApiRequest, ApiResponse, API_BASE_URL};
+pub use client::{API_BASE_URL, ApiClient, ApiRequest, ApiResponse};
 pub use models::*;
 pub use signer::Signer;

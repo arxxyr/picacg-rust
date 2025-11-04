@@ -1,9 +1,12 @@
-use crate::api::models::{Comic, User};
-use crate::db::models::DbBook;
+use std::{sync::Arc, time::Duration};
+
 use moka::future::Cache;
 use once_cell::sync::Lazy;
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::{
+    api::models::{Comic, User},
+    db::models::DbBook,
+};
 
 // 全局缓存实例
 pub static CACHE_MANAGER: Lazy<CacheManager> = Lazy::new(CacheManager::new);
@@ -172,7 +175,10 @@ mod tests {
 
         // 测试图片 URL 缓存
         cache
-            .set_image_url("img1".to_string(), "http://example.com/img1.jpg".to_string())
+            .set_image_url(
+                "img1".to_string(),
+                "http://example.com/img1.jpg".to_string(),
+            )
             .await;
 
         let url = cache.get_image_url("img1").await;

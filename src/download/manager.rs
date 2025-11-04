@@ -1,17 +1,25 @@
-use crate::download::task::{DownloadEvent, DownloadHandle, DownloadStatus, DownloadTask};
-use crate::error::{PicacgError, Result};
+use std::{
+    collections::HashMap,
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use reqwest::Client;
-use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
-use tokio::sync::{mpsc, Semaphore};
-use tokio::time::sleep;
+use tokio::{
+    fs::{File, OpenOptions},
+    io::{AsyncSeekExt, AsyncWriteExt},
+    sync::{Semaphore, mpsc},
+    time::sleep,
+};
 use tracing::{debug, error, info, warn};
+
+use crate::{
+    download::task::{DownloadEvent, DownloadHandle, DownloadStatus, DownloadTask},
+    error::{PicacgError, Result},
+};
 
 /// 全局下载管理器实例
 pub static DOWNLOAD_MANAGER: Lazy<DownloadManager> = Lazy::new(DownloadManager::new);
@@ -194,14 +202,9 @@ impl DownloadManager {
             }
 
             // 执行下载
-            let result = Self::download_file(
-                client,
-                task.clone(),
-                handle.clone(),
-                tasks.clone(),
-                config,
-            )
-            .await;
+            let result =
+                Self::download_file(client, task.clone(), handle.clone(), tasks.clone(), config)
+                    .await;
 
             // 处理下载结果
             match result {
@@ -259,15 +262,7 @@ impl DownloadManager {
             }
 
             // 尝试下载
-            match Self::download_with_resume(
-                &client,
-                &task,
-                &handle,
-                &tasks,
-                &config,
-            )
-            .await
-            {
+            match Self::download_with_resume(&client, &task, &handle, &tasks, &config).await {
                 Ok(_) => return Ok(()),
                 Err(e) => {
                     retries += 1;

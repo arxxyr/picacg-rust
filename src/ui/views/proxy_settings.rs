@@ -1,8 +1,12 @@
-use crate::config::settings::ProxyType;
-use crate::ui::message::Message;
-use crate::ui::state::ProxySettingsState;
-use iced::widget::{button, checkbox, column, container, pick_list, row, text, text_input};
-use iced::{Alignment, Color, Element, Length};
+use iced::{
+    Alignment, Color, Element, Length,
+    widget::{button, checkbox, column, container, pick_list, row, text, text_input},
+};
+
+use crate::{
+    config::settings::ProxyType,
+    ui::{message::Message, state::ProxySettingsState},
+};
 
 /// 代理类型选项
 const PROXY_TYPES: [ProxyType; 3] = [ProxyType::Http, ProxyType::Https, ProxyType::Socks5];
@@ -78,9 +82,11 @@ pub fn view<'a>(state: &'a ProxySettingsState) -> Element<'a, Message> {
             .padding(10)
             .size(16);
 
-        Some(row![username_label, username_input]
-            .spacing(10)
-            .align_y(Alignment::Center))
+        Some(
+            row![username_label, username_input]
+                .spacing(10)
+                .align_y(Alignment::Center),
+        )
     } else {
         None
     };
@@ -94,9 +100,11 @@ pub fn view<'a>(state: &'a ProxySettingsState) -> Element<'a, Message> {
             .padding(10)
             .size(16);
 
-        Some(row![password_label, password_input]
-            .spacing(10)
-            .align_y(Alignment::Center))
+        Some(
+            row![password_label, password_input]
+                .spacing(10)
+                .align_y(Alignment::Center),
+        )
     } else {
         None
     };

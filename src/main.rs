@@ -25,7 +25,8 @@ fn main() -> iced::Result {
     // 加载并打印配置
     let settings = config::settings::AppSettings::global().read();
     if settings.proxy.enabled {
-        tracing::info!("代理已启用: {:?} {}:{}",
+        tracing::info!(
+            "代理已启用: {:?} {}:{}",
             settings.proxy.proxy_type,
             settings.proxy.host,
             settings.proxy.port

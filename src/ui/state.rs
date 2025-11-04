@@ -1,7 +1,9 @@
-use crate::api::models::{Category, Comic};
-use crate::config::settings::{AppSettings, ProxyType};
-use crate::download::DownloadTask;
-use crate::ui::image_loader::ImageCache;
+use crate::{
+    api::models::{Category, Comic},
+    config::settings::{AppSettings, ProxyType},
+    download::DownloadTask,
+    ui::image_loader::ImageCache,
+};
 
 /// 路由枚举
 #[derive(Debug, Clone, PartialEq, Eq)]

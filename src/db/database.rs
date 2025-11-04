@@ -1,12 +1,17 @@
-use crate::db::models::{DbBook, DbCategoryCount, DbFavorite, DbHistory};
-use crate::error::Result;
+use std::{path::PathBuf, str::FromStr};
+
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
-use sqlx::Row;
-use std::path::PathBuf;
-use std::str::FromStr;
+use sqlx::{
+    Row,
+    sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions},
+};
 use tracing::{debug, info};
+
+use crate::{
+    db::models::{DbBook, DbCategoryCount, DbFavorite, DbHistory},
+    error::Result,
+};
 
 // 数据库单例
 static DATABASE: OnceCell<RwLock<Database>> = OnceCell::new();
@@ -27,7 +32,9 @@ impl Database {
 
     /// 获取全局数据库实例
     pub fn global() -> &'static RwLock<Database> {
-        DATABASE.get().expect("数据库未初始化，请先调用 Database::init()")
+        DATABASE
+            .get()
+            .expect("数据库未初始化，请先调用 Database::init()")
     }
 
     /// 创建新的数据库连接
@@ -50,9 +57,11 @@ impl Database {
 
         // 运行迁移
         info!("正在运行数据库迁移...");
-        sqlx::query(include_str!("../../migrations/20250104000001_initial_schema.sql"))
-            .execute(&pool)
-            .await?;
+        sqlx::query(include_str!(
+            "../../migrations/20250104000001_initial_schema.sql"
+        ))
+        .execute(&pool)
+        .await?;
 
         info!("数据库初始化完成");
 

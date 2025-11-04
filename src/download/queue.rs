@@ -1,8 +1,14 @@
-use crate::download::task::{DownloadStatus, DownloadTask};
-use crate::error::Result;
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
+
 use parking_lot::RwLock;
-use std::collections::{HashMap, VecDeque};
-use std::sync::Arc;
+
+use crate::{
+    download::task::{DownloadStatus, DownloadTask},
+    error::Result,
+};
 
 /// 下载优先级
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -302,8 +308,9 @@ impl QueueStats {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
+
+    use super::*;
 
     #[test]
     fn test_queue_operations() {
@@ -320,9 +327,7 @@ mod tests {
         queue
             .enqueue(task2.clone(), DownloadPriority::High)
             .unwrap();
-        queue
-            .enqueue(task3.clone(), DownloadPriority::Low)
-            .unwrap();
+        queue.enqueue(task3.clone(), DownloadPriority::Low).unwrap();
 
         // 检查队列大小
         assert_eq!(queue.waiting_count(), 3);

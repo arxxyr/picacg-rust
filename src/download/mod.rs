@@ -6,9 +6,7 @@ pub mod task;
 pub use manager::{DownloadConfig, DownloadManager};
 pub use queue::{DownloadPriority, DownloadQueue, QueueItem, QueueStats};
 pub use stats::{
-    format_bytes, format_bytes_per_second, format_duration, DownloadStats, GlobalDownloadStats,
-    StatsTracker,
+    DownloadStats, GlobalDownloadStats, StatsTracker, format_bytes, format_bytes_per_second,
+    format_duration,
 };
-pub use task::{
-    DownloadEvent, DownloadHandle, DownloadProgress, DownloadStatus, DownloadTask,
-};
+pub use task::{DownloadEvent, DownloadHandle, DownloadProgress, DownloadStatus, DownloadTask};

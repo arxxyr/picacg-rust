@@ -1,11 +1,14 @@
-use crate::api::signer::Signer;
-use crate::config::settings::AppSettings;
-use crate::error::{PicacgError, Result};
+use std::{sync::Arc, time::Duration};
+
 use parking_lot::RwLock;
 use reqwest::{Client, Method, Proxy};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
-use std::time::Duration;
+
+use crate::{
+    api::signer::Signer,
+    config::settings::AppSettings,
+    error::{PicacgError, Result},
+};
 
 // API 基础配置
 pub const API_BASE_URL: &str = "https://picaapi.picacomic.com";
@@ -163,9 +166,9 @@ impl ApiClient {
             if let Some(ref token_str) = *token {
                 headers.insert(
                     "authorization",
-                    token_str.parse().map_err(|_| {
-                        PicacgError::AuthError("无效的 token 格式".to_string())
-                    })?,
+                    token_str
+                        .parse()
+                        .map_err(|_| PicacgError::AuthError("无效的 token 格式".to_string()))?,
                 );
                 tracing::debug!("使用 token 认证");
             } else {
@@ -175,7 +178,10 @@ impl ApiClient {
         }
 
         // 构建请求(使用完整 URL)
-        let mut builder = self.client.request(method.clone(), &url_with_query).headers(headers);
+        let mut builder = self
+            .client
+            .request(method.clone(), &url_with_query)
+            .headers(headers);
 
         // 注意:查询参数已经包含在 URL 中了,不需要再通过 builder.query() 添加
 
@@ -208,14 +214,18 @@ impl ApiClient {
             PicacgError::NetworkError(format!("读取响应体失败: {}", e))
         })?;
 
-        tracing::debug!("响应体(前 500 字符): {}", &response_text[..response_text.len().min(500)]);
+        tracing::debug!(
+            "响应体(前 500 字符): {}",
+            &response_text[..response_text.len().min(500)]
+        );
 
         // 解析响应
-        let api_response: ApiResponse<R::Response> = serde_json::from_str(&response_text).map_err(|e| {
-            tracing::error!("解析响应失败: {}", e);
-            tracing::error!("完整响应体: {}", response_text);
-            PicacgError::SerializationError(format!("解析响应失败: {}", e))
-        })?;
+        let api_response: ApiResponse<R::Response> =
+            serde_json::from_str(&response_text).map_err(|e| {
+                tracing::error!("解析响应失败: {}", e);
+                tracing::error!("完整响应体: {}", response_text);
+                PicacgError::SerializationError(format!("解析响应失败: {}", e))
+            })?;
 
         api_response.into_result()
     }

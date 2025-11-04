@@ -1,7 +1,7 @@
-use crate::api::client::ApiRequest;
-use crate::api::models::User;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+use crate::api::{client::ApiRequest, models::User};
 
 // 登录请求
 #[derive(Debug, Serialize)]

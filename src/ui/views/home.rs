@@ -1,6 +1,9 @@
+use iced::{
+    Alignment, Element, Length,
+    widget::{column, container, text},
+};
+
 use crate::ui::message::Message;
-use iced::widget::{column, container, text};
-use iced::{Alignment, Element, Length};
 
 /// 主页视图
 pub fn view() -> Element<'static, Message> {

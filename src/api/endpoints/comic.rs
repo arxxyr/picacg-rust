@@ -1,7 +1,10 @@
-use crate::api::client::ApiRequest;
-use crate::api::models::{Comic, Episode, PageInfo, Picture};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
+
+use crate::api::{
+    client::ApiRequest,
+    models::{Comic, Episode, PageInfo, Picture},
+};
 
 // 获取漫画列表（按分类）
 #[derive(Debug, Serialize)]
@@ -14,11 +17,11 @@ pub struct GetComicsRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct ComicsData {
-    pub docs: Vec<Comic>,    // API 返回的字段名是 docs 不是 comics
+    pub docs: Vec<Comic>, // API 返回的字段名是 docs 不是 comics
     pub total: i32,
     pub limit: i32,
-    pub page: i32,           // page 是当前页码(数字)
-    pub pages: i32,          // pages 是总页数(数字)
+    pub page: i32,  // page 是当前页码(数字)
+    pub pages: i32, // pages 是总页数(数字)
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,11 +89,11 @@ pub struct GetEpisodesRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct EpisodesData {
-    pub docs: Vec<Episode>,  // API 返回的字段名是 docs
+    pub docs: Vec<Episode>, // API 返回的字段名是 docs
     pub total: i32,
     pub limit: i32,
-    pub page: i32,           // page 是当前页码(数字)
-    pub pages: i32,          // pages 是总页数(数字)
+    pub page: i32,  // page 是当前页码(数字)
+    pub pages: i32, // pages 是总页数(数字)
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,8 +134,8 @@ pub struct PicturesData {
     pub docs: Vec<Picture>,
     pub total: i32,
     pub limit: i32,
-    pub page: i32,           // page 是当前页码(数字)
-    pub pages: i32,          // pages 是总页数(数字)
+    pub page: i32,  // page 是当前页码(数字)
+    pub pages: i32, // pages 是总页数(数字)
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,7 +151,10 @@ impl ApiRequest for GetPicturesRequest {
     }
 
     fn path(&self) -> String {
-        format!("/comics/{}/order/{}/pages", self.comic_id, self.episode_order)
+        format!(
+            "/comics/{}/order/{}/pages",
+            self.comic_id, self.episode_order
+        )
     }
 
     fn query(&self) -> Option<Vec<(String, String)>> {

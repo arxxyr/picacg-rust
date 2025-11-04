@@ -1,9 +1,10 @@
-use crate::error::Result;
+use std::{fs, path::PathBuf};
+
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::PathBuf;
+
+use crate::error::Result;
 
 /// 代理类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

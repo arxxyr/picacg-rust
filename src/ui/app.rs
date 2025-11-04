@@ -1,14 +1,21 @@
-use crate::api::endpoints::{
-    category::GetCategoriesRequest, comic::GetComicsRequest, LoginRequest,
+use iced::{
+    Element, Settings, Task, Theme,
+    font::{Font, Weight},
+    widget::{text, text_input},
 };
-use crate::api::ApiClient;
-use crate::config::settings::AppSettings;
-use crate::ui::message::Message;
-use crate::ui::state::{AppState, Route};
-use crate::ui::views;
-use iced::font::{Font, Weight};
-use iced::widget::{text, text_input};
-use iced::{Element, Settings, Task, Theme};
+
+use crate::{
+    api::{
+        ApiClient,
+        endpoints::{LoginRequest, category::GetCategoriesRequest, comic::GetComicsRequest},
+    },
+    config::settings::AppSettings,
+    ui::{
+        message::Message,
+        state::{AppState, Route},
+        views,
+    },
+};
 
 /// 中文字体常量
 const SARASA_TERM_FONT: Font = Font {
@@ -266,7 +273,8 @@ impl PicACGApp {
                 self.state.navigate_to(Route::ComicDetail(comic_id.clone()));
 
                 // 创建新的详情状态
-                self.state.comic_detail_state = Some(crate::ui::state::ComicDetailState::new(comic_id.clone()));
+                self.state.comic_detail_state =
+                    Some(crate::ui::state::ComicDetailState::new(comic_id.clone()));
 
                 // 触发加载
                 self.update(Message::LoadComicDetail(comic_id))
@@ -301,9 +309,8 @@ impl PicACGApp {
                     let client = self.api_client.clone();
                     Task::perform(
                         async move {
-                            let request = crate::api::endpoints::comic::GetComicDetailRequest {
-                                comic_id,
-                            };
+                            let request =
+                                crate::api::endpoints::comic::GetComicDetailRequest { comic_id };
                             match client.request(request).await {
                                 Ok(response) => Message::ComicDetailLoaded(response.comic),
                                 Err(e) => Message::ComicDetailLoadFailed(e.to_string()),
@@ -383,7 +390,10 @@ impl PicACGApp {
 
             Message::ImageLoaded { url, handle } => {
                 // 存储到分类状态中
-                self.state.categories_state.thumbnails.insert(url.clone(), handle.clone());
+                self.state
+                    .categories_state
+                    .thumbnails
+                    .insert(url.clone(), handle.clone());
 
                 // 如果是详情页的封面图片，也存储到详情状态中
                 if let Some(ref mut detail_state) = self.state.comic_detail_state {
@@ -397,9 +407,7 @@ impl PicACGApp {
                 let cache = self.state.image_cache.clone();
                 Task::perform(
                     async move {
-                        cache
-                            .set(url, crate::ui::ImageState::Loaded(handle))
-                            .await;
+                        cache.set(url, crate::ui::ImageState::Loaded(handle)).await;
                         Message::Noop
                     },
                     |msg| msg,
@@ -410,9 +418,7 @@ impl PicACGApp {
                 let cache = self.state.image_cache.clone();
                 Task::perform(
                     async move {
-                        cache
-                            .set(url, crate::ui::ImageState::Failed(error))
-                            .await;
+                        cache.set(url, crate::ui::ImageState::Failed(error)).await;
                         Message::Noop
                     },
                     |msg| msg,
@@ -498,7 +504,9 @@ pub fn run() -> iced::Result {
     }
 
     iced::application("PicACG", PicACGApp::update, PicACGApp::view)
-        .font(include_bytes!("../../resources/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"))
+        .font(include_bytes!(
+            "../../resources/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"
+        ))
         .default_font(SARASA_TERM_FONT)
         .theme(PicACGApp::theme)
         .window_size((1024.0, 768.0))

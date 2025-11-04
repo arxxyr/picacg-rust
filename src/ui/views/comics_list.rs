@@ -1,7 +1,9 @@
-use crate::ui::message::Message;
-use crate::ui::state::ComicsListState;
-use iced::widget::{button, column, container, image, row, scrollable, text};
-use iced::{Alignment, Color, Element, Length};
+use iced::{
+    Alignment, Color, Element, Length,
+    widget::{button, column, container, image, row, scrollable, text},
+};
+
+use crate::ui::{message::Message, state::ComicsListState};
 
 /// 漫画列表界面视图
 pub fn view<'a>(state: &'a ComicsListState) -> Element<'a, Message> {
@@ -57,9 +59,12 @@ pub fn view<'a>(state: &'a ComicsListState) -> Element<'a, Message> {
     }
 
     // 显示漫画网格
-    let title = text(format!("{} - 第 {} / {} 页", state.category, state.page, state.total_pages))
-        .size(24)
-        .color(Color::from_rgb(0.9, 0.9, 0.9));
+    let title = text(format!(
+        "{} - 第 {} / {} 页",
+        state.category, state.page, state.total_pages
+    ))
+    .size(24)
+    .color(Color::from_rgb(0.9, 0.9, 0.9));
 
     // 创建漫画网格（每行 4 个）
     let mut grid = column![title].spacing(20).padding(20);

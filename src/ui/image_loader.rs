@@ -1,6 +1,6 @@
+use std::{collections::HashMap, sync::Arc};
+
 use iced::widget::image;
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// 图片加载状态
@@ -38,10 +38,7 @@ impl ImageCache {
     /// 获取图片状态
     pub async fn get(&self, url: &str) -> ImageState {
         let cache = self.cache.read().await;
-        cache
-            .get(url)
-            .cloned()
-            .unwrap_or(ImageState::NotLoaded)
+        cache.get(url).cloned().unwrap_or(ImageState::NotLoaded)
     }
 
     /// 设置图片状态
@@ -68,9 +65,11 @@ pub async fn download_image(
     _client: crate::api::ApiClient,
     url: String,
 ) -> Result<image::Handle, String> {
-    use crate::config::settings::AppSettings;
-    use reqwest::{Client, Proxy};
     use std::time::Duration;
+
+    use reqwest::{Client, Proxy};
+
+    use crate::config::settings::AppSettings;
 
     // 创建 HTTP 客户端（使用全局配置的代理）
     let proxy_url = {
@@ -84,8 +83,7 @@ pub async fn download_image(
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(proxy_url) = proxy_url {
-        let proxy = Proxy::all(&proxy_url)
-            .map_err(|e| format!("创建代理失败: {}", e))?;
+        let proxy = Proxy::all(&proxy_url).map_err(|e| format!("创建代理失败: {}", e))?;
         builder = builder.proxy(proxy);
     }
 
