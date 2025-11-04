@@ -1,0 +1,11 @@
+    // 数据库错误
+    #[error("数据库错误: {0}")]
+    DatabaseError(String),
+
+    // 配置错误
+    #[error("配置错误: {0}")]
+    ConfigError(String),
+
+    // 业务错误
+    #[error("任务已取消")]
+    Cancelled,
