@@ -184,8 +184,12 @@ pub struct ReadViewState {
     pub pictures: Vec<crate::api::models::Picture>,
     /// 当前显示的图片 Handle
     pub current_image: Option<iced::widget::image::Handle>,
+    /// 当前图片的尺寸 (width, height)，单位为像素
+    pub current_image_dimensions: Option<(u32, u32)>,
     /// 图片缓存 (page -> Handle)
     pub image_cache: std::collections::HashMap<i32, iced::widget::image::Handle>,
+    /// 图片尺寸缓存 (page -> (width, height))
+    pub image_dimensions_cache: std::collections::HashMap<i32, (u32, u32)>,
     /// 是否正在加载
     pub is_loading: bool,
     /// 错误信息
@@ -216,7 +220,9 @@ impl ReadViewState {
             total_pages: 0,
             pictures: Vec::new(),
             current_image: None,
+            current_image_dimensions: None,
             image_cache: std::collections::HashMap::new(),
+            image_dimensions_cache: std::collections::HashMap::new(),
             is_loading: false,
             error: None,
             scale: 1.0,

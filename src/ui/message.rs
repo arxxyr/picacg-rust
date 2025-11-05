@@ -170,6 +170,7 @@ pub enum Message {
     ImageLoaded {
         url: String,
         handle: iced::widget::image::Handle,
+        dimensions: (u32, u32),  // 图片尺寸 (width, height)
     },
     /// 图片加载失败
     ImageLoadFailed { url: String, error: String },

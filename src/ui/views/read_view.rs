@@ -130,31 +130,40 @@ fn create_top_controls<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
 /// 创建图片显示区域
 fn create_image_area<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
     let image_widget = if let Some(ref handle) = state.current_image {
-        // 创建图片 widget
-        let img = image(handle.clone());
+        // 如果有图片尺寸信息，使用 Fixed 长度实现缩放
+        if let Some((img_width, img_height)) = state.current_image_dimensions {
+            let scaled_width = img_width as f32 * state.scale;
+            let scaled_height = img_height as f32 * state.scale;
 
-        // 根据缩放比例设置图片尺寸
-        // 注意：iced 0.13 的 scrollable 不支持内部元素使用 FillPortion 的高度
-        // 因此暂时只支持缩小和 100%，不支持放大超过 100%
-        let scaled_img = if state.scale == 1.0 {
-            // 100% 缩放：填充容器
-            img.width(Length::Fill).height(Length::Fill)
-        } else if state.scale < 1.0 {
-            // 缩小：使用 FillPortion
-            let portion = (state.scale * 10.0) as u16;
-            img.width(Length::FillPortion(portion))
-                .height(Length::FillPortion(portion))
+            let img = image(handle.clone())
+                .width(Length::Fixed(scaled_width))
+                .height(Length::Fixed(scaled_height));
+
+            // 如果缩放大于 100%，使用 scrollable 支持滚动查看
+            if state.scale > 1.0 {
+                container(scrollable(container(img)))
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+            } else {
+                // 缩小或 100% 时，居中显示
+                container(img)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill)
+            }
         } else {
-            // 放大：暂不支持（因为 scrollable 限制）
-            // TODO: 需要获取图片实际尺寸后使用 Length::Fixed 才能正确实现
-            img.width(Length::Fill).height(Length::Fill)
-        };
+            // 如果还没有尺寸信息，暂时使用 Fill（等待尺寸加载）
+            let img = image(handle.clone())
+                .width(Length::Fill)
+                .height(Length::Fill);
 
-        container(scaled_img)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
+            container(img)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+        }
     } else {
         container(
             text("加载中...")

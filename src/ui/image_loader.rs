@@ -60,11 +60,13 @@ impl ImageCache {
     }
 }
 
-/// 下载图片
+/// 下载图片并获取其尺寸
+/// 返回 (Handle, (width, height))
 pub async fn download_image(
     _client: crate::api::ApiClient,
     url: String,
-) -> Result<image::Handle, String> {
+) -> Result<(image::Handle, (u32, u32)), String> {
+    use std::io::Cursor;
     use std::time::Duration;
 
     use reqwest::{Client, Proxy};
@@ -107,6 +109,23 @@ pub async fn download_image(
         .await
         .map_err(|e| format!("读取数据失败: {}", e))?;
 
+    // 使用 image crate 解码获取尺寸
+    let dimensions = {
+        use ::image::ImageReader;
+
+        let reader = ImageReader::new(Cursor::new(&bytes))
+            .with_guessed_format()
+            .map_err(|e| format!("无法识别图片格式: {}", e))?;
+
+        let img = reader
+            .decode()
+            .map_err(|e| format!("图片解码失败: {}", e))?;
+
+        (img.width(), img.height())
+    };
+
     // 转换为 iced 的 Handle
-    Ok(image::Handle::from_bytes(bytes))
+    let handle = image::Handle::from_bytes(bytes);
+
+    Ok((handle, dimensions))
 }

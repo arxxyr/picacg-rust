@@ -679,9 +679,8 @@ impl PicACGApp {
 
             Message::ZoomIn => {
                 if let Some(ref mut read_state) = self.state.read_view_state {
-                    // 暂时限制最大缩放为 100%（因为 iced scrollable 限制）
-                    // TODO: 实现正确的放大功能需要获取图片实际尺寸
-                    read_state.scale = (read_state.scale + 0.1).min(1.0);
+                    // 放大：最大 300%
+                    read_state.scale = (read_state.scale + 0.1).min(3.0);
                 }
                 Task::none()
             }
@@ -738,13 +737,14 @@ impl PicACGApp {
                             .set(url_clone.clone(), crate::ui::ImageState::Loading)
                             .await;
 
-                        // 下载图片
+                        // 下载图片并获取尺寸
                         match crate::ui::image_loader::download_image(client, url_clone.clone())
                             .await
                         {
-                            Ok(handle) => Message::ImageLoaded {
+                            Ok((handle, dimensions)) => Message::ImageLoaded {
                                 url: url_clone,
                                 handle,
+                                dimensions,
                             },
                             Err(e) => Message::ImageLoadFailed {
                                 url: url_clone,
@@ -756,7 +756,7 @@ impl PicACGApp {
                 )
             }
 
-            Message::ImageLoaded { url, handle } => {
+            Message::ImageLoaded { url, handle, dimensions } => {
                 // 存储到分类状态中
                 self.state
                     .categories_state
@@ -786,6 +786,7 @@ impl PicACGApp {
                         let current_pic_url = read_state.pictures[current_pic_index].media.url();
                         if url == current_pic_url {
                             read_state.current_image = Some(handle.clone());
+                            read_state.current_image_dimensions = Some(dimensions);
                         }
                     }
 
@@ -793,6 +794,11 @@ impl PicACGApp {
                     read_state
                         .image_cache
                         .insert(read_state.current_page, handle.clone());
+
+                    // 存储到尺寸缓存中
+                    read_state
+                        .image_dimensions_cache
+                        .insert(read_state.current_page, dimensions);
                 }
 
                 let cache = self.state.image_cache.clone();

@@ -42,7 +42,7 @@ once_cell = "1.19"
 directories = "6.0"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "chrono"] }
 moka = { version = "0.12", features = ["future"] }
-iced = { version = "0.13", features = ["tokio", "image"] }
+iced = { version = "0.13", features = ["tokio", "image", "canvas"] }
 image = "0.25"
 
 [dev-dependencies]
