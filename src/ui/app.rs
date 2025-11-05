@@ -398,6 +398,321 @@ impl PicACGApp {
                 Task::none()
             }
 
+            // ==================== 章节列表消息 ====================
+            Message::LoadEpisodes { comic_id, page } => {
+                if let Some(ref mut detail_state) = self.state.comic_detail_state {
+                    detail_state.is_loading_episodes = true;
+                    detail_state.episodes_page = page;
+
+                    let client = self.api_client.clone();
+                    Task::perform(
+                        async move {
+                            let request =
+                                crate::api::endpoints::comic::GetEpisodesRequest { comic_id, page };
+                            match client.request(request).await {
+                                Ok(response) => Message::EpisodesLoaded {
+                                    episodes: response.eps.docs,
+                                    total_pages: response.eps.pages,
+                                },
+                                Err(e) => Message::EpisodesLoadFailed(e.to_string()),
+                            }
+                        },
+                        |msg| msg,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+
+            Message::EpisodesLoaded {
+                episodes,
+                total_pages,
+            } => {
+                if let Some(ref mut detail_state) = self.state.comic_detail_state {
+                    detail_state.is_loading_episodes = false;
+                    detail_state.episodes = episodes;
+                    detail_state.episodes_total_pages = total_pages;
+                }
+                Task::none()
+            }
+
+            Message::EpisodesLoadFailed(error) => {
+                if let Some(ref mut detail_state) = self.state.comic_detail_state {
+                    detail_state.is_loading_episodes = false;
+                    detail_state.error = Some(format!("加载章节列表失败: {}", error));
+                }
+                Task::none()
+            }
+
+            Message::EpisodeClicked {
+                comic_id,
+                episode_order,
+            } => {
+                // 创建阅读界面状态
+                self.state.read_view_state = Some(crate::ui::state::ReadViewState::new(
+                    comic_id.clone(),
+                    episode_order,
+                ));
+
+                // 导航到阅读界面
+                self.state.navigate_to(Route::ReadView {
+                    comic_id: comic_id.clone(),
+                    episode_order,
+                });
+
+                // 触发加载图片列表
+                Task::done(Message::LoadPictures {
+                    comic_id,
+                    episode_order,
+                    page: 1,
+                })
+            }
+
+            // ==================== 点赞和收藏消息 ====================
+            Message::LikeComic(comic_id) => {
+                let client = self.api_client.clone();
+                Task::perform(
+                    async move {
+                        let request = crate::api::endpoints::comic::LikeComicRequest { comic_id };
+                        match client.request(request).await {
+                            Ok(response) => Message::LikeComicSuccess {
+                                action: response.action,
+                            },
+                            Err(e) => Message::LikeComicFailed(e.to_string()),
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+
+            Message::LikeComicSuccess { action } => {
+                if let Some(ref mut detail_state) = self.state.comic_detail_state {
+                    // 更新点赞状态
+                    detail_state.is_liked = action == "like";
+
+                    // 更新漫画点赞数
+                    if let Some(ref mut comic) = detail_state.comic {
+                        if action == "like" {
+                            comic.likes_count += 1;
+                        } else {
+                            comic.likes_count = comic.likes_count.saturating_sub(1);
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::LikeComicFailed(error) => {
+                self.state.set_error(format!("点赞失败: {}", error));
+                Task::none()
+            }
+
+            Message::FavoriteComic(comic_id) => {
+                let client = self.api_client.clone();
+                Task::perform(
+                    async move {
+                        let request =
+                            crate::api::endpoints::comic::FavoriteComicRequest { comic_id };
+                        match client.request(request).await {
+                            Ok(response) => Message::FavoriteComicSuccess {
+                                action: response.action,
+                            },
+                            Err(e) => Message::FavoriteComicFailed(e.to_string()),
+                        }
+                    },
+                    |msg| msg,
+                )
+            }
+
+            Message::FavoriteComicSuccess { action } => {
+                if let Some(ref mut detail_state) = self.state.comic_detail_state {
+                    // 更新收藏状态
+                    detail_state.is_favorite = action == "favorite";
+                }
+
+                // 显示成功消息
+                let msg = if action == "favorite" {
+                    "收藏成功"
+                } else {
+                    "取消收藏"
+                };
+                self.state.set_success(msg.to_string());
+                Task::none()
+            }
+
+            Message::FavoriteComicFailed(error) => {
+                self.state.set_error(format!("收藏失败: {}", error));
+                Task::none()
+            }
+
+            // ==================== 阅读界面消息 ====================
+            Message::LoadPictures {
+                comic_id,
+                episode_order,
+                page,
+            } => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.is_loading = true;
+                    read_state.error = None;
+
+                    let client = self.api_client.clone();
+                    Task::perform(
+                        async move {
+                            let request = crate::api::endpoints::comic::GetPicturesRequest {
+                                comic_id,
+                                episode_order,
+                                page,
+                            };
+                            match client.request(request).await {
+                                Ok(response) => Message::PicturesLoaded {
+                                    pictures: response.pages.docs,
+                                    total_pages: response.pages.pages,
+                                },
+                                Err(e) => Message::PicturesLoadFailed(e.to_string()),
+                            }
+                        },
+                        |msg| msg,
+                    )
+                } else {
+                    Task::none()
+                }
+            }
+
+            Message::PicturesLoaded {
+                pictures,
+                total_pages,
+            } => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.is_loading = false;
+                    read_state.pictures = pictures.clone();
+                    read_state.total_pages = pictures.len() as i32;
+
+                    // 加载第一张图片
+                    if !pictures.is_empty() {
+                        read_state.current_page = 1;
+                        let first_pic_url = pictures[0].media.url();
+                        return Task::done(Message::LoadImage(first_pic_url));
+                    }
+                }
+                Task::none()
+            }
+
+            Message::PicturesLoadFailed(error) => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.is_loading = false;
+                    read_state.error = Some(format!("加载图片列表失败: {}", error));
+                }
+                Task::none()
+            }
+
+            Message::NextPicturePage => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    if read_state.current_page < read_state.total_pages {
+                        read_state.current_page += 1;
+                        let pic_index = (read_state.current_page - 1) as usize;
+                        if pic_index < read_state.pictures.len() {
+                            let pic_url = read_state.pictures[pic_index].media.url();
+                            return Task::done(Message::LoadImage(pic_url));
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::PrevPicturePage => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    if read_state.current_page > 1 {
+                        read_state.current_page -= 1;
+                        let pic_index = (read_state.current_page - 1) as usize;
+                        if pic_index < read_state.pictures.len() {
+                            let pic_url = read_state.pictures[pic_index].media.url();
+                            return Task::done(Message::LoadImage(pic_url));
+                        }
+                    }
+                }
+                Task::none()
+            }
+
+            Message::NextEpisode => {
+                if let Some(ref read_state) = self.state.read_view_state {
+                    let new_order = read_state.episode_order + 1;
+                    let comic_id = read_state.comic_id.clone();
+
+                    // 重新加载图片列表
+                    if let Some(ref mut read_state) = self.state.read_view_state {
+                        read_state.episode_order = new_order;
+                        read_state.current_page = 1;
+                        read_state.pictures.clear();
+                    }
+
+                    return Task::done(Message::LoadPictures {
+                        comic_id,
+                        episode_order: new_order,
+                        page: 1,
+                    });
+                }
+                Task::none()
+            }
+
+            Message::PrevEpisode => {
+                if let Some(ref read_state) = self.state.read_view_state {
+                    if read_state.episode_order > 1 {
+                        let new_order = read_state.episode_order - 1;
+                        let comic_id = read_state.comic_id.clone();
+
+                        // 重新加载图片列表
+                        if let Some(ref mut read_state) = self.state.read_view_state {
+                            read_state.episode_order = new_order;
+                            read_state.current_page = 1;
+                            read_state.pictures.clear();
+                        }
+
+                        return Task::done(Message::LoadPictures {
+                            comic_id,
+                            episode_order: new_order,
+                            page: 1,
+                        });
+                    }
+                }
+                Task::none()
+            }
+
+            Message::ZoomIn => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.scale = (read_state.scale + 0.1).min(3.0);
+                }
+                Task::none()
+            }
+
+            Message::ZoomOut => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.scale = (read_state.scale - 0.1).max(0.5);
+                }
+                Task::none()
+            }
+
+            Message::ResetZoom => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.scale = 1.0;
+                }
+                Task::none()
+            }
+
+            Message::ChangeReadMode(mode) => {
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    read_state.read_mode = mode;
+                }
+                Task::none()
+            }
+
+            Message::BackToDetail => {
+                if let Some(ref read_state) = self.state.read_view_state {
+                    let comic_id = read_state.comic_id.clone();
+                    self.state.navigate_to(Route::ComicDetail(comic_id));
+                }
+                Task::none()
+            }
+
             // ==================== 图片加载消息 ====================
             Message::LoadImage(url) => {
                 let cache = self.state.image_cache.clone();
@@ -459,6 +774,23 @@ impl PicACGApp {
                             detail_state.cover_image = Some(handle.clone());
                         }
                     }
+                }
+
+                // 如果是阅读界面的图片，存储到阅读状态中
+                if let Some(ref mut read_state) = self.state.read_view_state {
+                    // 检查是否是当前页的图片
+                    let current_pic_index = (read_state.current_page - 1) as usize;
+                    if current_pic_index < read_state.pictures.len() {
+                        let current_pic_url = read_state.pictures[current_pic_index].media.url();
+                        if url == current_pic_url {
+                            read_state.current_image = Some(handle.clone());
+                        }
+                    }
+
+                    // 存储到图片缓存中
+                    read_state
+                        .image_cache
+                        .insert(read_state.current_page, handle.clone());
                 }
 
                 let cache = self.state.image_cache.clone();
@@ -544,6 +876,14 @@ impl PicACGApp {
                     text("加载中...").into()
                 };
                 views::main_layout_view(&self.state, content)
+            }
+            Route::ReadView { .. } => {
+                // 阅读界面不使用主布局，直接全屏显示
+                if let Some(ref read_state) = self.state.read_view_state {
+                    views::read_view_view(read_state)
+                } else {
+                    text("加载中...").into()
+                }
             }
         }
     }

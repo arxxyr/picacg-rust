@@ -66,6 +66,65 @@ pub enum Message {
     ComicDetailLoaded(crate::api::models::Comic),
     /// 漫画详情加载失败
     ComicDetailLoadFailed(String),
+    /// 加载章节列表
+    LoadEpisodes { comic_id: String, page: i32 },
+    /// 章节列表加载成功
+    EpisodesLoaded {
+        episodes: Vec<crate::api::models::Episode>,
+        total_pages: i32,
+    },
+    /// 章节列表加载失败
+    EpisodesLoadFailed(String),
+    /// 章节被点击
+    EpisodeClicked {
+        comic_id: String,
+        episode_order: i32,
+    },
+    /// 点赞漫画
+    LikeComic(String), // comic_id
+    /// 点赞成功
+    LikeComicSuccess { action: String },
+    /// 点赞失败
+    LikeComicFailed(String),
+    /// 收藏漫画
+    FavoriteComic(String), // comic_id
+    /// 收藏成功
+    FavoriteComicSuccess { action: String },
+    /// 收藏失败
+    FavoriteComicFailed(String),
+
+    // ==================== 阅读界面消息 ====================
+    /// 加载章节图片列表
+    LoadPictures {
+        comic_id: String,
+        episode_order: i32,
+        page: i32,
+    },
+    /// 图片列表加载成功
+    PicturesLoaded {
+        pictures: Vec<crate::api::models::Picture>,
+        total_pages: i32,
+    },
+    /// 图片列表加载失败
+    PicturesLoadFailed(String),
+    /// 切换到下一页
+    NextPicturePage,
+    /// 切换到上一页
+    PrevPicturePage,
+    /// 切换到下一章
+    NextEpisode,
+    /// 切换到上一章
+    PrevEpisode,
+    /// 放大图片
+    ZoomIn,
+    /// 缩小图片
+    ZoomOut,
+    /// 重置缩放
+    ResetZoom,
+    /// 切换阅读模式
+    ChangeReadMode(crate::ui::state::ReadMode),
+    /// 返回详情页
+    BackToDetail,
 
     // ==================== 下载管理消息 ====================
     /// 开始下载

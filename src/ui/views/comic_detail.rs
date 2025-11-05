@@ -192,21 +192,26 @@ pub fn view<'a>(
 
     content = content.push(info_row);
 
-    // 添加操作按钮（暂时占位）
-    let buttons_row = row![
-        button(text("开始阅读").align_x(iced::alignment::Horizontal::Center))
-            .padding(10)
-            .width(Length::Fixed(120.0)),
-        button(text("收藏").align_x(iced::alignment::Horizontal::Center))
-            .padding(10)
-            .width(Length::Fixed(100.0)),
-        button(text("点赞").align_x(iced::alignment::Horizontal::Center))
-            .padding(10)
-            .width(Length::Fixed(100.0)),
-    ]
-    .spacing(10);
-
+    // 添加操作按钮
+    let buttons_row = create_action_buttons(state);
     content = content.push(buttons_row);
+
+    // 添加章节列表
+    if !state.episodes.is_empty() {
+        let episodes_section = create_episodes_section(state);
+        content = content.push(episodes_section);
+    } else if !state.is_loading_episodes {
+        // 如果还没加载章节，显示加载按钮
+        let load_episodes_button =
+            button(text("加载章节列表").align_x(iced::alignment::Horizontal::Center))
+                .on_press(Message::LoadEpisodes {
+                    comic_id: state.comic_id.clone(),
+                    page: 1,
+                })
+                .padding(10)
+                .width(Length::Fixed(150.0));
+        content = content.push(load_episodes_button);
+    }
 
     // 添加可滚动容器
     // 注意：scrollable 本身不能设置 height(Fill)，需要用 container 包裹
@@ -214,4 +219,133 @@ pub fn view<'a>(
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// 创建操作按钮行
+fn create_action_buttons(state: &ComicDetailState) -> Element<Message> {
+    let start_reading_button = if !state.episodes.is_empty() {
+        // 如果有章节，点击开始阅读第一章
+        button(text("开始阅读").align_x(iced::alignment::Horizontal::Center))
+            .on_press(Message::EpisodeClicked {
+                comic_id: state.comic_id.clone(),
+                episode_order: state.episodes[0].order,
+            })
+            .padding(10)
+            .width(Length::Fixed(120.0))
+    } else {
+        button(text("开始阅读").align_x(iced::alignment::Horizontal::Center))
+            .padding(10)
+            .width(Length::Fixed(120.0))
+    };
+
+    let favorite_text = if state.is_favorite {
+        "已收藏"
+    } else {
+        "收藏"
+    };
+    let favorite_button = button(text(favorite_text).align_x(iced::alignment::Horizontal::Center))
+        .on_press(Message::FavoriteComic(state.comic_id.clone()))
+        .padding(10)
+        .width(Length::Fixed(100.0));
+
+    let like_text = if state.is_liked {
+        "已点赞"
+    } else {
+        "点赞"
+    };
+    let like_button = button(text(like_text).align_x(iced::alignment::Horizontal::Center))
+        .on_press(Message::LikeComic(state.comic_id.clone()))
+        .padding(10)
+        .width(Length::Fixed(100.0));
+
+    row![start_reading_button, favorite_button, like_button]
+        .spacing(10)
+        .into()
+}
+
+/// 创建章节列表区域
+fn create_episodes_section(state: &ComicDetailState) -> Element<Message> {
+    let mut episodes_column = column![
+        text("章节列表")
+            .size(20)
+            .color(Color::from_rgb(0.9, 0.9, 0.9))
+    ]
+    .spacing(10);
+
+    // 创建章节网格布局（每行 4 个）
+    let mut current_row = row![].spacing(10);
+    let mut count = 0;
+
+    for episode in &state.episodes {
+        let episode_button = button(
+            text(format!("第 {} 章", episode.order))
+                .size(14)
+                .align_x(iced::alignment::Horizontal::Center),
+        )
+        .on_press(Message::EpisodeClicked {
+            comic_id: state.comic_id.clone(),
+            episode_order: episode.order,
+        })
+        .padding(10)
+        .width(Length::Fixed(150.0));
+
+        current_row = current_row.push(episode_button);
+        count += 1;
+
+        if count % 4 == 0 {
+            episodes_column = episodes_column.push(current_row);
+            current_row = row![].spacing(10);
+        }
+    }
+
+    // 添加最后一行（如果有剩余）
+    if count % 4 != 0 {
+        episodes_column = episodes_column.push(current_row);
+    }
+
+    // 添加分页控制（如果有多页）
+    if state.episodes_total_pages > 1 {
+        let page_info = text(format!(
+            "第 {}/{} 页",
+            state.episodes_page, state.episodes_total_pages
+        ))
+        .size(14)
+        .color(Color::from_rgb(0.8, 0.8, 0.8));
+
+        let prev_button = if state.episodes_page > 1 {
+            button(text("上一页").align_x(iced::alignment::Horizontal::Center))
+                .on_press(Message::LoadEpisodes {
+                    comic_id: state.comic_id.clone(),
+                    page: state.episodes_page - 1,
+                })
+                .padding(8)
+                .width(Length::Fixed(80.0))
+        } else {
+            button(text("上一页").align_x(iced::alignment::Horizontal::Center))
+                .padding(8)
+                .width(Length::Fixed(80.0))
+        };
+
+        let next_button = if state.episodes_page < state.episodes_total_pages {
+            button(text("下一页").align_x(iced::alignment::Horizontal::Center))
+                .on_press(Message::LoadEpisodes {
+                    comic_id: state.comic_id.clone(),
+                    page: state.episodes_page + 1,
+                })
+                .padding(8)
+                .width(Length::Fixed(80.0))
+        } else {
+            button(text("下一页").align_x(iced::alignment::Horizontal::Center))
+                .padding(8)
+                .width(Length::Fixed(80.0))
+        };
+
+        let pagination = row![prev_button, page_info, next_button]
+            .spacing(20)
+            .align_y(Alignment::Center);
+
+        episodes_column = episodes_column.push(pagination);
+    }
+
+    episodes_column.into()
 }

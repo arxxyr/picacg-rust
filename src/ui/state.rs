@@ -28,6 +28,11 @@ pub enum Route {
     Settings,
     /// 漫画详情
     ComicDetail(String), // comic_id
+    /// 阅读界面
+    ReadView {
+        comic_id: String,
+        episode_order: i32,
+    },
 }
 
 /// 登录界面焦点位置
@@ -128,10 +133,22 @@ pub struct ComicDetailState {
     pub comic: Option<Comic>,
     /// 封面图片
     pub cover_image: Option<iced::widget::image::Handle>,
-    /// 是否正在加载
+    /// 章节列表
+    pub episodes: Vec<crate::api::models::Episode>,
+    /// 章节当前页码
+    pub episodes_page: i32,
+    /// 章节总页数
+    pub episodes_total_pages: i32,
+    /// 是否正在加载章节
+    pub is_loading_episodes: bool,
+    /// 是否正在加载详情
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
+    /// 是否收藏
+    pub is_favorite: bool,
+    /// 是否点赞
+    pub is_liked: bool,
 }
 
 impl ComicDetailState {
@@ -140,8 +157,70 @@ impl ComicDetailState {
             comic_id,
             comic: None,
             cover_image: None,
+            episodes: Vec::new(),
+            episodes_page: 1,
+            episodes_total_pages: 1,
+            is_loading_episodes: false,
             is_loading: false,
             error: None,
+            is_favorite: false,
+            is_liked: false,
+        }
+    }
+}
+
+/// 阅读界面状态
+#[derive(Debug, Clone)]
+pub struct ReadViewState {
+    /// 当前漫画 ID
+    pub comic_id: String,
+    /// 当前章节顺序
+    pub episode_order: i32,
+    /// 当前页码
+    pub current_page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 图片列表
+    pub pictures: Vec<crate::api::models::Picture>,
+    /// 当前显示的图片 Handle
+    pub current_image: Option<iced::widget::image::Handle>,
+    /// 图片缓存 (page -> Handle)
+    pub image_cache: std::collections::HashMap<i32, iced::widget::image::Handle>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 缩放比例
+    pub scale: f32,
+    /// 阅读模式（单页/双页等）
+    pub read_mode: ReadMode,
+}
+
+/// 阅读模式
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadMode {
+    /// 单页模式
+    SinglePage,
+    /// 双页模式
+    DoublePage,
+    /// 连续滚动
+    Scroll,
+}
+
+impl ReadViewState {
+    pub fn new(comic_id: String, episode_order: i32) -> Self {
+        Self {
+            comic_id,
+            episode_order,
+            current_page: 1,
+            total_pages: 0,
+            pictures: Vec::new(),
+            current_image: None,
+            image_cache: std::collections::HashMap::new(),
+            is_loading: false,
+            error: None,
+            scale: 1.0,
+            read_mode: ReadMode::SinglePage,
         }
     }
 }
@@ -211,6 +290,8 @@ pub struct AppState {
     pub comics_list_state: ComicsListState,
     /// 漫画详情状态
     pub comic_detail_state: Option<ComicDetailState>,
+    /// 阅读界面状态
+    pub read_view_state: Option<ReadViewState>,
     /// 下载管理状态
     pub downloads_state: DownloadsState,
     /// 代理设置状态
@@ -232,6 +313,7 @@ impl Default for AppState {
             categories_state: CategoriesState::default(),
             comics_list_state: ComicsListState::default(),
             comic_detail_state: None,
+            read_view_state: None,
             downloads_state: DownloadsState::default(),
             proxy_settings_state: ProxySettingsState::default(),
             image_cache: ImageCache::new(),
