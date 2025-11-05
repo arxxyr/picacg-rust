@@ -62,6 +62,7 @@ container(image(handle.clone()))
 - `src/ui/views/comics_list.rs:96-97` - 移除 placeholder 的 `.center_x/.center_y(Length::Fill)`
 - `src/ui/views/categories.rs:124` - 移除 scrollable 的 `.width(Length::Fill)`
 - `src/ui/views/categories.rs:93-94` - 移除 placeholder 的 `.center_x/.center_y(Length::Fill)`
+- `src/ui/views/read_view.rs:158-159` - 移除 scaled_container 的 `.center_x/.center_y(Length::Fill)` (2025-11-05)
 
 **提交信息：**
 ```

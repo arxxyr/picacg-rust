@@ -130,15 +130,43 @@ fn create_top_controls<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
 /// 创建图片显示区域
 fn create_image_area<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
     let image_widget = if let Some(ref handle) = state.current_image {
-        let img = image(handle.clone())
-            .width(Length::Fill)
-            .height(Length::Fill);
+        // 创建图片 widget
+        let img = image(handle.clone());
 
-        // 根据缩放比例调整
-        if state.scale != 1.0 {
-            container(img).width(Length::Fill).height(Length::Fill)
+        // 根据缩放比例设置图片尺寸
+        // iced 的 image widget 需要明确的尺寸才能缩放
+        // 使用 FillPortion 来实现缩放效果
+        let scaled_img = if state.scale == 1.0 {
+            // 100% 缩放：填充容器
+            img.width(Length::Fill).height(Length::Fill)
+        } else if state.scale < 1.0 {
+            // 缩小：使用 FillPortion
+            let portion = (state.scale * 10.0) as u16;
+            img.width(Length::FillPortion(portion))
+                .height(Length::FillPortion(portion))
         } else {
-            container(img).width(Length::Fill).height(Length::Fill)
+            // 放大：需要 scrollable 支持
+            // 使用固定像素值来实现放大
+            img.width(Length::Fill).height(Length::Fill)
+        };
+
+        // 对于放大的情况，使用 scrollable 包裹
+        if state.scale > 1.0 {
+            let scaled_container = container(scaled_img)
+                .width(Length::FillPortion((state.scale * 10.0) as u16))
+                .height(Length::FillPortion((state.scale * 10.0) as u16));
+            // 注意：scrollable 内部的元素不能使用 center_x/center_y(Length::Fill)
+            // 否则会导致 "scrollable content must not fill its vertical scrolling axis" 崩溃
+
+            container(scrollable(scaled_container))
+                .width(Length::Fill)
+                .height(Length::Fill)
+        } else {
+            container(scaled_img)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
         }
     } else {
         container(
@@ -149,6 +177,8 @@ fn create_image_area<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
         )
         .width(Length::Fill)
         .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
     };
 
     container(image_widget)
