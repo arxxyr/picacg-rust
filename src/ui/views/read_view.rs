@@ -134,8 +134,8 @@ fn create_image_area<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
         let img = image(handle.clone());
 
         // 根据缩放比例设置图片尺寸
-        // iced 的 image widget 需要明确的尺寸才能缩放
-        // 使用 FillPortion 来实现缩放效果
+        // 注意：iced 0.13 的 scrollable 不支持内部元素使用 FillPortion 的高度
+        // 因此暂时只支持缩小和 100%，不支持放大超过 100%
         let scaled_img = if state.scale == 1.0 {
             // 100% 缩放：填充容器
             img.width(Length::Fill).height(Length::Fill)
@@ -145,29 +145,16 @@ fn create_image_area<'a>(state: &'a ReadViewState) -> Element<'a, Message> {
             img.width(Length::FillPortion(portion))
                 .height(Length::FillPortion(portion))
         } else {
-            // 放大：需要 scrollable 支持
-            // 使用固定像素值来实现放大
+            // 放大：暂不支持（因为 scrollable 限制）
+            // TODO: 需要获取图片实际尺寸后使用 Length::Fixed 才能正确实现
             img.width(Length::Fill).height(Length::Fill)
         };
 
-        // 对于放大的情况，使用 scrollable 包裹
-        if state.scale > 1.0 {
-            let scaled_container = container(scaled_img)
-                .width(Length::FillPortion((state.scale * 10.0) as u16))
-                .height(Length::FillPortion((state.scale * 10.0) as u16));
-            // 注意：scrollable 内部的元素不能使用 center_x/center_y(Length::Fill)
-            // 否则会导致 "scrollable content must not fill its vertical scrolling axis" 崩溃
-
-            container(scrollable(scaled_container))
-                .width(Length::Fill)
-                .height(Length::Fill)
-        } else {
-            container(scaled_img)
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center_x(Length::Fill)
-                .center_y(Length::Fill)
-        }
+        container(scaled_img)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
     } else {
         container(
             text("加载中...")

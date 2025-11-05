@@ -679,7 +679,9 @@ impl PicACGApp {
 
             Message::ZoomIn => {
                 if let Some(ref mut read_state) = self.state.read_view_state {
-                    read_state.scale = (read_state.scale + 0.1).min(3.0);
+                    // 暂时限制最大缩放为 100%（因为 iced scrollable 限制）
+                    // TODO: 实现正确的放大功能需要获取图片实际尺寸
+                    read_state.scale = (read_state.scale + 0.1).min(1.0);
                 }
                 Task::none()
             }

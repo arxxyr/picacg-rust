@@ -1,4 +1,3 @@
-   Compiling picacg v0.1.0 (C:\Users\ffqi\dev\py\picacg-windows\picacg-rust)
 warning: unused import: `PageInfo`
  --> src\api\endpoints\comic.rs:6:30
   |
@@ -1473,14 +1472,14 @@ help: use `'_` for type paths
     |                                                                 +++
 
 warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "picacg"` to apply 32 suggestions)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.32s
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
      Running `target\debug\picacg.exe`
-[2m2025-11-05T16:09:20.106565Z[0m [32m INFO[0m PicACG Rust 瀹㈡埛绔惎鍔?[2m2025-11-05T16:09:20.108238Z[0m [32m INFO[0m 閰嶇疆鍔犺浇鎴愬姛
-[2m2025-11-05T16:09:20.108276Z[0m [32m INFO[0m 浠ｇ悊宸插惎鐢? Socks5 127.0.0.1:10808
-[2m2025-11-05T16:09:20.118444Z[0m [32m INFO[0m 浣跨敤浠ｇ悊: socks5://127.0.0.1:10808
-[2m2025-11-05T16:09:20.176797Z[0m [33m WARN[0m InstanceFlags::VALIDATION requested, but unable to find layer: VK_LAYER_KHRONOS_validation
-[2m2025-11-05T16:09:20.204324Z[0m [32m INFO[0m Debug utils not enabled: debug_utils_user_data not passed to Instance::from_raw
-[2m2025-11-05T16:09:20.204426Z[0m [32m INFO[0m Settings {
+[2m2025-11-05T16:16:34.875816Z[0m [32m INFO[0m PicACG Rust 瀹㈡埛绔惎鍔?[2m2025-11-05T16:16:34.877456Z[0m [32m INFO[0m 閰嶇疆鍔犺浇鎴愬姛
+[2m2025-11-05T16:16:34.877493Z[0m [32m INFO[0m 浠ｇ悊宸插惎鐢? Socks5 127.0.0.1:10808
+[2m2025-11-05T16:16:34.887603Z[0m [32m INFO[0m 浣跨敤浠ｇ悊: socks5://127.0.0.1:10808
+[2m2025-11-05T16:16:34.943968Z[0m [33m WARN[0m InstanceFlags::VALIDATION requested, but unable to find layer: VK_LAYER_KHRONOS_validation
+[2m2025-11-05T16:16:34.969459Z[0m [32m INFO[0m Debug utils not enabled: debug_utils_user_data not passed to Instance::from_raw
+[2m2025-11-05T16:16:34.969569Z[0m [32m INFO[0m Settings {
     present_mode: AutoVsync,
     backends: Backends(
         VULKAN,
@@ -1500,9 +1499,9 @@ warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "p
         MSAAx4,
     ),
 }
-[2m2025-11-05T16:09:20.208697Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "NVIDIA GeForce RTX 5090", vendor: 4318, device: 11141, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "581.57", backend: Vulkan }
-[2m2025-11-05T16:09:20.208792Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "AMD Radeon(TM) Graphics", vendor: 4098, device: 5056, device_type: IntegratedGpu, driver: "AMD proprietary driver", driver_info: "24.12.1 (AMD proprietary shader compiler)", backend: Vulkan }
-[2m2025-11-05T16:09:20.208896Z[0m [32m INFO[0m Available adapters: [
+[2m2025-11-05T16:16:34.973559Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "NVIDIA GeForce RTX 5090", vendor: 4318, device: 11141, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "581.57", backend: Vulkan }
+[2m2025-11-05T16:16:34.973651Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "AMD Radeon(TM) Graphics", vendor: 4098, device: 5056, device_type: IntegratedGpu, driver: "AMD proprietary driver", driver_info: "24.12.1 (AMD proprietary shader compiler)", backend: Vulkan }
+[2m2025-11-05T16:16:34.973751Z[0m [32m INFO[0m Available adapters: [
     AdapterInfo {
         name: "NVIDIA GeForce RTX 5090",
         vendor: 4318,
@@ -1522,9 +1521,9 @@ warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "p
         backend: Vulkan,
     },
 ]
-[2m2025-11-05T16:09:20.216400Z[0m [33m WARN[0m Unrecognized present mode 1000361000
-[2m2025-11-05T16:09:20.216505Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "NVIDIA GeForce RTX 5090", vendor: 4318, device: 11141, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "581.57", backend: Vulkan }
-[2m2025-11-05T16:09:20.216562Z[0m [32m INFO[0m Selected: AdapterInfo {
+[2m2025-11-05T16:16:34.980993Z[0m [33m WARN[0m Unrecognized present mode 1000361000
+[2m2025-11-05T16:16:34.981084Z[0m [32m INFO[0m Adapter Vulkan AdapterInfo { name: "NVIDIA GeForce RTX 5090", vendor: 4318, device: 11141, device_type: DiscreteGpu, driver: "NVIDIA", driver_info: "581.57", backend: Vulkan }
+[2m2025-11-05T16:16:34.981136Z[0m [32m INFO[0m Selected: AdapterInfo {
     name: "NVIDIA GeForce RTX 5090",
     vendor: 4318,
     device: 11141,
@@ -1533,8 +1532,8 @@ warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "p
     driver_info: "581.57",
     backend: Vulkan,
 }
-[2m2025-11-05T16:09:20.218293Z[0m [33m WARN[0m Unrecognized present mode 1000361000
-[2m2025-11-05T16:09:20.218330Z[0m [32m INFO[0m Available formats: Copied {
+[2m2025-11-05T16:16:34.982582Z[0m [33m WARN[0m Unrecognized present mode 1000361000
+[2m2025-11-05T16:16:34.982609Z[0m [32m INFO[0m Available formats: Copied {
     it: Iter(
         [
             Bgra8UnormSrgb,
@@ -1545,11 +1544,11 @@ warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "p
         ],
     ),
 }
-[2m2025-11-05T16:09:20.218347Z[0m [32m INFO[0m Available alpha modes: [
+[2m2025-11-05T16:16:34.982624Z[0m [32m INFO[0m Available alpha modes: [
     Opaque,
 ]
-[2m2025-11-05T16:09:20.218362Z[0m [32m INFO[0m Selected format: Bgra8UnormSrgb with alpha mode: Auto
-[2m2025-11-05T16:09:20.595617Z[0m [32m INFO[0m Window attributes for id `Id(
+[2m2025-11-05T16:16:34.982671Z[0m [32m INFO[0m Selected format: Bgra8UnormSrgb with alpha mode: Auto
+[2m2025-11-05T16:16:35.351045Z[0m [32m INFO[0m Window attributes for id `Id(
     1,
 )`: WindowAttributes {
     inner_size: Some(
@@ -1601,11 +1600,10 @@ warning: `picacg` (bin "picacg") generated 145 warnings (run `cargo fix --bin "p
         corner_preference: None,
     },
 }
-[2m2025-11-05T16:09:20.604072Z[0m [33m WARN[0m Unrecognized present mode 1000361000
-[2m2025-11-05T16:09:20.757906Z[0m [33m WARN[0m Unrecognized present mode 1000361000
-[2m2025-11-05T16:09:22.071981Z[0m [33m WARN[0m Unrecognized present mode 1000361000
+[2m2025-11-05T16:16:35.359809Z[0m [33m WARN[0m Unrecognized present mode 1000361000
+[2m2025-11-05T16:16:35.488900Z[0m [33m WARN[0m Unrecognized present mode 1000361000
 
-thread 'main' (41592) panicked at C:\Users\ffqi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\iced_widget-0.13.4\src\scrollable.rs:118:9:
+thread 'main' (35704) panicked at C:\Users\ffqi\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\iced_widget-0.13.4\src\scrollable.rs:118:9:
 scrollable content must not fill its vertical scrolling axis
 stack backtrace:
    0: std::panicking::panic_handler
