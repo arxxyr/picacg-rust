@@ -1,6 +1,7 @@
 use iced::{
-    Element, Settings, Task, Theme,
+    Element, Subscription, Task, Theme,
     font::{Font, Weight},
+    keyboard::{self, key::Named},
     widget::{text, text_input},
 };
 
@@ -114,6 +115,56 @@ impl PicACGApp {
             Message::LoginFailed(error) => {
                 self.state.login_state.is_loading = false;
                 self.state.login_state.error = Some(format!("登录失败: {}", error));
+                Task::none()
+            }
+
+            Message::TabPressed => {
+                // 仅在登录界面处理 Tab 键
+                if self.state.route == Route::Login {
+                    use crate::ui::{
+                        state::LoginFocus,
+                        views::login::{PASSWORD_INPUT_ID, USERNAME_INPUT_ID},
+                    };
+
+                    // 切换焦点位置（循环：用户名 → 密码 → 登录按钮 → 代理按钮 → 用户名）
+                    let (new_focus, focus_task) = match self.state.login_state.focus {
+                        LoginFocus::Username => (
+                            LoginFocus::Password,
+                            Some(text_input::focus(text_input::Id::new(PASSWORD_INPUT_ID))),
+                        ),
+                        LoginFocus::Password => (LoginFocus::LoginButton, None),
+                        LoginFocus::LoginButton => (LoginFocus::ProxyButton, None),
+                        LoginFocus::ProxyButton => (
+                            LoginFocus::Username,
+                            Some(text_input::focus(text_input::Id::new(USERNAME_INPUT_ID))),
+                        ),
+                    };
+
+                    self.state.login_state.focus = new_focus;
+
+                    // 返回焦点切换任务（如果有）
+                    return focus_task.unwrap_or(Task::none());
+                }
+                Task::none()
+            }
+
+            Message::EnterPressed => {
+                // 仅在登录界面处理 Enter 键
+                if self.state.route == Route::Login {
+                    use crate::ui::state::LoginFocus;
+
+                    // 根据当前焦点位置触发相应动作
+                    match self.state.login_state.focus {
+                        LoginFocus::Username | LoginFocus::Password | LoginFocus::LoginButton => {
+                            // 在输入框或登录按钮按 Enter，触发登录
+                            return self.update(Message::LoginPressed);
+                        }
+                        LoginFocus::ProxyButton => {
+                            // 在代理设置按钮按 Enter，跳转到代理设置
+                            return self.update(Message::NavigateToProxySettings);
+                        }
+                    }
+                }
                 Task::none()
             }
 
@@ -269,22 +320,22 @@ impl PicACGApp {
             }
 
             Message::ComicClicked(comic_id) => {
-                // 跳转到漫画详情页面并触发加载
+                // 跳转到漫画详情页面
                 self.state.navigate_to(Route::ComicDetail(comic_id.clone()));
 
                 // 创建新的详情状态
                 self.state.comic_detail_state =
                     Some(crate::ui::state::ComicDetailState::new(comic_id.clone()));
 
-                // 触发加载
-                self.update(Message::LoadComicDetail(comic_id))
+                // 触发加载：返回 Task 而不是递归调用 update
+                Task::done(Message::LoadComicDetail(comic_id))
             }
 
             Message::PrevPage => {
                 if self.state.comics_list_state.page > 1 {
                     self.state.comics_list_state.page -= 1;
                     let category = self.state.comics_list_state.category.clone();
-                    self.update(Message::LoadComics(category))
+                    Task::done(Message::LoadComics(category))
                 } else {
                     Task::none()
                 }
@@ -294,7 +345,7 @@ impl PicACGApp {
                 if self.state.comics_list_state.page < self.state.comics_list_state.total_pages {
                     self.state.comics_list_state.page += 1;
                     let category = self.state.comics_list_state.category.clone();
-                    self.update(Message::LoadComics(category))
+                    Task::done(Message::LoadComics(category))
                 } else {
                     Task::none()
                 }
@@ -392,6 +443,12 @@ impl PicACGApp {
                 // 存储到分类状态中
                 self.state
                     .categories_state
+                    .thumbnails
+                    .insert(url.clone(), handle.clone());
+
+                // 存储到漫画列表状态中
+                self.state
+                    .comics_list_state
                     .thumbnails
                     .insert(url.clone(), handle.clone());
 
@@ -494,6 +551,27 @@ impl PicACGApp {
     pub fn theme(&self) -> Theme {
         Theme::Dark
     }
+
+    pub fn subscription(&self) -> Subscription<Message> {
+        // 仅在登录界面监听键盘事件
+        if self.state.route == Route::Login {
+            keyboard::on_key_press(|key, modifiers| {
+                match key {
+                    keyboard::Key::Named(Named::Tab) if !modifiers.shift() => {
+                        // Tab 键（不带 Shift）
+                        Some(Message::TabPressed)
+                    }
+                    keyboard::Key::Named(Named::Enter) => {
+                        // Enter 键：发送通用消息，在 update 中根据 focus 状态处理
+                        Some(Message::EnterPressed)
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            Subscription::none()
+        }
+    }
 }
 
 /// 运行应用
@@ -509,6 +587,7 @@ pub fn run() -> iced::Result {
         ))
         .default_font(SARASA_TERM_FONT)
         .theme(PicACGApp::theme)
+        .subscription(PicACGApp::subscription)
         .window_size((1024.0, 768.0))
         .antialiasing(true)
         .run()

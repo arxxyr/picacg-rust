@@ -92,9 +92,7 @@ pub fn view<'a>(state: &'a ComicsListState) -> Element<'a, Message> {
                     .align_x(iced::alignment::Horizontal::Center),
             )
             .width(Length::Fixed(140.0))
-            .height(Length::Fixed(200.0))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill);
+            .height(Length::Fixed(200.0));
             card_content = card_content.push(placeholder);
         }
 
@@ -172,7 +170,8 @@ pub fn view<'a>(state: &'a ComicsListState) -> Element<'a, Message> {
     grid = grid.push(pagination_row);
 
     // 添加可滚动容器
-    scrollable(grid)
+    // 注意：scrollable 本身不能设置 height(Fill)，需要用 container 包裹
+    container(scrollable(grid))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

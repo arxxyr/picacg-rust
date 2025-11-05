@@ -30,6 +30,19 @@ pub enum Route {
     ComicDetail(String), // comic_id
 }
 
+/// 登录界面焦点位置
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginFocus {
+    /// 用户名输入框
+    Username,
+    /// 密码输入框
+    Password,
+    /// 登录按钮
+    LoginButton,
+    /// 代理设置按钮
+    ProxyButton,
+}
+
 /// 登录状态
 #[derive(Debug, Clone)]
 pub struct LoginState {
@@ -41,6 +54,8 @@ pub struct LoginState {
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
+    /// 当前焦点位置
+    pub focus: LoginFocus,
 }
 
 impl Default for LoginState {
@@ -50,6 +65,7 @@ impl Default for LoginState {
             password: String::new(),
             is_loading: false,
             error: None,
+            focus: LoginFocus::Username,
         }
     }
 }

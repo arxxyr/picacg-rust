@@ -79,8 +79,6 @@ pub fn view<'a>(
         container(image(handle.clone()))
             .width(Length::Fixed(200.0))
             .height(Length::Fixed(280.0))
-            .center_x(Length::Fill)
-            .center_y(Length::Fill)
     } else {
         container(
             text("加载中...")
@@ -90,8 +88,6 @@ pub fn view<'a>(
         )
         .width(Length::Fixed(200.0))
         .height(Length::Fixed(280.0))
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
     };
 
     left_column = left_column.push(cover_widget);
@@ -213,7 +209,8 @@ pub fn view<'a>(
     content = content.push(buttons_row);
 
     // 添加可滚动容器
-    scrollable(content)
+    // 注意：scrollable 本身不能设置 height(Fill)，需要用 container 包裹
+    container(scrollable(content))
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

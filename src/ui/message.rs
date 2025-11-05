@@ -12,6 +12,10 @@ pub enum Message {
     LoginSuccess(String), // token
     /// 登录失败
     LoginFailed(String), // error message
+    /// Tab 键焦点切换
+    TabPressed,
+    /// Enter 键按下
+    EnterPressed,
 
     // ==================== 主界面消息 ====================
     /// 切换到主页
