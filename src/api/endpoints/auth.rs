@@ -55,9 +55,16 @@ impl ApiRequest for GetUserInfoRequest {
 #[derive(Debug, Serialize)]
 pub struct PunchInRequest;
 
+/// 打卡响应内层结构
+#[derive(Debug, Deserialize)]
+pub struct PunchInRes {
+    pub status: String,
+}
+
+/// 打卡响应（匹配 API 嵌套结构 data.res.status）
 #[derive(Debug, Deserialize)]
 pub struct PunchInResponse {
-    pub status: String,
+    pub res: PunchInRes,
 }
 
 impl ApiRequest for PunchInRequest {

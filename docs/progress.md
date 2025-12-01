@@ -1,15 +1,25 @@
 # PicACG Rust 重写进度报告
 
-**最后更新**: 2025-11-05 (下午)
+**最后更新**: 2025-12-01
+
+## 重要通知
+
+⚠️ **框架迁移进行中**: 从 iced 0.13 迁移到 **Bevy 0.17.3**
+
+迁移原因：
+- iced 0.13 scrollable 组件存在稳定性问题
+- Bevy ECS 架构更适合复杂 UI 状态管理
+- Bevy 社区更活跃，文档更完善
 
 ## 项目概览
 
 | 项目信息 | 数值 |
 |---------|------|
-| 总代码行数 | ~4570 行 Rust |
-| 完成阶段 | 5.7/10 |
-| 完成度 | ~57% |
-| Release 二进制大小 | 13 MB |
+| 总代码行数 | ~5500 行 Rust |
+| 完成阶段 | 6.0/10 |
+| 完成度 | ~60% |
+| UI 框架 | **Bevy 0.17.3** (迁移自 iced 0.13) |
+| Release 二进制大小 | ~15 MB |
 | 启动时间 | < 500ms |
 | 内存占用 | ~30-50 MB |
 
@@ -629,6 +639,80 @@
 - 创建 `docs/testing_guide_2025-11-05.md`
 - 包含完整的测试流程和功能清单
 - 记录已知问题和下一步计划
+
+---
+
+### ✅ 阶段 6.0: Bevy 0.17.3 框架迁移 (进行中 ~70%)
+
+**开始时间**: 2025-12-01
+
+**代码量**: ~1000 行新增/修改
+
+**迁移原因**:
+- iced 0.13 scrollable 组件存在稳定性问题
+- Bevy ECS 架构更适合复杂 UI 状态管理
+- Bevy 社区更活跃，文档更完善
+
+**完成内容**:
+
+#### 项目基础设施
+- [x] 更新 `Cargo.toml` 使用 Bevy 0.17.3
+- [x] 创建 ECS 架构目录结构
+  - `plugins/` - Bevy 插件
+  - `components/` - ECS 组件
+  - `resources/` - 全局资源
+  - `events/` - 事件定义
+  - `systems/` - ECS 系统
+
+#### 核心插件
+- [x] `UiPlugin` - UI 主插件
+  - 状态路由管理 (`AppRoute`)
+  - 页面生命周期 (`OnEnter`/`OnExit`)
+- [x] `ApiPlugin` - API 异步任务插件
+  - 使用 `bevy-tokio-tasks` 集成
+  - 登录/分类/漫画列表请求处理
+
+#### 页面实现
+- [x] 登录页面 (`systems/login.rs`)
+  - 用户名/密码输入
+  - 键盘输入捕获
+  - 登录按钮交互
+- [x] 代理设置页面 (`systems/proxy_settings.rs`)
+  - 启用开关、类型选择（HTTP/HTTPS/SOCKS5）
+  - 主机/端口输入
+  - 配置持久化
+- [x] 分类页面 (`systems/categories.rs`)
+  - 分类卡片布局
+  - 点击跳转
+- [x] 漫画列表页面 (`systems/comics.rs`)
+  - 漫画卡片网格
+  - 分页控制
+
+#### API 变更适配
+- [x] `Event` → `Message` trait
+- [x] `EventWriter::send()` → `MessageWriter::write()`
+- [x] `EventReader` → `MessageReader`
+- [x] `add_event::<T>()` → `add_message::<T>()`
+- [x] `BorderColor(color)` → `BorderColor::all(color)`
+- [x] `despawn_recursive()` → `despawn()` (自动递归)
+- [x] `ReceivedCharacter` → `KeyboardInput` + `logical_key`
+
+#### Bug 修复
+- [x] 字体乱码：显式配置 `AssetPlugin` 的 `file_path`
+- [x] 键盘输入：使用 `KeyboardInput` 替代已弃用的 `ReceivedCharacter`
+- [x] Children 迭代：移除不必要的 `*` 解引用
+
+**待完成**:
+- [ ] 漫画详情页面
+- [ ] 阅读器页面
+- [ ] 图片异步加载与缓存
+- [ ] 下载管理界面
+
+**技术亮点**:
+- **ECS 架构**: 状态管理更清晰，组件复用更方便
+- **状态路由**: 使用 Bevy States 实现页面切换
+- **异步集成**: `bevy-tokio-tasks` 无缝对接 Tokio
+- **点击聚焦**: Button 组件模拟输入框，捕获键盘输入
 
 ---
 

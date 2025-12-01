@@ -79,11 +79,29 @@ impl ProxySettings {
     }
 }
 
+/// 登录设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LoginSettings {
+    /// 是否保存密码
+    pub save_password: bool,
+    /// 是否自动登录
+    pub auto_login: bool,
+    /// 是否自动打卡
+    pub auto_punch_in: bool,
+    /// 保存的用户名/邮箱
+    pub saved_email: String,
+    /// 保存的密码（注意：明文存储，生产环境应加密）
+    pub saved_password: String,
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     /// 代理设置
     pub proxy: ProxySettings,
+    /// 登录设置
+    #[serde(default)]
+    pub login: LoginSettings,
     /// 下载并发数
     pub download_workers: usize,
     /// HTTP 并发数
@@ -96,6 +114,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             proxy: ProxySettings::default(),
+            login: LoginSettings::default(),
             download_workers: 5,
             http_workers: 5,
             cache_path: PathBuf::from("cache"),

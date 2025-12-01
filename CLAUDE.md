@@ -1,175 +1,195 @@
 # PicACG Rust 客户端开发笔记
 
-## 已知问题与解决方案
+> 最后更新: 2025-12-02
 
-### 1. iced 0.13 scrollable 组件崩溃问题
+## 框架概述
 
-**问题描述：**
-点击漫画进入详情页时，应用崩溃并显示错误：
-```
-thread 'main' panicked at scrollable.rs:118:9:
-scrollable content must not fill its vertical scrolling axis
-```
+**当前框架**: **Bevy 0.17.3** (ECS 架构)
 
-**根本原因：**
-在 iced 0.13 框架中，有两个关键问题会导致 scrollable 崩溃：
+### Bevy 0.17 API 速查
 
-1. **不应该在 `scrollable()` 组件本身上设置 `.width(Length::Fill)`**
-2. **scrollable 内部的元素不应使用 `.center_x(Length::Fill)` 或 `.center_y(Length::Fill)`**
+| API | 说明 |
+|-----|------|
+| `#[derive(Event)]` | 定义事件/消息 |
+| `MessageWriter::write()` | 发送消息 |
+| `MessageReader<T>` | 接收消息 |
+| `add_message::<T>()` | 注册消息类型 |
+| `BorderColor::all(color)` | 设置边框颜色 |
+| `despawn()` | 删除实体（自动递归删除子实体） |
+| `KeyboardInput` + `logical_key` | 键盘输入处理 |
 
-这两种情况都会导致内部布局计算错误，使得内容在垂直方向上也尝试填充，违反了 "scrollable content must not fill its vertical scrolling axis" 规则。
+### 键盘输入新 API (Bevy 0.17)
 
-**错误代码示例 1：scrollable 上设置 width**
 ```rust
-// ❌ 错误写法
-container(scrollable(content).width(Length::Fill))
-    .width(Length::Fill)
-    .height(Length::Fill)
+use bevy::input::keyboard::{Key, KeyboardInput};
+use bevy::input::ButtonState;
 
-// ✅ 正确写法
-container(scrollable(content))
-    .width(Length::Fill)
-    .height(Length::Fill)
+fn keyboard_input(
+    mut keyboard_events: MessageReader<KeyboardInput>,
+) {
+    for event in keyboard_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+        match &event.logical_key {
+            Key::Backspace => { /* 删除字符 */ }
+            Key::Character(input) => {
+                // input 是 &str，包含输入的字符串
+                for c in input.chars() {
+                    // 处理每个字符
+                }
+            }
+            _ => {}
+        }
+    }
+}
 ```
 
-**错误代码示例 2：scrollable 内部元素使用 center_x/center_y**
+### 字体加载配置
+
+必须显式配置 `AssetPlugin` 的 `file_path` 以确保字体正确加载：
+
 ```rust
-// ❌ 错误写法（位于 scrollable 内部）
-container(image(handle.clone()))
-    .width(Length::Fixed(200.0))
-    .height(Length::Fixed(280.0))
-    .center_x(Length::Fill)  // 导致崩溃
-    .center_y(Length::Fill)  // 导致崩溃
+use bevy::asset::AssetPlugin;
 
-// ✅ 正确写法
-container(image(handle.clone()))
-    .width(Length::Fixed(200.0))
-    .height(Length::Fixed(280.0))
-// 固定尺寸的容器会自动居中，无需额外设置
-```
+let manifest_dir = env!("CARGO_MANIFEST_DIR");
+let assets_path = std::path::Path::new(manifest_dir).join("assets");
 
-**技术原理：**
-- `scrollable()` 组件会自动处理其内容的布局
-- 当在 scrollable 上直接设置 `.width(Length::Fill)` 时，会导致内部布局计算出现问题
-- scrollable 内部使用 `center_x(Length::Fill)` 或 `center_y(Length::Fill)` 会让布局引擎误认为容器想要填充整个垂直滚动区域
-- 正确做法是让外层的 `container` 来控制宽度和高度，scrollable 只负责内容的滚动
-- 固定尺寸的容器会自然地在父容器中布局，无需显式居中
-
-**已修复的文件：**
-- `src/ui/views/comic_detail.rs:215` - 移除 scrollable 的 `.width(Length::Fill)`
-- `src/ui/views/comic_detail.rs:82,92` - 移除 cover_widget 的 `.center(Length::Fill)`
-- `src/ui/views/comics_list.rs:176` - 移除 scrollable 的 `.width(Length::Fill)`
-- `src/ui/views/comics_list.rs:96-97` - 移除 placeholder 的 `.center_x/.center_y(Length::Fill)`
-- `src/ui/views/categories.rs:124` - 移除 scrollable 的 `.width(Length::Fill)`
-- `src/ui/views/categories.rs:93-94` - 移除 placeholder 的 `.center_x/.center_y(Length::Fill)`
-- `src/ui/views/read_view.rs:158-159` - 移除 scaled_container 的 `.center_x/.center_y(Length::Fill)` (2025-11-05)
-
-**提交信息：**
-```
-fix: 修复 iced scrollable 组件布局导致的崩溃问题
-
-问题描述：
-- 点击漫画进入详情页时应用崩溃
-- 错误信息：scrollable content must not fill its vertical scrolling axis
-- 崩溃位置：comic_detail.rs:215, comics_list.rs:96, categories.rs:93
-
-修复内容：
-1. 移除 scrollable 组件上的 .width(Length::Fill) 调用
-   - 改为由外层 container 控制宽度和高度
-   - 让 scrollable 组件自动处理其内容布局
-
-2. 移除 scrollable 内部元素的 center_x/center_y(Length::Fill)
-   - cover_widget 容器移除 .center(Length::Fill)
-   - placeholder 容器移除 .center_x/.center_y(Length::Fill)
-   - 固定尺寸的容器会自然居中，无需额外设置
-
-业务逻辑：
-- iced 0.13 框架中，scrollable 组件不应直接设置 width/height
-- scrollable 内部的元素不应使用 Length::Fill 作为居中参数
-- 应该通过外层 container 来控制可滚动区域的尺寸
-- scrollable 内部会自动根据内容计算滚动区域
-
-影响文件：
-- src/ui/views/comic_detail.rs (line 82, 92, 215)
-- src/ui/views/comics_list.rs (line 96-97, 176)
-- src/ui/views/categories.rs (line 93-94, 124)
+App::new()
+    .add_plugins(
+        DefaultPlugins
+            .set(AssetPlugin {
+                file_path: assets_path.to_string_lossy().to_string(),
+                ..default()
+            })
+    )
 ```
 
 ---
 
-### 2. Tab 键导航系统
+### Bevy 0.17 DPI 缩放处理
 
-**功能描述：**
-登录界面支持 Tab 键在所有交互元素间循环导航。
+**核心原则：** Bevy UI 使用逻辑像素，但 `ComputedNode::size()` 返回物理像素。
 
-**实现要点：**
-- 使用 `keyboard::on_key_press` 订阅键盘事件
-- 使用 `LoginFocus` 枚举追踪焦点状态
-- Tab 键循环顺序：用户名 → 密码 → 登录按钮 → 代理设置按钮 → 用户名
-- Enter 键根据当前焦点执行对应操作
-- 通过 `button::Style` 为获得焦点的按钮添加蓝色边框视觉反馈
+| API | 返回值类型 | 说明 |
+|-----|-----------|------|
+| `ComputedNode::size()` | **物理像素** | 需要除以 `scale_factor` 转换 |
+| `Window::cursor_position()` | **逻辑像素** | 屏幕坐标系（原点左上，Y 向下） |
+| `GlobalTransform::translation()` | **逻辑像素** | Bevy UI 坐标系（原点中心，Y 向上） |
+| `Node` 的 `Val::Px(x)` | 逻辑像素 | Bevy 自动处理 DPI 缩放 |
+| `ScrollPosition` | 逻辑像素 | 自定义组件，存储逻辑像素 |
+| `ContentSizeInfo` | 逻辑像素 | 自定义组件，存储逻辑像素 |
 
-**相关文件：**
-- `src/ui/message.rs` - 新增 `TabPressed` 和 `EnterPressed` 消息
-- `src/ui/state.rs` - 扩展 `LoginFocus` 枚举至 4 个变体
-- `src/ui/app.rs` - 实现 Tab/Enter 键处理逻辑和订阅
-- `src/ui/views/login.rs` - 添加焦点视觉反馈
+**获取 scale_factor：**
+```rust
+fn get_scale_factor(window_query: &Query<&Window, With<PrimaryWindow>>) -> f32 {
+    window_query
+        .single()
+        .ok()
+        .map(|w| w.scale_factor() as f32)
+        .unwrap_or(1.0)
+}
+```
+
+**典型场景：**
+```rust
+// ❌ 错误：直接使用 ComputedNode::size()
+let viewport_height = scroll_computed.size().y;
+
+// ✅ 正确：转换为逻辑像素
+let scale_factor = get_scale_factor(&window_query);
+let viewport_height = scroll_computed.size().y / scale_factor;
+```
 
 ---
 
-## 开发注意事项
+### 坐标系统转换（重要）
 
-### iced 框架最佳实践
+Bevy 中存在两套坐标系统，进行鼠标位置计算时必须正确转换：
 
-1. **避免在 scrollable 上直接设置尺寸**
-   ```rust
-   // 错误
-   scrollable(content).width(Length::Fill)
+**1. 屏幕坐标系（Window::cursor_position()）**
+- 原点：窗口**左上角**
+- Y 轴：**向下**为正
+- 单位：逻辑像素
 
-   // 正确
-   container(scrollable(content)).width(Length::Fill)
-   ```
+**2. Bevy UI 坐标系（GlobalTransform::translation()）**
+- 原点：窗口**中心**
+- Y 轴：**向上**为正
+- 单位：逻辑像素
 
-2. **避免在 scrollable 内部元素使用 center_x/center_y(Length::Fill)**
-   ```rust
-   // 错误（位于 scrollable 内部）
-   container(widget)
-       .width(Length::Fixed(200.0))
-       .center_x(Length::Fill)  // 导致崩溃
+**坐标转换公式：**
+```rust
+// 屏幕坐标 → Bevy UI 坐标
+let window_height = window.height();
+let cursor_y_bevy = window_height - cursor_pos.y;  // 翻转 Y 轴
+```
 
-   // 正确
-   container(widget)
-       .width(Length::Fixed(200.0))
-   // 固定尺寸会自动居中
-   ```
+**滚动条轨道点击计算示例：**
+```rust
+// 获取轨道中心位置（Bevy UI 坐标系）
+let track_center = track_transform.translation();
+let track_height = track_computed.size().y / scale_factor;
 
-3. **使用 Task 而非递归 update() 调用**
-   ```rust
-   // 错误
-   Message::SomeEvent => {
-       self.update(Message::AnotherEvent)
-   }
+// 轨道顶部 Y 坐标（Bevy 坐标系中，Y 增大 = 向上）
+let track_top_y = track_center.y + track_height / 2.0;
 
-   // 正确
-   Message::SomeEvent => {
-       Task::done(Message::AnotherEvent)
-   }
-   ```
+// 点击位置相对于轨道顶部的距离
+let click_offset_from_top = track_top_y - cursor_y_bevy;
 
-4. **keyboard subscription 不能捕获变量**
-   ```rust
-   // 错误
-   keyboard::on_key_press(move |key, modifiers| {
-       match focus { ... }  // 捕获了 focus 变量
-   })
+// 点击比例（0.0 = 顶部，1.0 = 底部）
+let click_ratio = (click_offset_from_top / track_height).clamp(0.0, 1.0);
+```
 
-   // 正确
-   keyboard::on_key_press(|key, modifiers| {
-       Some(Message::TabPressed)  // 只返回消息
-   })
-   ```
+**常见错误：**
+```rust
+// ❌ 错误：使用 RelativeCursorPosition.normalized
+//    该组件在高 DPI 环境下可能出现 1/scale_factor 的偏差
+let click_ratio = relative_cursor.normalized.y;
 
-### 调试技巧
+// ✅ 正确：手动计算相对位置
+let click_ratio = (track_top_y - cursor_y_bevy) / track_height;
+```
+
+**滚动条系统 DPI 修复要点：**
+1. `update_all_scrollbar_thumbs`: track_height 需要除以 scale_factor
+2. `scrollbar_thumb_drag`: track_height、thumb_height 需要除以 scale_factor
+
+
+**影响文件：**
+- `src/systems/categories.rs` - viewport 计算
+- `src/systems/comics.rs` - viewport 计算
+- `src/systems/scrollbar.rs` - 滚动条所有系统
+
+---
+
+## 自定义滚动条系统
+
+实现 VSCode 风格的滚动条，支持：
+- 轨道点击快速跳转
+- 滑块拖拽滚动
+- 自动计算滑块大小和位置
+- DPI 缩放适配
+
+**关键组件：**
+| 组件 | 用途 |
+|------|------|
+| `ScrollContainer` | 可滚动容器标记 |
+| `ScrollPosition` | 滚动位置（逻辑像素） |
+| `ContentSizeInfo` | 内容/视口尺寸信息 |
+| `ScrollbarTrack` | 滚动条轨道 |
+| `ScrollbarThumb` | 滚动条滑块 |
+| `ScrollbarDragState` | 拖拽状态资源 |
+
+**系统函数：**
+- `update_all_scrollbar_thumbs` - 更新滑块位置和大小
+- `scrollbar_thumb_interaction` - 滑块悬停/按下状态
+- `scrollbar_track_click` - 轨道点击跳转
+- `scrollbar_thumb_drag` - 滑块拖拽
+- `reset_drag_state_on_release` - 鼠标释放时重置状态
+
+---
+
+## 调试技巧
 
 1. **使用完整堆栈追踪**
    ```powershell
@@ -177,30 +197,33 @@ fix: 修复 iced scrollable 组件布局导致的崩溃问题
    cargo run
    ```
 
-2. **通过 grep 快速定位问题**
-   ```bash
-   cargo run 2>&1 | grep -i "panic\|error"
+2. **查看编译警告**
+   ```powershell
+   cargo clippy --all
    ```
 
-3. **检查所有 scrollable 使用位置**
-   ```bash
-   grep -rn "scrollable" src/ui/views/
+3. **格式化代码**
+   ```powershell
+   cargo fmt --all
    ```
 
 ---
 
 ## 待办事项
 
-- [ ] 清理 151 个编译警告（未使用的导入和变量）
-- [ ] 实现漫画详情页的"开始阅读"功能
-- [ ] 实现收藏和点赞功能
-- [ ] 添加搜索功能
+- [ ] 清理编译警告（未使用的导入和变量）
+- [ ] 完善漫画详情页面
+- [ ] 实现基础阅读器
+- [ ] 实现搜索功能
+- [ ] 实现收藏/历史管理
+- [ ] 下载管理 UI
 - [ ] 优化图片加载性能
 
 ---
 
 ## 参考资料
 
-- [iced 官方文档](https://docs.rs/iced/latest/iced/)
-- [iced GitHub 仓库](https://github.com/iced-rs/iced)
+- [Bevy 0.17 发布说明](https://bevy.org/news/bevy-0-17/)
+- [Bevy 官方文档](https://docs.rs/bevy/latest/bevy/)
+- [Tokio 官方文档](https://tokio.rs/)
 - [PicACG API 文档](../docs/)
