@@ -115,6 +115,8 @@ impl Plugin for UiPlugin {
                 (
                     comic_card_interaction,
                     pagination_interaction,
+                    refresh_comics_list_ui,
+                    update_comics_images,
                     handle_comics_scroll,
                     clamp_comics_scroll,
                     // 滚动条系统

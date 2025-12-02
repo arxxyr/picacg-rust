@@ -618,3 +618,332 @@ pub fn update_comics_content_size(
         content_size_info.viewport_height = viewport_height;
     }
 }
+
+/// 刷新漫画列表 UI（当 ComicsListState 变化时）
+///
+/// 类似于 refresh_categories_ui，在数据异步加载完成后重新创建 UI。
+pub fn refresh_comics_list_ui(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    comics_state: Res<ComicsListState>,
+    image_cache: Res<ImageCache>,
+    root_query: Query<Entity, With<ComicsListRoot>>,
+    content_area_query: Query<Entity, With<ContentArea>>,
+) {
+    // 只在状态变化时刷新
+    if !comics_state.is_changed() {
+        return;
+    }
+
+    // 如果还在加载中且没有数据，不刷新（等待加载完成）
+    if comics_state.is_loading && comics_state.comics.is_empty() {
+        return;
+    }
+
+    // 删除旧的 UI
+    for entity in root_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // 尝试找到 ContentArea
+    let content_area = content_area_query.single().ok();
+
+    // 重新创建 UI
+    let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+    let comics_root = commands
+        .spawn((
+            ComicsListRoot,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(AppColors::BACKGROUND),
+        ))
+        .with_children(|root| {
+            // 标题栏（包含面包屑导航）
+            root.spawn(Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(15.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                border: UiRect::bottom(Val::Px(1.0)),
+                ..default()
+            })
+            .insert(BorderColor::all(AppColors::BORDER))
+            .with_children(|header| {
+                // 面包屑: 分类 > 当前分类名
+                header.spawn((
+                    Text::new("分类"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+
+                header.spawn((
+                    Text::new(">"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+
+                header.spawn((
+                    Text::new(&comics_state.category),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+
+                // 加载状态提示
+                if comics_state.is_loading {
+                    header.spawn((
+                        Text::new("(加载中...)"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                }
+            });
+
+            // 滚动区域包装器（用于放置滚动条）
+            root.spawn(Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                position_type: PositionType::Relative,
+                ..default()
+            })
+            .with_children(|wrapper| {
+                // 漫画网格（可滚动）
+                let scroll_container_id = wrapper
+                    .spawn((
+                        ComicsScrollContainer,
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::FlexStart,
+                            align_content: AlignContent::FlexStart,
+                            padding: UiRect {
+                                left: Val::Px(comic_layout::PADDING_LEFT),
+                                right: Val::Px(comic_layout::PADDING_RIGHT),
+                                top: Val::Px(comic_layout::PADDING_TOP),
+                                bottom: Val::Px(comic_layout::PADDING_BOTTOM),
+                            },
+                            column_gap: Val::Px(comic_layout::COLUMN_GAP),
+                            row_gap: Val::Px(comic_layout::ROW_GAP),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                        ScrollPosition::default(),
+                        ContentSizeInfo::default(),
+                    ))
+                    .with_children(|grid| {
+                        if let Some(ref error) = comics_state.error {
+                            // 错误信息
+                            grid.spawn((
+                                Text::new(format!("加载失败: {}", error)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(1.0, 0.4, 0.4)),
+                            ));
+                        } else if comics_state.comics.is_empty() && !comics_state.is_loading {
+                            // 空列表
+                            grid.spawn((
+                                Text::new("该分类下暂无漫画"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        } else {
+                            // 漫画卡片
+                            for comic in &comics_state.comics {
+                                spawn_comic_card(grid, comic, &font, &image_cache);
+                            }
+                        }
+                    })
+                    .id();
+
+                // 创建滚动条
+                spawn_scrollbar_inline(wrapper, scroll_container_id);
+            });
+
+            // 分页控件（只在有数据时显示）
+            if comics_state.total_pages > 0 {
+                root.spawn((
+                    PaginationControl,
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(50.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(20.0),
+                        border: UiRect::top(Val::Px(1.0)),
+                        ..default()
+                    },
+                    BorderColor::all(AppColors::BORDER),
+                    BackgroundColor(AppColors::SURFACE),
+                ))
+                .with_children(|pagination| {
+                    // 上一页按钮
+                    pagination
+                        .spawn((
+                            PrevPageButton,
+                            Button,
+                            Node {
+                                width: Val::Px(80.0),
+                                height: Val::Px(36.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(if comics_state.page > 1 {
+                                AppColors::PRIMARY
+                            } else {
+                                AppColors::SECONDARY
+                            }),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("上一页"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                    // 页码显示
+                    pagination.spawn((
+                        PageNumberText,
+                        Text::new(format!(
+                            "{} / {}",
+                            comics_state.page, comics_state.total_pages
+                        )),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+
+                    // 下一页按钮
+                    pagination
+                        .spawn((
+                            NextPageButton,
+                            Button,
+                            Node {
+                                width: Val::Px(80.0),
+                                height: Val::Px(36.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BackgroundColor(if comics_state.page < comics_state.total_pages {
+                                AppColors::PRIMARY
+                            } else {
+                                AppColors::SECONDARY
+                            }),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("下一页"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                });
+            }
+        })
+        .id();
+
+    // 如果有 ContentArea，将漫画列表作为其子实体
+    if let Some(content_entity) = content_area {
+        commands.entity(content_entity).add_child(comics_root);
+    }
+}
+
+/// 更新漫画封面图片（当图片加载完成时替换占位符）
+pub fn update_comics_images(
+    mut commands: Commands,
+    image_cache: Res<ImageCache>,
+    comics_state: Res<ComicsListState>,
+    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
+    card_query: Query<&ComicCard>,
+) {
+    // 每帧都检查占位符（不仅仅是 image_cache 变化时）
+    // 因为占位符可能在 image_cache 变化后的帧才创建
+    let placeholder_count = placeholder_query.iter().count();
+    if placeholder_count == 0 {
+        return;
+    }
+
+    for (placeholder_entity, child_of) in placeholder_query.iter() {
+        // 找到父卡片
+        let parent_entity: Entity = child_of.parent();
+        let Ok(card) = card_query.get(parent_entity) else {
+            continue;
+        };
+
+        // 找到对应的漫画
+        let Some(comic) = comics_state.comics.iter().find(|c| c.id == card.comic_id) else {
+            continue;
+        };
+
+        let thumb_url = comic.thumb.url();
+
+        // 检查图片是否已加载
+        if let Some(handle) = image_cache.get(&thumb_url) {
+            // 删除占位符，添加实际图片
+            commands.entity(placeholder_entity).despawn();
+            // 创建新的图片实体并插入到父卡片的第一个位置
+            let image_entity = commands
+                .spawn((
+                    ComicThumbnail {
+                        url: thumb_url.clone(),
+                    },
+                    ImageNode::new(handle.clone()),
+                    Node {
+                        width: Val::Px(164.0),
+                        height: Val::Px(220.0),
+                        ..default()
+                    },
+                ))
+                .id();
+
+            // 插入到第一个位置（在标题之前）
+            commands
+                .entity(parent_entity)
+                .insert_children(0, &[image_entity]);
+        }
+    }
+}

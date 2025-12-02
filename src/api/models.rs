@@ -43,16 +43,20 @@ pub struct Comic {
     #[serde(rename = "_id")]
     pub id: String,
     pub title: String,
+    #[serde(default)]
     pub author: String,
-    #[serde(rename = "pagesCount")]
+    #[serde(rename = "pagesCount", default)]
     pub pages_count: i32,
-    #[serde(rename = "epsCount")]
+    #[serde(rename = "epsCount", default)]
     pub eps_count: i32,
+    #[serde(default)]
     pub finished: bool,
+    #[serde(default)]
     pub categories: Vec<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub thumb: ImageInfo,
-    #[serde(rename = "likesCount")]
+    #[serde(rename = "likesCount", default)]
     pub likes_count: i64,
     #[serde(rename = "viewsCount", default)]
     pub views_count: i64,
