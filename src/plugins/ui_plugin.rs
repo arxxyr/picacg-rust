@@ -220,6 +220,9 @@ impl Plugin for UiPlugin {
                     pause_download_button_interaction,
                     resume_download_button_interaction,
                     delete_download_button_interaction,
+                    // 已下载项按钮交互
+                    redownload_button_interaction,
+                    open_completed_folder_button_interaction,
                     refresh_downloads_ui,
                     handle_downloads_scroll,
                     update_downloads_content_size,

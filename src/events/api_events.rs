@@ -242,3 +242,9 @@ pub struct DownloadPausedEvent {
 pub struct ResumeDownloadRequest {
     pub comic_id: String,
 }
+
+/// 重新下载请求（检查更新/补全缺失）
+#[derive(Message)]
+pub struct RedownloadRequest {
+    pub comic_id: String,
+}

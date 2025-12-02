@@ -59,6 +59,7 @@ impl Plugin for ApiPlugin {
             .add_message::<DownloadFailedEvent>()
             .add_message::<DownloadPausedEvent>()
             .add_message::<ResumeDownloadRequest>()
+            .add_message::<RedownloadRequest>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -99,6 +100,7 @@ impl Plugin for ApiPlugin {
                     handle_download_failed,
                     handle_download_paused,
                     handle_resume_download,
+                    handle_redownload,
                 ),
             )
             // 启动时自动登录系统
@@ -1434,5 +1436,185 @@ fn handle_resume_download(
             total_episodes,
             control,
         );
+    }
+}
+
+/// 处理重新下载请求（检查更新/补全缺失）
+fn handle_redownload(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<RedownloadRequest>,
+    api_client: Res<ApiClientResource>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    use crate::resources::{DownloadState, DownloadTaskMeta};
+
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+
+        // 检查是否已在下载
+        if download_state.downloading_ids.contains(&comic_id) {
+            tracing::warn!("漫画 {} 已在下载中，跳过重新下载", comic_id);
+            continue;
+        }
+
+        // 尝试加载元数据获取保存路径
+        let download_base_path = crate::config::settings::AppSettings::global()
+            .read()
+            .download_path
+            .clone();
+        let download_base_path = if download_base_path.is_empty() {
+            std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("Downloads")
+        } else {
+            std::path::PathBuf::from(&download_base_path)
+        };
+
+        // 查找对应的保存路径（遍历下载目录）
+        let mut save_path = None;
+        let mut comic_title = String::new();
+
+        if download_base_path.exists() {
+            if let Ok(entries) = std::fs::read_dir(&download_base_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if let Ok(meta) = DownloadTaskMeta::load(path.to_str().unwrap_or_default())
+                        {
+                            if meta.comic_id == comic_id {
+                                save_path = Some(path.to_string_lossy().to_string());
+                                comic_title = meta.comic_title.clone();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(save_path) = save_path else {
+            tracing::warn!("找不到漫画 {} 的下载目录", comic_id);
+            continue;
+        };
+
+        tracing::info!("开始重新下载/检查更新: {} -> {}", comic_title, save_path);
+
+        // 先移除已完成的任务（如果存在）
+        download_state.remove_task(&comic_id);
+
+        let client = api_client.0.clone();
+        let comic_id_clone = comic_id.clone();
+        let save_path_clone = save_path.clone();
+
+        // 启动异步任务：获取最新章节列表并开始下载
+        runtime.spawn_background_task(|mut ctx| async move {
+            use crate::api::endpoints::comic::{GetComicDetailRequest, GetEpisodesRequest};
+
+            // 获取漫画详情
+            let detail_request = GetComicDetailRequest {
+                comic_id: comic_id_clone.clone(),
+            };
+            let comic = match client.request(detail_request).await {
+                Ok(resp) => resp.comic,
+                Err(e) => {
+                    tracing::error!("获取漫画详情失败: {}", e);
+                    return;
+                }
+            };
+
+            // 获取所有章节
+            let mut all_episodes = Vec::new();
+            let mut page = 1;
+            loop {
+                let episodes_request = GetEpisodesRequest {
+                    comic_id: comic_id_clone.clone(),
+                    page,
+                };
+                match client.request(episodes_request).await {
+                    Ok(resp) => {
+                        let eps = &resp.eps;
+                        all_episodes.extend(eps.docs.clone());
+                        if page >= eps.pages {
+                            break;
+                        }
+                        page += 1;
+                    }
+                    Err(e) => {
+                        tracing::error!("获取章节列表失败: {}", e);
+                        return;
+                    }
+                }
+            }
+
+            // 章节顺序（正序）
+            let mut episode_orders: Vec<i32> = all_episodes.iter().map(|e| e.order).collect();
+            episode_orders.sort();
+
+            let total_episodes = episode_orders.len() as i32;
+
+            tracing::info!("重新下载: {} 共 {} 章节", comic.title, total_episodes);
+
+            // 创建新的元数据并保存
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            let meta = DownloadTaskMeta {
+                comic_id: comic_id_clone.clone(),
+                comic_title: comic.title.clone(),
+                save_path: save_path_clone.clone(),
+                episode_orders: episode_orders.clone(),
+                total_episodes,
+                state: DownloadState::Downloading {
+                    current_episode: 1,
+                    current_page: 0,
+                },
+                created_at: now,
+                updated_at: now,
+            };
+
+            if let Err(e) = meta.save() {
+                tracing::warn!("保存元数据失败: {}", e);
+            }
+
+            // 发送下载请求到主线程
+            ctx.run_on_main_thread(move |ctx| {
+                // 添加任务到状态
+                let mut download_state = ctx.world.resource_mut::<DownloadManagerState>();
+
+                // 添加新任务
+                download_state.add_task(meta.clone());
+
+                // 获取控制器
+                let control = download_state
+                    .find_task(&comic_id_clone)
+                    .map(|fsm| fsm.get_control())
+                    .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()));
+
+                // 标记为下载中
+                download_state
+                    .downloading_ids
+                    .insert(comic_id_clone.clone());
+
+                // 获取 runtime 和 api_client
+                let runtime = ctx.world.resource::<TokioTasksRuntime>();
+                let api_client = ctx.world.resource::<ApiClientResource>();
+
+                // 启动下载任务
+                spawn_download_task(
+                    runtime,
+                    api_client.0.clone(),
+                    comic_id_clone,
+                    save_path_clone,
+                    episode_orders,
+                    total_episodes,
+                    control,
+                );
+            })
+            .await;
+        });
     }
 }

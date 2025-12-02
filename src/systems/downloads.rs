@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::{
     components::{ContentArea, ContentSizeInfo, ScrollbarThumb, ScrollbarTrack},
     config::settings::AppSettings,
-    events::ResumeDownloadRequest,
+    events::{RedownloadRequest, ResumeDownloadRequest},
     resources::{ComicDownloadStatus, DownloadManagerState},
     systems::login::{AppColors, FONT_PATH},
 };
@@ -58,6 +58,7 @@ pub struct DownloadTaskList;
 /// 已完成下载项目（历史记录）
 #[derive(Debug, Clone)]
 pub struct CompletedDownload {
+    pub comic_id: String,
     pub folder_name: String,
     pub episode_count: usize,
     pub path: String,
@@ -66,12 +67,25 @@ pub struct CompletedDownload {
 /// 已下载漫画项标记
 #[derive(Component)]
 pub struct CompletedDownloadItem {
+    pub comic_id: String,
     pub path: String,
 }
 
 /// 已下载列表容器标记
 #[derive(Component)]
 pub struct CompletedDownloadList;
+
+/// 重新下载按钮标记
+#[derive(Component)]
+pub struct RedownloadButton {
+    pub comic_id: String,
+}
+
+/// 打开已下载漫画文件夹按钮
+#[derive(Component)]
+pub struct OpenCompletedFolderButton {
+    pub path: String,
+}
 
 /// 扫描下载目录，获取已完成的下载列表
 ///
@@ -118,6 +132,7 @@ fn scan_completed_downloads(
                     if meta.state.is_completed() {
                         let episode_count = meta.episode_orders.len();
                         downloads.push(CompletedDownload {
+                            comic_id: meta.comic_id.clone(),
                             folder_name,
                             episode_count,
                             path: path_str,
@@ -134,8 +149,10 @@ fn scan_completed_downloads(
                     };
 
                     // 只有包含章节的才算已下载的漫画
+                    // 注意：没有元数据的旧数据无法重新下载（没有 comic_id）
                     if episode_count > 0 {
                         downloads.push(CompletedDownload {
+                            comic_id: String::new(), // 旧数据没有 comic_id
                             folder_name,
                             episode_count,
                             path: path_str,
@@ -704,13 +721,14 @@ fn spawn_completed_download_item(
     download: &CompletedDownload,
 ) {
     let path = download.path.clone();
+    let has_comic_id = !download.comic_id.is_empty();
 
     parent
         .spawn((
             CompletedDownloadItem {
+                comic_id: download.comic_id.clone(),
                 path: download.path.clone(),
             },
-            Button,
             Node {
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Row,
@@ -768,16 +786,76 @@ fn spawn_completed_download_item(
                     ));
                 });
 
-            // 打开文件夹图标
-            item.spawn((
-                Text::new("📁"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
+            // 按钮组
+            item.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|btns| {
+                    // 重新下载/更新按钮（只有有 comic_id 的才能重新下载）
+                    if has_comic_id {
+                        btns.spawn((
+                            RedownloadButton {
+                                comic_id: download.comic_id.clone(),
+                            },
+                            Button,
+                            Node {
+                                width: Val::Px(28.0),
+                                height: Val::Px(28.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.2, 0.5, 0.3).with_alpha(0.2)),
+                            BorderColor::all(Color::srgb(0.3, 0.7, 0.4)),
+                            BorderRadius::all(Val::Px(4.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("🔄"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.3, 0.8, 0.4)),
+                            ));
+                        });
+                    }
+
+                    // 打开文件夹按钮
+                    btns.spawn((
+                        OpenCompletedFolderButton {
+                            path: download.path.clone(),
+                        },
+                        Button,
+                        Node {
+                            width: Val::Px(28.0),
+                            height: Val::Px(28.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.3, 0.3, 0.4).with_alpha(0.2)),
+                        BorderColor::all(Color::srgb(0.5, 0.5, 0.6)),
+                        BorderRadius::all(Val::Px(4.0)),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("📁"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+                    });
+                });
         });
 }
 
@@ -1196,6 +1274,83 @@ pub fn delete_download_button_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.2));
+            }
+        }
+    }
+}
+
+/// 重新下载按钮交互
+pub fn redownload_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &RedownloadButton),
+        Changed<Interaction>,
+    >,
+    mut redownload_messages: MessageWriter<RedownloadRequest>,
+) {
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let redownload_color = Color::srgb(0.3, 0.7, 0.4);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(redownload_color.with_alpha(0.4));
+
+                // 发送重新下载请求
+                redownload_messages.write(RedownloadRequest {
+                    comic_id: btn.comic_id.clone(),
+                });
+                tracing::info!("请求重新下载/检查更新: {}", btn.comic_id);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(redownload_color.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(redownload_color.with_alpha(0.2));
+            }
+        }
+    }
+}
+
+/// 打开已下载漫画文件夹按钮交互
+pub fn open_completed_folder_button_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &OpenCompletedFolderButton,
+        ),
+        Changed<Interaction>,
+    >,
+) {
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let folder_color = Color::srgb(0.5, 0.5, 0.6);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(folder_color.with_alpha(0.4));
+
+                // 打开文件夹
+                let path = std::path::Path::new(&btn.path);
+                if path.exists() {
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("explorer").arg(path).spawn();
+                    }
+                    #[cfg(target_os = "macos")]
+                    {
+                        let _ = std::process::Command::new("open").arg(path).spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+                    }
+                    tracing::info!("打开已下载漫画文件夹: {:?}", path);
+                } else {
+                    tracing::warn!("文件夹不存在: {:?}", path);
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(folder_color.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(folder_color.with_alpha(0.2));
             }
         }
     }
