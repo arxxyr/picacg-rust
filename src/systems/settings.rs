@@ -241,9 +241,11 @@ pub fn setup_settings_ui(
                             spawn_save_button(scroll, &font);
 
                             // 底部间距（确保最后的内容可以完全滚动到可见区域）
+                            // 需要足够的高度来容纳滚动，特别是在高 DPI 屏幕上
                             scroll.spawn(Node {
                                 width: Val::Percent(100.0),
-                                height: Val::Px(50.0),
+                                height: Val::Px(100.0),
+                                min_height: Val::Px(100.0),
                                 ..default()
                             });
                         })
