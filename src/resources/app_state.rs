@@ -717,7 +717,25 @@ impl DownloadManagerState {
                                 }
 
                                 tracing::info!("加载未完成的下载任务: {}", meta.comic_title);
-                                let fsm = DownloadTaskFSM::new(meta);
+                                let mut fsm = DownloadTaskFSM::new(meta);
+                                // 如果任务状态是 Downloading，自动转换为 Paused
+                                // （因为程序重启后后台下载任务已停止）
+                                if let DownloadState::Downloading {
+                                    current_episode,
+                                    current_page,
+                                } = fsm.meta.state.clone()
+                                {
+                                    fsm.meta.state = DownloadState::Paused {
+                                        current_episode,
+                                        current_page,
+                                    };
+                                    // 保存状态变更
+                                    let _ = fsm.meta.save();
+                                    tracing::info!(
+                                        "将任务状态从 Downloading 转换为 Paused: {}",
+                                        fsm.meta.comic_title
+                                    );
+                                }
                                 self.fsm_tasks.push(fsm);
                             }
                         }
