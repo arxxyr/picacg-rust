@@ -1,4 +1,8 @@
 //! 阅读器系统
+//!
+//! 阅读器功能（预留）
+
+#![allow(dead_code)]
 
 use bevy::prelude::*;
 

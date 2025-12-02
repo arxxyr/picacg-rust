@@ -2,6 +2,8 @@
 //!
 //! 实现侧边栏 + 内容区域的主布局，模仿 Python 版本的界面结构
 
+#![allow(dead_code)]
+
 use bevy::prelude::*;
 
 use crate::{
@@ -39,6 +41,12 @@ const SIDEBAR_BUTTONS: &[SidebarButtonConfig] = &[
     },
     // 导航分组
     SidebarButtonConfig {
+        route: SidebarRoute::Home,
+        label: "首页",
+        icon: "🏠",
+        section: SidebarSection::Navigation,
+    },
+    SidebarButtonConfig {
         route: SidebarRoute::Categories,
         label: "分类",
         icon: "📚",
@@ -48,6 +56,12 @@ const SIDEBAR_BUTTONS: &[SidebarButtonConfig] = &[
         route: SidebarRoute::Search,
         label: "搜索",
         icon: "🔍",
+        section: SidebarSection::Navigation,
+    },
+    SidebarButtonConfig {
+        route: SidebarRoute::Rankings,
+        label: "排行榜",
+        icon: "🏆",
         section: SidebarSection::Navigation,
     },
     // 其他分组
@@ -155,13 +169,16 @@ fn spawn_sidebar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
 /// 创建用户信息区
 fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            padding: UiRect::all(Val::Px(15.0)),
-            ..default()
-        })
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(Val::Px(15.0)),
+                ..default()
+            },
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+        ))
         .with_children(|area| {
             // 头像占位符 (100x100)
             area.spawn((
@@ -221,15 +238,18 @@ fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) 
 /// 创建菜单区域
 fn spawn_menu_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
-        .spawn(Node {
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
-            flex_basis: Val::Px(0.0),
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::horizontal(Val::Px(10.0)),
-            overflow: Overflow::scroll_y(),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::horizontal(Val::Px(10.0)),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+        ))
         .with_children(|menu| {
             // 用户分组
             spawn_section_header(menu, "用户", font);
@@ -376,11 +396,13 @@ pub fn sidebar_button_interaction(
     for (interaction, mut bg_color, mut border_color, sidebar_btn) in &mut interaction_query {
         // 判断是否为当前激活的路由
         let is_active = match (sidebar_btn.route, current_route.get()) {
+            (SidebarRoute::Home, AppRoute::Home) => true,
             (SidebarRoute::Categories, AppRoute::Categories) => true,
             (SidebarRoute::Categories, AppRoute::ComicsList) => true,
             (SidebarRoute::Categories, AppRoute::ComicDetail) => true,
             (SidebarRoute::Categories, AppRoute::ReadView) => true,
             (SidebarRoute::Search, AppRoute::Search) => true,
+            (SidebarRoute::Rankings, AppRoute::Rankings) => true,
             (SidebarRoute::Favorites, AppRoute::Favorites) => true,
             (SidebarRoute::Downloads, AppRoute::Downloads) => true,
             (SidebarRoute::Settings, AppRoute::Settings) => true,
@@ -397,6 +419,7 @@ pub fn sidebar_button_interaction(
                     SidebarRoute::Home => AppRoute::Home,
                     SidebarRoute::Categories => AppRoute::Categories,
                     SidebarRoute::Search => AppRoute::Search,
+                    SidebarRoute::Rankings => AppRoute::Rankings,
                     SidebarRoute::Favorites => AppRoute::Favorites,
                     SidebarRoute::Downloads => AppRoute::Downloads,
                     SidebarRoute::Settings => AppRoute::Settings,
@@ -437,11 +460,13 @@ pub fn update_sidebar_active_state(
 
     for (sidebar_btn, mut bg_color, mut border_color) in &mut button_query {
         let is_active = match (sidebar_btn.route, current_route.get()) {
+            (SidebarRoute::Home, AppRoute::Home) => true,
             (SidebarRoute::Categories, AppRoute::Categories) => true,
             (SidebarRoute::Categories, AppRoute::ComicsList) => true,
             (SidebarRoute::Categories, AppRoute::ComicDetail) => true,
             (SidebarRoute::Categories, AppRoute::ReadView) => true,
             (SidebarRoute::Search, AppRoute::Search) => true,
+            (SidebarRoute::Rankings, AppRoute::Rankings) => true,
             (SidebarRoute::Favorites, AppRoute::Favorites) => true,
             (SidebarRoute::Downloads, AppRoute::Downloads) => true,
             (SidebarRoute::Settings, AppRoute::Settings) => true,

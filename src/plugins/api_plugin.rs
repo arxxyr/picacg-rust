@@ -2,11 +2,16 @@
 //!
 //! 处理与后端 API 的异步通信
 
+#![allow(dead_code)]
+
 use bevy::{asset::RenderAssetUsages, prelude::*};
 use bevy_tokio_tasks::TokioTasksRuntime;
 
 use crate::{
-    api::ApiClient, config::settings::AppSettings, events::*, resources::*,
+    api::ApiClient,
+    config::settings::AppSettings,
+    events::*,
+    resources::{DownloadManagerState, DownloadTaskMeta, SharedTaskControl, *},
     systems::login::save_credentials_on_login,
 };
 
@@ -18,6 +23,8 @@ impl Plugin for ApiPlugin {
         app
             // 注册 API 客户端资源
             .insert_resource(ApiClientResource::new())
+            // 注册下载管理状态
+            .init_resource::<DownloadManagerState>()
             // 注册消息 (Bevy 0.17 使用 add_message)
             .add_message::<LoginRequestEvent>()
             .add_message::<LoginResponseEvent>()
@@ -45,7 +52,14 @@ impl Plugin for ApiPlugin {
             .add_message::<ImageLoadFailedEvent>()
             .add_message::<PunchInRequestEvent>()
             .add_message::<PunchInResponseEvent>()
-            // 注册系统
+            // 下载相关消息
+            .add_message::<DownloadComicRequest>()
+            .add_message::<DownloadProgressEvent>()
+            .add_message::<DownloadCompletedEvent>()
+            .add_message::<DownloadFailedEvent>()
+            .add_message::<DownloadPausedEvent>()
+            .add_message::<ResumeDownloadRequest>()
+            // 注册系统 - 登录和分类
             .add_systems(
                 Update,
                 (
@@ -55,20 +69,57 @@ impl Plugin for ApiPlugin {
                     handle_categories_response,
                     handle_load_comics,
                     handle_comics_response,
+                    handle_load_comic_detail,
+                    handle_comic_detail_response,
+                ),
+            )
+            // 注册系统 - 章节、点赞、收藏
+            .add_systems(
+                Update,
+                (
+                    handle_load_episodes,
+                    handle_episodes_response,
+                    handle_like_comic,
+                    handle_like_response,
+                    handle_favorite_comic,
+                    handle_favorite_response,
                     handle_load_image,
                     handle_image_response,
+                ),
+            )
+            // 注册系统 - 打卡和下载
+            .add_systems(
+                Update,
+                (
                     handle_punch_in_request,
                     handle_punch_in_response,
+                    handle_download_comic,
+                    handle_download_progress,
+                    handle_download_completed,
+                    handle_download_failed,
+                    handle_download_paused,
+                    handle_resume_download,
                 ),
             )
             // 启动时自动登录系统
-            .add_systems(Startup, auto_login_on_startup);
+            .add_systems(Startup, auto_login_on_startup)
+            // 检查自动登录计时器（在 Update 中运行）
+            .add_systems(Update, check_auto_login_timer);
     }
 }
 
 /// API 客户端资源包装
 #[derive(Resource)]
 pub struct ApiClientResource(pub ApiClient);
+
+/// 自动登录延迟计时器
+#[derive(Resource)]
+pub struct AutoLoginTimer {
+    pub timer: Timer,
+    pub should_login: bool,
+    pub email: String,
+    pub password: String,
+}
 
 impl ApiClientResource {
     pub fn new() -> Self {
@@ -283,6 +334,45 @@ fn handle_comics_response(
     }
 }
 
+/// 获取图片缓存目录
+fn get_image_cache_path() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("cache")
+        .join("images")
+}
+
+/// 将 URL 转换为缓存文件路径
+fn url_to_cache_path(url: &str) -> std::path::PathBuf {
+    use std::{
+        collections::hash_map::DefaultHasher,
+        hash::{Hash, Hasher},
+    };
+
+    // 使用 URL 的 hash 作为文件名，避免特殊字符问题
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // 提取扩展名
+    let ext = url
+        .rsplit('.')
+        .next()
+        .and_then(|e| {
+            let e = e.to_lowercase();
+            if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
+                Some(e)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "jpg".to_string());
+
+    get_image_cache_path().join(format!("{:016x}.{}", hash, ext))
+}
+
 /// 处理图片加载请求
 fn handle_load_image(
     runtime: ResMut<TokioTasksRuntime>,
@@ -300,8 +390,33 @@ fn handle_load_image(
         image_cache.mark_loading(url.clone());
 
         runtime.spawn_background_task(move |mut ctx| async move {
-            // 下载图片
-            let result = download_image(&url).await;
+            let cache_path = url_to_cache_path(&url);
+
+            // 先尝试从本地缓存加载
+            let result = if cache_path.exists() {
+                match tokio::fs::read(&cache_path).await {
+                    Ok(data) => Ok(data),
+                    Err(_) => {
+                        // 缓存文件读取失败，从网络下载
+                        download_image(&url).await
+                    }
+                }
+            } else {
+                // 从网络下载
+                let data = download_image(&url).await;
+
+                // 下载成功后保存到缓存
+                if let Ok(ref image_data) = data {
+                    // 确保缓存目录存在
+                    if let Some(parent) = cache_path.parent() {
+                        let _ = tokio::fs::create_dir_all(parent).await;
+                    }
+                    // 保存到缓存（忽略保存失败）
+                    let _ = tokio::fs::write(&cache_path, image_data).await;
+                }
+
+                data
+            };
 
             ctx.run_on_main_thread(move |ctx| {
                 match result {
@@ -349,14 +464,73 @@ fn handle_load_image(
     }
 }
 
-/// 下载图片数据
+/// 下载图片数据（使用代理设置和签名头部）
 async fn download_image(url: &str) -> Result<Vec<u8>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
+    use hmac::{Hmac, Mac};
+    use reqwest::Proxy;
+    use sha2::Sha256;
+
+    const API_KEY: &str = "C69BAF41DA5ABD1FFEDC6D2FEA56B";
+    const SECRET_KEY: &str = r"~d}$Q7$eIni=V)9\RK/P.RM4;9[7|@/CA}b~OW!3?EV`:<>M7pddUBL5n|0/*Cn";
+    const VERSION: &str = "2.2.1.3.3.4";
+    const BUILD_VERSION: &str = "45";
+    const APP_UUID: &str = "defaultUuid";
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    let settings = AppSettings::global().read();
+    let proxy_url = settings.proxy.to_proxy_url();
+    drop(settings);
+
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::limited(10));
+
+    // 添加代理配置
+    if let Some(ref proxy_url_str) = proxy_url {
+        let proxy = Proxy::all(proxy_url_str).map_err(|e| format!("代理配置错误: {}", e))?;
+        builder = builder.proxy(proxy);
+    }
+
+    let client = builder.build().map_err(|e| e.to_string())?;
+
+    // 生成签名头部
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+
+    let method = "GET";
+    let src = format!("{}{}{}{}{}", url, now, nonce, method, API_KEY);
+
+    let mut mac =
+        HmacSha256::new_from_slice(SECRET_KEY.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(src.to_lowercase().as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+
+    let response = client
+        .get(url)
+        .header("api-key", API_KEY)
+        .header("accept", "application/vnd.picacomic.com.v1+json")
+        .header("app-channel", "3")
+        .header("time", &now)
+        .header("app-uuid", APP_UUID)
+        .header("nonce", &nonce)
+        .header("signature", &signature)
+        .header("app-version", VERSION)
+        .header("image-quality", "original")
+        .header("app-platform", "android")
+        .header("app-build-version", BUILD_VERSION)
+        .header("user-agent", "okhttp/3.8.1")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status()));
@@ -423,8 +597,8 @@ fn handle_punch_in_response(mut messages: MessageReader<PunchInResponseEvent>) {
     }
 }
 
-/// 启动时自动登录系统
-fn auto_login_on_startup(mut login_messages: MessageWriter<LoginRequestEvent>) {
+/// 启动时初始化自动登录计时器
+fn auto_login_on_startup(mut commands: Commands) {
     let settings = AppSettings::global().read();
 
     // 检查是否启用自动登录且有保存的凭据
@@ -436,7 +610,829 @@ fn auto_login_on_startup(mut login_messages: MessageWriter<LoginRequestEvent>) {
         let password = settings.login.saved_password.clone();
         drop(settings); // 释放锁
 
-        tracing::info!("自动登录中...");
-        login_messages.write(LoginRequestEvent { email, password });
+        tracing::info!("启用自动登录，将在 3 秒后自动登录...");
+
+        // 创建 3 秒延迟计时器
+        commands.insert_resource(AutoLoginTimer {
+            timer: Timer::from_seconds(3.0, TimerMode::Once),
+            should_login: true,
+            email,
+            password,
+        });
+    }
+}
+
+/// 检查自动登录计时器并触发登录
+fn check_auto_login_timer(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut timer: Option<ResMut<AutoLoginTimer>>,
+    mut login_messages: MessageWriter<LoginRequestEvent>,
+) {
+    let Some(ref mut auto_login) = timer else {
+        return;
+    };
+
+    if !auto_login.should_login {
+        return;
+    }
+
+    auto_login.timer.tick(time.delta());
+
+    if auto_login.timer.just_finished() {
+        tracing::info!("自动登录计时完成，正在登录...");
+        login_messages.write(LoginRequestEvent {
+            email: auto_login.email.clone(),
+            password: auto_login.password.clone(),
+        });
+        auto_login.should_login = false;
+
+        // 移除计时器资源
+        commands.remove_resource::<AutoLoginTimer>();
+    }
+}
+
+// ==================== 漫画详情处理 ====================
+
+/// 处理加载漫画详情请求
+fn handle_load_comic_detail(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadComicDetailRequest>,
+    api_client: Res<ApiClientResource>,
+    mut detail_state: ResMut<ComicDetailState>,
+) {
+    for event in messages.read() {
+        detail_state.is_loading = true;
+        detail_state.error = None;
+        detail_state.comic_id = event.comic_id.clone();
+
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::GetComicDetailRequest;
+
+            let request = GetComicDetailRequest { comic_id };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(ComicDetailLoadedEvent {
+                            comic: response.comic,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(ComicDetailLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理漫画详情加载响应
+fn handle_comic_detail_response(
+    mut loaded_messages: MessageReader<ComicDetailLoadedEvent>,
+    mut failed_messages: MessageReader<ComicDetailLoadFailedEvent>,
+    mut detail_state: ResMut<ComicDetailState>,
+    mut image_messages: MessageWriter<LoadImageRequest>,
+    mut episodes_messages: MessageWriter<LoadEpisodesRequest>,
+) {
+    for event in loaded_messages.read() {
+        detail_state.is_loading = false;
+        detail_state.is_favorite = event.comic.is_favourite.unwrap_or(false);
+        detail_state.is_liked = event.comic.is_liked.unwrap_or(false);
+        detail_state.comic = Some(event.comic.clone());
+
+        // 加载封面图片
+        image_messages.write(LoadImageRequest {
+            url: event.comic.thumb.url(),
+        });
+
+        // 加载章节列表
+        episodes_messages.write(LoadEpisodesRequest {
+            comic_id: detail_state.comic_id.clone(),
+            page: 1,
+        });
+    }
+
+    for event in failed_messages.read() {
+        detail_state.is_loading = false;
+        detail_state.error = Some(event.error.clone());
+    }
+}
+
+// ==================== 章节列表处理 ====================
+
+/// 处理加载章节列表请求
+fn handle_load_episodes(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadEpisodesRequest>,
+    api_client: Res<ApiClientResource>,
+    mut detail_state: ResMut<ComicDetailState>,
+) {
+    for event in messages.read() {
+        detail_state.is_loading_episodes = true;
+
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+        let page = event.page;
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::GetEpisodesRequest;
+
+            let request = GetEpisodesRequest { comic_id, page };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(EpisodesLoadedEvent {
+                            episodes: response.eps.docs,
+                            total_pages: response.eps.pages,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(EpisodesLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理章节列表加载响应
+fn handle_episodes_response(
+    mut loaded_messages: MessageReader<EpisodesLoadedEvent>,
+    mut failed_messages: MessageReader<EpisodesLoadFailedEvent>,
+    mut detail_state: ResMut<ComicDetailState>,
+) {
+    for event in loaded_messages.read() {
+        detail_state.is_loading_episodes = false;
+        detail_state.episodes = event.episodes.clone();
+        detail_state.episodes_total_pages = event.total_pages;
+    }
+
+    for event in failed_messages.read() {
+        detail_state.is_loading_episodes = false;
+        // 不覆盖漫画详情的错误
+        tracing::warn!("章节加载失败: {}", event.error);
+    }
+}
+
+// ==================== 点赞处理 ====================
+
+/// 处理点赞漫画请求
+fn handle_like_comic(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LikeComicRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::LikeComicRequest as ApiLikeRequest;
+
+            let request = ApiLikeRequest { comic_id };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(LikeComicResponse {
+                            action: response.action,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    tracing::warn!("点赞失败: {}", e);
+                }
+            }
+        });
+    }
+}
+
+/// 处理点赞响应
+fn handle_like_response(
+    mut messages: MessageReader<LikeComicResponse>,
+    mut detail_state: ResMut<ComicDetailState>,
+) {
+    for event in messages.read() {
+        detail_state.is_liked = event.action == "like";
+        tracing::info!("点赞操作: {}", event.action);
+    }
+}
+
+// ==================== 收藏处理 ====================
+
+/// 处理收藏漫画请求
+fn handle_favorite_comic(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<FavoriteComicRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::FavoriteComicRequest as ApiFavoriteRequest;
+
+            let request = ApiFavoriteRequest { comic_id };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(FavoriteComicResponse {
+                            action: response.action,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    tracing::warn!("收藏失败: {}", e);
+                }
+            }
+        });
+    }
+}
+
+/// 处理收藏响应
+fn handle_favorite_response(
+    mut messages: MessageReader<FavoriteComicResponse>,
+    mut detail_state: ResMut<ComicDetailState>,
+) {
+    for event in messages.read() {
+        detail_state.is_favorite = event.action == "favorite";
+        tracing::info!("收藏操作: {}", event.action);
+    }
+}
+
+// ==================== 下载处理 ====================
+
+/// 获取下载保存路径（公开版本，供其他模块调用）
+pub fn get_download_base_path_public() -> std::path::PathBuf {
+    get_download_base_path()
+}
+
+/// 获取下载保存路径
+/// 优先使用设置中的自定义路径，否则使用程序目录下的 Downloads 文件夹
+fn get_download_base_path() -> std::path::PathBuf {
+    // 先检查设置中是否有自定义路径
+    let settings = AppSettings::global().read();
+    if !settings.download_path.is_empty() {
+        return std::path::PathBuf::from(&settings.download_path);
+    }
+    drop(settings);
+
+    // 使用程序所在目录的 Downloads 文件夹
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Downloads")
+}
+
+/// 清理文件名中的非法字符
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect()
+}
+
+/// 处理下载漫画请求（FSM 架构）
+fn handle_download_comic(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<DownloadComicRequest>,
+    api_client: Res<ApiClientResource>,
+    mut download_state: ResMut<DownloadManagerState>,
+    detail_state: Res<ComicDetailState>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+        let comic_title = event.comic_title.clone();
+
+        // 检查是否已在下载
+        if download_state.downloading_ids.contains(&comic_id) {
+            tracing::warn!("漫画 {} 已在下载队列中", comic_id);
+            continue;
+        }
+
+        // 确定要下载的章节
+        let mut episodes_to_download: Vec<i32> = if event.episodes.is_empty() {
+            // 下载所有章节
+            detail_state.episodes.iter().map(|e| e.order).collect()
+        } else {
+            event.episodes.clone()
+        };
+        // 从第一章开始下载（正序）
+        episodes_to_download.sort();
+
+        if episodes_to_download.is_empty() {
+            tracing::warn!("没有章节可下载");
+            continue;
+        }
+
+        let save_path = get_download_base_path()
+            .join(sanitize_filename(&comic_title))
+            .to_string_lossy()
+            .to_string();
+
+        // 创建 FSM 任务元数据
+        let meta = DownloadTaskMeta::new(
+            comic_id.clone(),
+            comic_title.clone(),
+            episodes_to_download.clone(),
+            save_path.clone(),
+        );
+
+        // 保存元数据到文件
+        if let Err(e) = meta.save() {
+            tracing::error!("保存下载元数据失败: {}", e);
+        }
+
+        // 添加到下载状态
+        download_state.downloading_ids.insert(comic_id.clone());
+        let fsm = download_state.add_task(meta);
+        let control = fsm.get_control();
+
+        // 启动下载
+        if let Err(e) = fsm.start() {
+            tracing::error!("启动下载失败: {}", e);
+        }
+
+        let total_episodes = episodes_to_download.len() as i32;
+        tracing::info!(
+            "开始下载漫画: {} ({} 章节) -> {}",
+            comic_title,
+            total_episodes,
+            save_path
+        );
+
+        let client = api_client.0.clone();
+
+        // 启动后台下载任务
+        spawn_download_task(
+            runtime.as_ref(),
+            client,
+            comic_id,
+            save_path,
+            episodes_to_download,
+            total_episodes,
+            control,
+        );
+    }
+}
+
+/// 启动后台下载任务
+fn spawn_download_task(
+    runtime: &TokioTasksRuntime,
+    client: ApiClient,
+    comic_id: String,
+    save_path: String,
+    episodes_to_download: Vec<i32>,
+    total_episodes: i32,
+    control: std::sync::Arc<SharedTaskControl>,
+) {
+    runtime.spawn_background_task(move |mut ctx| async move {
+        let download_path = std::path::PathBuf::from(&save_path);
+
+        // 创建下载目录
+        if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(DownloadFailedEvent {
+                    comic_id,
+                    error: format!("创建目录失败: {}", e),
+                });
+            })
+            .await;
+            return;
+        }
+
+        // 逐章节下载
+        for (ep_idx, episode_order) in episodes_to_download.iter().enumerate() {
+            let episode_order = *episode_order;
+
+            // 检查是否已暂停
+            if control.is_pause_requested() {
+                tracing::info!("下载已暂停: {}", comic_id);
+                let comic_id_clone = comic_id.clone();
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadPausedEvent {
+                        comic_id: comic_id_clone,
+                    });
+                })
+                .await;
+                return;
+            }
+
+            // 发送进度更新
+            let comic_id_clone = comic_id.clone();
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(DownloadProgressEvent {
+                    comic_id: comic_id_clone,
+                    current_episode: ep_idx as i32 + 1,
+                    total_episodes,
+                    current_page: 0,
+                    total_pages: 0,
+                    status: format!("正在获取第 {} 章图片列表...", episode_order),
+                });
+            })
+            .await;
+
+            // 创建章节目录
+            let ep_folder = download_path.join(format!("第{}章", episode_order));
+            if let Err(e) = tokio::fs::create_dir_all(&ep_folder).await {
+                let comic_id_clone = comic_id.clone();
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadFailedEvent {
+                        comic_id: comic_id_clone,
+                        error: format!("创建章节目录失败: {}", e),
+                    });
+                })
+                .await;
+                return;
+            }
+
+            // 获取该章节所有图片
+            let mut all_pictures = Vec::new();
+            let mut page = 1;
+            loop {
+                use crate::api::endpoints::comic::GetPicturesRequest;
+
+                let request = GetPicturesRequest {
+                    comic_id: comic_id.clone(),
+                    episode_order,
+                    page,
+                };
+
+                match client.request(request).await {
+                    Ok(response) => {
+                        all_pictures.extend(response.pages.docs);
+                        if page >= response.pages.pages {
+                            break;
+                        }
+                        page += 1;
+                    }
+                    Err(e) => {
+                        let comic_id_clone = comic_id.clone();
+                        let error = format!("获取第 {} 章图片列表失败: {}", episode_order, e);
+                        ctx.run_on_main_thread(move |ctx| {
+                            ctx.world.write_message(DownloadFailedEvent {
+                                comic_id: comic_id_clone,
+                                error,
+                            });
+                        })
+                        .await;
+                        return;
+                    }
+                }
+            }
+
+            let total_pages = all_pictures.len() as i32;
+            tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
+
+            // 下载每张图片
+            let mut success_count = 0;
+            let mut skip_count = 0;
+            let mut fail_count = 0;
+
+            for (pic_idx, picture) in all_pictures.iter().enumerate() {
+                // 检查是否已暂停
+                if control.is_pause_requested() {
+                    tracing::info!("下载已暂停: {}", comic_id);
+                    let comic_id_clone = comic_id.clone();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(DownloadPausedEvent {
+                            comic_id: comic_id_clone,
+                        });
+                    })
+                    .await;
+                    return;
+                }
+
+                let url = picture.media.url();
+
+                // 发送进度更新
+                let comic_id_clone = comic_id.clone();
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadProgressEvent {
+                        comic_id: comic_id_clone,
+                        current_episode: ep_idx as i32 + 1,
+                        total_episodes,
+                        current_page: pic_idx as i32 + 1,
+                        total_pages,
+                        status: format!("第{}章 {}/{}", episode_order, pic_idx + 1, total_pages),
+                    });
+                })
+                .await;
+
+                // 确定文件扩展名
+                let ext = url
+                    .rsplit('.')
+                    .next()
+                    .and_then(|e| {
+                        let e = e.to_lowercase();
+                        if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
+                            Some(e)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "jpg".to_string());
+
+                let file_path = ep_folder.join(format!("{:04}.{}", pic_idx + 1, ext));
+
+                // 如果文件已存在，跳过（支持断点续传）
+                if file_path.exists() {
+                    skip_count += 1;
+                    continue;
+                }
+
+                // 下载图片
+                match download_image_to_file(&url, &file_path).await {
+                    Ok(_) => {
+                        success_count += 1;
+                    }
+                    Err(e) => {
+                        fail_count += 1;
+                        tracing::error!(
+                            "✗ 第{}章 {}/{} 下载失败: {}",
+                            episode_order,
+                            pic_idx + 1,
+                            total_pages,
+                            e
+                        );
+                    }
+                }
+            }
+
+            tracing::info!(
+                "第 {} 章下载完成: 成功={}, 跳过={}, 失败={}",
+                episode_order,
+                success_count,
+                skip_count,
+                fail_count
+            );
+        }
+
+        // 下载完成
+        let comic_id_clone = comic_id.clone();
+        let save_path_clone = save_path.clone();
+        ctx.run_on_main_thread(move |ctx| {
+            ctx.world.write_message(DownloadCompletedEvent {
+                comic_id: comic_id_clone,
+                save_path: save_path_clone,
+            });
+        })
+        .await;
+    });
+}
+
+/// 下载图片到文件（使用代理设置和签名头部）
+async fn download_image_to_file(url: &str, file_path: &std::path::Path) -> Result<(), String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use hmac::{Hmac, Mac};
+    use reqwest::Proxy;
+    use sha2::Sha256;
+
+    const API_KEY: &str = "C69BAF41DA5ABD1FFEDC6D2FEA56B";
+    const SECRET_KEY: &str = r"~d}$Q7$eIni=V)9\RK/P.RM4;9[7|@/CA}b~OW!3?EV`:<>M7pddUBL5n|0/*Cn";
+    const VERSION: &str = "2.2.1.3.3.4";
+    const BUILD_VERSION: &str = "45";
+    const APP_UUID: &str = "defaultUuid";
+
+    type HmacSha256 = Hmac<Sha256>;
+
+    let settings = AppSettings::global().read();
+    let proxy_url = settings.proxy.to_proxy_url();
+    drop(settings);
+
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::limited(10));
+
+    // 添加代理配置
+    if let Some(ref proxy_url_str) = proxy_url {
+        tracing::debug!("下载使用代理: {}", proxy_url_str);
+        let proxy = Proxy::all(proxy_url_str).map_err(|e| format!("代理配置错误: {}", e))?;
+        builder = builder.proxy(proxy);
+    }
+
+    let client = builder.build().map_err(|e| e.to_string())?;
+
+    // 生成签名头部（参考 Python 的 ToolUtil.GetHeader）
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .to_string();
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+
+    // 对于 CDN URL，使用完整 URL 作为 path 进行签名
+    let method = "GET";
+    let src = format!("{}{}{}{}{}", url, now, nonce, method, API_KEY);
+
+    let mut mac =
+        HmacSha256::new_from_slice(SECRET_KEY.as_bytes()).expect("HMAC can take key of any size");
+    mac.update(src.to_lowercase().as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+
+    // 发送带签名头部的请求
+    let response = client
+        .get(url)
+        .header("api-key", API_KEY)
+        .header("accept", "application/vnd.picacomic.com.v1+json")
+        .header("app-channel", "3")
+        .header("time", &now)
+        .header("app-uuid", APP_UUID)
+        .header("nonce", &nonce)
+        .header("signature", &signature)
+        .header("app-version", VERSION)
+        .header("image-quality", "original")
+        .header("app-platform", "android")
+        .header("app-build-version", BUILD_VERSION)
+        .header("user-agent", "okhttp/3.8.1")
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP {}", response.status()));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+
+    tokio::fs::write(file_path, &bytes)
+        .await
+        .map_err(|e| format!("保存文件失败: {}", e))?;
+
+    Ok(())
+}
+
+/// 处理下载进度更新（FSM 架构）
+fn handle_download_progress(
+    mut messages: MessageReader<DownloadProgressEvent>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for event in messages.read() {
+        // 更新 FSM 任务状态
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
+            fsm.current_episode_total_pages = event.total_pages;
+            // 更新状态并保存到文件
+            if let Err(e) =
+                fsm.update_progress(event.current_episode, event.current_page, event.total_pages)
+            {
+                tracing::warn!("更新下载进度失败: {}", e);
+            }
+        }
+
+        tracing::debug!("下载进度: {} - {}", event.comic_id, event.status);
+    }
+}
+
+/// 处理下载完成（FSM 架构）
+fn handle_download_completed(
+    mut messages: MessageReader<DownloadCompletedEvent>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for event in messages.read() {
+        download_state.downloading_ids.remove(&event.comic_id);
+
+        // 更新 FSM 状态
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
+            if let Err(e) = fsm.complete() {
+                tracing::warn!("更新下载完成状态失败: {}", e);
+            }
+        }
+
+        tracing::info!("下载完成: {} -> {}", event.comic_id, event.save_path);
+    }
+}
+
+/// 处理下载失败（FSM 架构）
+fn handle_download_failed(
+    mut messages: MessageReader<DownloadFailedEvent>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for event in messages.read() {
+        download_state.downloading_ids.remove(&event.comic_id);
+
+        // 更新 FSM 状态
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
+            if let Err(e) = fsm.fail(event.error.clone()) {
+                tracing::warn!("更新下载失败状态失败: {}", e);
+            }
+        }
+
+        tracing::error!("下载失败: {} - {}", event.comic_id, event.error);
+    }
+}
+
+/// 处理下载暂停（后台任务通知主线程已暂停）（FSM 架构）
+fn handle_download_paused(
+    mut messages: MessageReader<DownloadPausedEvent>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for event in messages.read() {
+        download_state.downloading_ids.remove(&event.comic_id);
+
+        // 更新 FSM 状态
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
+            if let Err(e) = fsm.pause() {
+                tracing::warn!("更新下载暂停状态失败: {}", e);
+            }
+        }
+
+        tracing::info!("下载已暂停: {}", event.comic_id);
+    }
+}
+
+/// 处理恢复下载请求（FSM 架构）
+fn handle_resume_download(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<ResumeDownloadRequest>,
+    api_client: Res<ApiClientResource>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+
+        // 查找 FSM 任务
+        let task_info = download_state.find_task(&comic_id).map(|fsm| {
+            let mut episode_orders = fsm.meta.episode_orders.clone();
+            // 从第一章开始下载（正序）
+            episode_orders.sort();
+            (
+                fsm.meta.comic_title.clone(),
+                fsm.meta.save_path.clone(),
+                episode_orders,
+                fsm.meta.total_episodes,
+            )
+        });
+
+        let Some((comic_title, save_path, episode_orders, total_episodes)) = task_info else {
+            tracing::warn!("找不到下载任务: {}", comic_id);
+            continue;
+        };
+
+        // 检查是否已在下载
+        if download_state.downloading_ids.contains(&comic_id) {
+            tracing::warn!("漫画 {} 已在下载中", comic_id);
+            continue;
+        }
+
+        // 重置控制器并获取新的控制器
+        if let Some(fsm) = download_state.find_task_mut(&comic_id) {
+            fsm.control.reset();
+            // 更新状态为下载中
+            if let Err(e) = fsm.start() {
+                tracing::warn!("更新下载状态失败: {}", e);
+            }
+        }
+
+        let control = download_state
+            .find_task(&comic_id)
+            .map(|fsm| fsm.get_control())
+            .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()));
+
+        // 更新下载中状态
+        download_state.downloading_ids.insert(comic_id.clone());
+
+        tracing::info!("恢复下载漫画: {} -> {}", comic_title, save_path);
+
+        let client = api_client.0.clone();
+
+        // 启动后台下载任务（使用元数据中保存的章节信息，会自动跳过已存在的文件）
+        spawn_download_task(
+            runtime.as_ref(),
+            client,
+            comic_id,
+            save_path,
+            episode_orders,
+            total_episodes,
+            control,
+        );
     }
 }

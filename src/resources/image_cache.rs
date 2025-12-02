@@ -60,4 +60,14 @@ impl ImageCache {
         self.loading.remove(&url);
         self.failed.insert(url, error);
     }
+
+    /// 获取已加载图片数量
+    pub fn loaded_count(&self) -> usize {
+        self.handles.len()
+    }
+
+    /// 获取正在加载的图片数量
+    pub fn loading_count(&self) -> usize {
+        self.loading.len()
+    }
 }

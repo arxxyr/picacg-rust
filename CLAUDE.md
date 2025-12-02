@@ -2,6 +2,9 @@
 
 > 最后更新: 2025-12-02
 
+## 其他
+ - git commit 带emoji
+
 ## 框架概述
 
 **当前框架**: **Bevy 0.17.3** (ECS 架构)
@@ -170,22 +173,187 @@ let click_ratio = (track_top_y - cursor_y_bevy) / track_height;
 - 自动计算滑块大小和位置
 - DPI 缩放适配
 
-**关键组件：**
+### 关键组件
+
 | 组件 | 用途 |
 |------|------|
 | `ScrollContainer` | 可滚动容器标记 |
-| `ScrollPosition` | 滚动位置（逻辑像素） |
-| `ContentSizeInfo` | 内容/视口尺寸信息 |
-| `ScrollbarTrack` | 滚动条轨道 |
-| `ScrollbarThumb` | 滚动条滑块 |
-| `ScrollbarDragState` | 拖拽状态资源 |
+| `ScrollPosition` | Bevy 内置滚动位置，使用 `.y` 字段 |
+| `ContentSizeInfo` | 内容/视口尺寸信息（需手动更新） |
+| `ScrollbarTrack` | 滚动条轨道，存储关联的滚动容器 Entity |
+| `ScrollbarThumb` | 滚动条滑块，存储关联的滚动容器 Entity |
+| `ScrollbarDragState` | 拖拽状态资源（全局） |
+| `ScrollbarContainer` | 滚动条容器（可选） |
 
-**系统函数：**
+### 系统函数（需在 ui_plugin.rs 注册）
+
 - `update_all_scrollbar_thumbs` - 更新滑块位置和大小
 - `scrollbar_thumb_interaction` - 滑块悬停/按下状态
 - `scrollbar_track_click` - 轨道点击跳转
 - `scrollbar_thumb_drag` - 滑块拖拽
 - `reset_drag_state_on_release` - 鼠标释放时重置状态
+
+### 使用步骤
+
+**1. 在 ui_plugin.rs 注册系统（在对应页面的 Update 中）：**
+```rust
+.add_systems(
+    Update,
+    (
+        // ... 其他系统
+        update_all_scrollbar_thumbs,
+        scrollbar_thumb_interaction,
+        scrollbar_track_click,
+        scrollbar_thumb_drag,
+        reset_drag_state_on_release,
+    )
+        .run_if(in_state(AppRoute::YourPage)),
+)
+```
+
+**2. 创建可滚动容器（保存 Entity ID）：**
+```rust
+let scroll_container = parent
+    .spawn((
+        YourScrollContainerMarker,  // 自定义标记组件
+        ScrollContainer,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            overflow: Overflow::scroll_y(),  // 启用垂直滚动
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+        ScrollPosition::default(),
+        ContentSizeInfo::default(),
+    ))
+    .with_children(|content| {
+        // 滚动内容...
+    })
+    .id();  // 保存 Entity ID
+```
+
+**3. 创建滚动条（使用保存的 scroll_container Entity）：**
+```rust
+fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
+    parent
+        .spawn((
+            ScrollbarContainer { scroll_container },
+            Node {
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                width: Val::Px(12.0),  // 滚动条宽度
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .with_children(|scrollbar| {
+            // 轨道
+            scrollbar
+                .spawn((
+                    ScrollbarTrack { scroll_container },
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
+                        padding: UiRect::horizontal(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
+                    Transform::default(),  // 必须！否则 GlobalTransform 不可用
+                ))
+                .with_children(|track| {
+                    // 滑块
+                    track.spawn((
+                        ScrollbarThumb { scroll_container },
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(8.0),
+                            height: Val::Px(50.0),  // 初始高度，会被系统自动更新
+                            position_type: PositionType::Absolute,
+                            top: Val::Px(0.0),
+                            left: Val::Px(2.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
+                        Transform::default(),  // 必须！
+                    ));
+                });
+        });
+}
+```
+
+**4. 实现滚动处理系统：**
+```rust
+pub fn handle_your_scroll(
+    mut scroll_query: Query<
+        (&mut ScrollPosition, Option<&ContentSizeInfo>),
+        With<YourScrollContainerMarker>,
+    >,
+    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+) {
+    for event in mouse_wheel_events.read() {
+        let scroll_delta = match event.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
+            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
+        };
+
+        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
+            let max_scroll = content_info
+                .map(|info| (info.content_height - info.viewport_height).max(0.0))
+                .unwrap_or(0.0);
+            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
+        }
+    }
+}
+```
+
+**5. 实现内容尺寸更新系统：**
+```rust
+pub fn update_your_content_size(
+    mut scroll_query: Query<
+        (&ComputedNode, &mut ContentSizeInfo, &Children),
+        With<YourScrollContainerMarker>,
+    >,
+    children_query: Query<&ComputedNode>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+) {
+    let scale_factor = window_query
+        .single()
+        .ok()
+        .map(|w| w.scale_factor() as f32)
+        .unwrap_or(1.0);
+
+    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
+        let viewport_height = scroll_computed.size().y / scale_factor;
+
+        // 计算内容高度
+        let mut content_height = 0.0;
+        for child in children.iter() {
+            if let Ok(child_computed) = children_query.get(*child) {
+                content_height += child_computed.size().y / scale_factor;
+            }
+        }
+
+        content_info.viewport_height = viewport_height;
+        content_info.content_height = content_height;
+    }
+}
+```
+
+### 注意事项
+
+1. **Transform 组件必须添加**：轨道和滑块需要 `Transform::default()`，否则 `GlobalTransform` 不可用，导致点击/拖拽不响应
+2. **ScrollPosition 使用 `.y` 字段**：Bevy 0.17 的 `ScrollPosition` 有 `x` 和 `y` 字段
+3. **ContentSizeInfo 需手动更新**：在每帧的 Update 系统中更新 `content_height` 和 `viewport_height`
+4. **滚动容器需要 `overflow: Overflow::scroll_y()`**：启用 Bevy 内置的滚动裁剪
 
 ---
 
@@ -284,3 +452,4 @@ scrollbar.spawn((
 - [Bevy 官方文档](https://docs.rs/bevy/latest/bevy/)
 - [Tokio 官方文档](https://tokio.rs/)
 - [PicACG API 文档](../docs/)
+- python版本在"C:\Users\ffqi\dev\py\picacg-windows"

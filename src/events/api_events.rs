@@ -186,3 +186,59 @@ pub struct ImageLoadFailedEvent {
     pub url: String,
     pub error: String,
 }
+
+// ==================== 下载消息 ====================
+
+/// 下载漫画请求
+#[derive(Message)]
+pub struct DownloadComicRequest {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 漫画标题（用于创建目录）
+    pub comic_title: String,
+    /// 要下载的章节列表（空表示下载全部）
+    pub episodes: Vec<i32>,
+}
+
+/// 下载进度更新事件
+#[derive(Message)]
+pub struct DownloadProgressEvent {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 当前章节
+    pub current_episode: i32,
+    /// 总章节数
+    pub total_episodes: i32,
+    /// 当前章节已下载图片数
+    pub current_page: i32,
+    /// 当前章节总图片数
+    pub total_pages: i32,
+    /// 下载状态描述
+    pub status: String,
+}
+
+/// 下载完成事件
+#[derive(Message)]
+pub struct DownloadCompletedEvent {
+    pub comic_id: String,
+    pub save_path: String,
+}
+
+/// 下载失败事件
+#[derive(Message)]
+pub struct DownloadFailedEvent {
+    pub comic_id: String,
+    pub error: String,
+}
+
+/// 下载暂停事件（后台任务发出，通知主线程下载已暂停）
+#[derive(Message)]
+pub struct DownloadPausedEvent {
+    pub comic_id: String,
+}
+
+/// 恢复下载请求（主线程发出，请求从断点继续下载）
+#[derive(Message)]
+pub struct ResumeDownloadRequest {
+    pub comic_id: String,
+}

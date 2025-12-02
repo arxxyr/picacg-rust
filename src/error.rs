@@ -1,3 +1,7 @@
+//! 错误类型定义
+
+#![allow(dead_code)]
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]

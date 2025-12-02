@@ -1,3 +1,9 @@
+//! API 数据模型
+//!
+//! 预留的 API 响应模型，部分暂未使用
+
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 // 图片信息

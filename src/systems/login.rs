@@ -103,13 +103,16 @@ pub fn setup_login_ui(
 
             // 表单容器
             parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    width: Val::Px(400.0),
-                    padding: UiRect::all(Val::Px(20.0)),
-                    row_gap: Val::Px(15.0),
-                    ..default()
-                })
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Px(400.0),
+                        padding: UiRect::all(Val::Px(20.0)),
+                        row_gap: Val::Px(15.0),
+                        ..default()
+                    },
+                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+                ))
                 .with_children(|form| {
                     // 用户名行
                     spawn_input_row(
@@ -130,14 +133,17 @@ pub fn setup_login_ui(
                     );
 
                     // 复选框行
-                    form.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(20.0),
-                        margin: UiRect::vertical(Val::Px(5.0)),
-                        ..default()
-                    })
+                    form.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::FlexStart,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(20.0),
+                            margin: UiRect::vertical(Val::Px(5.0)),
+                            ..default()
+                        },
+                        Transform::default(), // 必须添加
+                    ))
                     .with_children(|row| {
                         // 保存密码复选框
                         spawn_checkbox(
@@ -286,12 +292,15 @@ fn spawn_input_row(
     };
 
     parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },
+            Transform::default(), // 必须添加
+        ))
         .with_children(|row| {
             // 标签
             row.spawn((

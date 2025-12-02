@@ -94,13 +94,16 @@ pub fn setup_proxy_settings_ui(
 
             // 设置容器
             parent
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    width: Val::Px(400.0),
-                    padding: UiRect::all(Val::Px(20.0)),
-                    row_gap: Val::Px(15.0),
-                    ..default()
-                })
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        width: Val::Px(400.0),
+                        padding: UiRect::all(Val::Px(20.0)),
+                        row_gap: Val::Px(15.0),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|form| {
                     // 启用代理开关
                     spawn_toggle_row(form, &font, "启用代理:", proxy_state.enabled);
@@ -127,13 +130,16 @@ pub fn setup_proxy_settings_ui(
                     );
 
                     // 按钮行
-                    form.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::SpaceBetween,
-                        column_gap: Val::Px(15.0),
-                        margin: UiRect::top(Val::Px(20.0)),
-                        ..default()
-                    })
+                    form.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::SpaceBetween,
+                            column_gap: Val::Px(15.0),
+                            margin: UiRect::top(Val::Px(20.0)),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ))
                     .with_children(|buttons| {
                         // 返回按钮
                         buttons
@@ -216,12 +222,15 @@ fn spawn_toggle_row(
     enabled: bool,
 ) {
     parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
@@ -273,12 +282,15 @@ fn spawn_proxy_type_row(
     current: ProxyType,
 ) {
     parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
         .with_children(|row| {
             row.spawn((
                 Text::new("代理类型:"),
@@ -339,12 +351,15 @@ fn spawn_input_field(
     field_type: ProxyFieldType,
 ) {
     parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),

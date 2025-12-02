@@ -2,6 +2,8 @@
 //!
 //! 定义应用状态、配置等全局资源
 
+#![allow(dead_code)]
+
 mod app_state;
 mod image_cache;
 

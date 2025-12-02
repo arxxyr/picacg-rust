@@ -301,7 +301,7 @@ pub fn scrollbar_track_click(
 
 /// 滑块拖拽系统
 pub fn scrollbar_thumb_drag(
-    mut drag_state: ResMut<ScrollbarDragState>,
+    drag_state: Res<ScrollbarDragState>,
     mouse_button: Res<ButtonInput<MouseButton>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     track_query: Query<(&ScrollbarTrack, &ComputedNode)>,

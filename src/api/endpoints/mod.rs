@@ -1,3 +1,10 @@
+//! API 端点定义
+//!
+//! 各种 API 请求/响应结构，部分功能预留
+
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub mod auth;
 pub mod category;
 pub mod comic;

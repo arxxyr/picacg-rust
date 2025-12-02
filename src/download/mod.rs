@@ -1,3 +1,10 @@
+//! 下载管理模块
+//!
+//! 后台下载管理（旧架构），已迁移至 FSM，保留供参考
+
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 pub mod manager;
 pub mod queue;
 pub mod stats;

@@ -29,6 +29,8 @@ pub enum AppRoute {
     ReadView,
     /// 搜索
     Search,
+    /// 排行榜
+    Rankings,
     /// 收藏
     Favorites,
     /// 下载管理
@@ -252,4 +254,478 @@ pub struct GlobalMessageState {
     pub error: Option<String>,
     /// 成功消息
     pub success: Option<String>,
+}
+
+/// 下载任务状态（用于 UI 显示）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ComicDownloadStatus {
+    /// 等待中
+    Waiting,
+    /// 下载中
+    Downloading,
+    /// 已暂停
+    Paused,
+    /// 已完成
+    Completed,
+    /// 失败
+    Failed(String),
+}
+
+// ==================== FSM 下载系统 ====================
+
+/// 下载状态（FSM 状态机）
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum DownloadState {
+    /// 排队中（等待下载）
+    Queued,
+    /// 下载中
+    Downloading {
+        current_episode: i32,
+        current_page: i32,
+    },
+    /// 已暂停
+    Paused {
+        current_episode: i32,
+        current_page: i32,
+    },
+    /// 已完成
+    Completed,
+    /// 失败
+    Failed(String),
+}
+
+impl Default for DownloadState {
+    fn default() -> Self {
+        Self::Queued
+    }
+}
+
+impl DownloadState {
+    /// 转换为 UI 显示状态
+    pub fn to_ui_status(&self) -> ComicDownloadStatus {
+        match self {
+            DownloadState::Queued => ComicDownloadStatus::Waiting,
+            DownloadState::Downloading { .. } => ComicDownloadStatus::Downloading,
+            DownloadState::Paused { .. } => ComicDownloadStatus::Paused,
+            DownloadState::Completed => ComicDownloadStatus::Completed,
+            DownloadState::Failed(err) => ComicDownloadStatus::Failed(err.clone()),
+        }
+    }
+
+    /// 是否可以暂停
+    pub fn can_pause(&self) -> bool {
+        matches!(
+            self,
+            DownloadState::Queued | DownloadState::Downloading { .. }
+        )
+    }
+
+    /// 是否可以恢复
+    pub fn can_resume(&self) -> bool {
+        matches!(
+            self,
+            DownloadState::Paused { .. } | DownloadState::Failed(_)
+        )
+    }
+
+    /// 是否正在下载
+    pub fn is_downloading(&self) -> bool {
+        matches!(self, DownloadState::Downloading { .. })
+    }
+
+    /// 是否已完成
+    pub fn is_completed(&self) -> bool {
+        matches!(self, DownloadState::Completed)
+    }
+
+    /// 获取当前章节
+    pub fn current_episode(&self) -> i32 {
+        match self {
+            DownloadState::Downloading {
+                current_episode, ..
+            } => *current_episode,
+            DownloadState::Paused {
+                current_episode, ..
+            } => *current_episode,
+            _ => 0,
+        }
+    }
+
+    /// 获取当前页码
+    pub fn current_page(&self) -> i32 {
+        match self {
+            DownloadState::Downloading { current_page, .. } => *current_page,
+            DownloadState::Paused { current_page, .. } => *current_page,
+            _ => 0,
+        }
+    }
+}
+
+/// 下载任务元数据（持久化到 JSON 文件）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DownloadTaskMeta {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 漫画标题
+    pub comic_title: String,
+    /// 总章节数
+    pub total_episodes: i32,
+    /// 要下载的章节顺序列表
+    pub episode_orders: Vec<i32>,
+    /// 保存路径
+    pub save_path: String,
+    /// 当前状态
+    pub state: DownloadState,
+    /// 创建时间（时间戳）
+    pub created_at: i64,
+    /// 更新时间（时间戳）
+    pub updated_at: i64,
+}
+
+impl DownloadTaskMeta {
+    /// 创建新的下载任务元数据
+    pub fn new(
+        comic_id: String,
+        comic_title: String,
+        episode_orders: Vec<i32>,
+        save_path: String,
+    ) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+
+        Self {
+            comic_id,
+            comic_title,
+            total_episodes: episode_orders.len() as i32,
+            episode_orders,
+            save_path,
+            state: DownloadState::Queued,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// 获取元数据文件路径
+    pub fn meta_file_path(save_path: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(save_path).join(".download_meta.json")
+    }
+
+    /// 保存元数据到文件
+    pub fn save(&self) -> Result<(), String> {
+        let path = Self::meta_file_path(&self.save_path);
+
+        // 确保目录存在
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+
+        let json = serde_json::to_string_pretty(self).map_err(|e| format!("序列化失败: {}", e))?;
+        std::fs::write(&path, json).map_err(|e| format!("写入文件失败: {}", e))?;
+
+        Ok(())
+    }
+
+    /// 从文件加载元数据
+    pub fn load(save_path: &str) -> Result<Self, String> {
+        let path = Self::meta_file_path(save_path);
+
+        if !path.exists() {
+            return Err("元数据文件不存在".to_string());
+        }
+
+        let json = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+        serde_json::from_str(&json).map_err(|e| format!("解析 JSON 失败: {}", e))
+    }
+
+    /// 更新状态并保存
+    pub fn update_state(&mut self, state: DownloadState) -> Result<(), String> {
+        self.state = state;
+        self.updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.save()
+    }
+
+    /// 删除元数据文件
+    pub fn delete(&self) -> Result<(), String> {
+        let path = Self::meta_file_path(&self.save_path);
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| format!("删除文件失败: {}", e))?;
+        }
+        Ok(())
+    }
+}
+
+/// 共享任务控制（主线程和后台任务之间通信）
+#[derive(Debug)]
+pub struct SharedTaskControl {
+    /// 暂停请求标志
+    pub pause_requested: std::sync::atomic::AtomicBool,
+    /// 取消请求标志
+    pub cancel_requested: std::sync::atomic::AtomicBool,
+}
+
+impl SharedTaskControl {
+    pub fn new() -> Self {
+        Self {
+            pause_requested: std::sync::atomic::AtomicBool::new(false),
+            cancel_requested: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub fn request_pause(&self) {
+        self.pause_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn request_cancel(&self) {
+        self.cancel_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn is_pause_requested(&self) -> bool {
+        self.pause_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn is_cancel_requested(&self) -> bool {
+        self.cancel_requested
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn reset(&self) {
+        self.pause_requested
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.cancel_requested
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Default for SharedTaskControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// 下载任务 FSM
+#[derive(Debug)]
+pub struct DownloadTaskFSM {
+    /// 任务元数据
+    pub meta: DownloadTaskMeta,
+    /// 共享控制（用于暂停/取消）
+    pub control: std::sync::Arc<SharedTaskControl>,
+    /// 当前章节总页数（运行时数据）
+    pub current_episode_total_pages: i32,
+}
+
+impl DownloadTaskFSM {
+    /// 创建新任务
+    pub fn new(meta: DownloadTaskMeta) -> Self {
+        Self {
+            meta,
+            control: std::sync::Arc::new(SharedTaskControl::new()),
+            current_episode_total_pages: 0,
+        }
+    }
+
+    /// 从元数据文件加载任务
+    pub fn load(save_path: &str) -> Result<Self, String> {
+        let meta = DownloadTaskMeta::load(save_path)?;
+        Ok(Self::new(meta))
+    }
+
+    /// 转换为 UI 显示的 ComicDownloadTask
+    pub fn to_ui_task(&self) -> ComicDownloadTask {
+        ComicDownloadTask {
+            comic_id: self.meta.comic_id.clone(),
+            comic_title: self.meta.comic_title.clone(),
+            status: self.meta.state.to_ui_status(),
+            current_episode: self.meta.state.current_episode(),
+            total_episodes: self.meta.total_episodes,
+            current_page: self.meta.state.current_page(),
+            total_pages: self.current_episode_total_pages,
+            save_path: self.meta.save_path.clone(),
+        }
+    }
+
+    /// 开始下载
+    pub fn start(&mut self) -> Result<(), String> {
+        self.meta.update_state(DownloadState::Downloading {
+            current_episode: 1,
+            current_page: 0,
+        })
+    }
+
+    /// 更新进度
+    pub fn update_progress(
+        &mut self,
+        episode: i32,
+        page: i32,
+        total_pages: i32,
+    ) -> Result<(), String> {
+        self.current_episode_total_pages = total_pages;
+        self.meta.update_state(DownloadState::Downloading {
+            current_episode: episode,
+            current_page: page,
+        })
+    }
+
+    /// 暂停
+    pub fn pause(&mut self) -> Result<(), String> {
+        let (episode, page) = match &self.meta.state {
+            DownloadState::Downloading {
+                current_episode,
+                current_page,
+            } => (*current_episode, *current_page),
+            _ => (1, 0),
+        };
+        self.meta.update_state(DownloadState::Paused {
+            current_episode: episode,
+            current_page: page,
+        })
+    }
+
+    /// 完成
+    pub fn complete(&mut self) -> Result<(), String> {
+        self.meta.update_state(DownloadState::Completed)
+    }
+
+    /// 失败
+    pub fn fail(&mut self, error: String) -> Result<(), String> {
+        self.meta.update_state(DownloadState::Failed(error))
+    }
+
+    /// 请求暂停（线程安全）
+    pub fn request_pause(&self) {
+        self.control.request_pause();
+    }
+
+    /// 检查是否应该暂停
+    pub fn should_pause(&self) -> bool {
+        self.control.is_pause_requested()
+    }
+
+    /// 获取控制器的克隆（用于传递给后台任务）
+    pub fn get_control(&self) -> std::sync::Arc<SharedTaskControl> {
+        self.control.clone()
+    }
+}
+
+/// 单个漫画下载任务
+#[derive(Debug, Clone)]
+pub struct ComicDownloadTask {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 漫画标题
+    pub comic_title: String,
+    /// 下载状态
+    pub status: ComicDownloadStatus,
+    /// 当前章节
+    pub current_episode: i32,
+    /// 总章节数
+    pub total_episodes: i32,
+    /// 当前章节已下载图片数
+    pub current_page: i32,
+    /// 当前章节总图片数
+    pub total_pages: i32,
+    /// 保存路径
+    pub save_path: String,
+}
+
+/// 下载管理状态（FSM 架构）
+#[derive(Resource, Default)]
+pub struct DownloadManagerState {
+    /// 下载任务 FSM 列表
+    pub fsm_tasks: Vec<DownloadTaskFSM>,
+    /// 正在下载的漫画 ID
+    pub downloading_ids: std::collections::HashSet<String>,
+}
+
+impl DownloadManagerState {
+    /// 根据 comic_id 查找任务
+    pub fn find_task(&self, comic_id: &str) -> Option<&DownloadTaskFSM> {
+        self.fsm_tasks.iter().find(|t| t.meta.comic_id == comic_id)
+    }
+
+    /// 根据 comic_id 查找任务（可变）
+    pub fn find_task_mut(&mut self, comic_id: &str) -> Option<&mut DownloadTaskFSM> {
+        self.fsm_tasks
+            .iter_mut()
+            .find(|t| t.meta.comic_id == comic_id)
+    }
+
+    /// 获取活跃任务列表（未完成的）
+    pub fn active_tasks(&self) -> Vec<&DownloadTaskFSM> {
+        self.fsm_tasks
+            .iter()
+            .filter(|t| !t.meta.state.is_completed())
+            .collect()
+    }
+
+    /// 获取已完成任务列表
+    pub fn completed_tasks(&self) -> Vec<&DownloadTaskFSM> {
+        self.fsm_tasks
+            .iter()
+            .filter(|t| t.meta.state.is_completed())
+            .collect()
+    }
+
+    /// 转换为 UI 显示的任务列表（兼容旧代码）
+    pub fn tasks(&self) -> Vec<ComicDownloadTask> {
+        self.fsm_tasks.iter().map(|t| t.to_ui_task()).collect()
+    }
+
+    /// 添加新任务
+    pub fn add_task(&mut self, meta: DownloadTaskMeta) -> &mut DownloadTaskFSM {
+        let fsm = DownloadTaskFSM::new(meta);
+        self.fsm_tasks.push(fsm);
+        self.fsm_tasks.last_mut().unwrap()
+    }
+
+    /// 移除任务
+    pub fn remove_task(&mut self, comic_id: &str) {
+        self.fsm_tasks.retain(|t| t.meta.comic_id != comic_id);
+        self.downloading_ids.remove(comic_id);
+    }
+
+    /// 从下载目录加载未完成的任务
+    pub fn load_incomplete_tasks(&mut self, download_base_path: &std::path::Path) {
+        // 扫描下载目录中的所有子文件夹
+        if !download_base_path.exists() {
+            tracing::debug!("下载目录不存在: {:?}", download_base_path);
+            return;
+        }
+
+        if let Ok(entries) = std::fs::read_dir(download_base_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // 检查是否有元数据文件
+                    let meta_path = path.join(".download_meta.json");
+                    if meta_path.exists() {
+                        if let Ok(meta) = DownloadTaskMeta::load(path.to_str().unwrap_or_default())
+                        {
+                            // 只加载未完成的任务
+                            if !meta.state.is_completed() {
+                                // 检查是否已经存在
+                                if self.find_task(&meta.comic_id).is_some() {
+                                    tracing::debug!("任务已存在，跳过: {}", meta.comic_title);
+                                    continue;
+                                }
+
+                                tracing::info!("加载未完成的下载任务: {}", meta.comic_title);
+                                let fsm = DownloadTaskFSM::new(meta);
+                                self.fsm_tasks.push(fsm);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("加载了 {} 个未完成的下载任务", self.active_tasks().len());
+    }
 }

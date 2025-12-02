@@ -173,6 +173,7 @@ pub fn setup_comics_list_ui(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
+                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ))
             .with_children(|pagination| {
                 // 上一页按钮
@@ -281,6 +282,7 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|scrollbar| {
             // 滚动条轨道（与滑块同级，ZIndex 较低）
@@ -510,8 +512,8 @@ pub fn handle_comics_scroll(
             let old_scroll = scroll_position.y;
             scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
 
-            // 详细日志
-            tracing::info!(
+            // 详细日志（trace 级别）
+            tracing::trace!(
                 "[Comics] 滚动: delta={:.1}, old={:.1}, new={:.1}, max={:.1}, content={:.1}, viewport={:.1}",
                 scroll_delta,
                 old_scroll,
@@ -602,7 +604,7 @@ pub fn update_comics_content_size(
         let last = LAST_DEBUG.load(std::sync::atomic::Ordering::Relaxed);
         if current_hash != last {
             LAST_DEBUG.store(current_hash, std::sync::atomic::Ordering::Relaxed);
-            tracing::info!(
+            tracing::trace!(
                 "[Comics] scale={:.2}, cards={}, cols={}, rows={}, viewport={:.0}, content={:.0}, max_scroll={:.0}",
                 scale_factor,
                 card_count,
@@ -805,6 +807,7 @@ pub fn refresh_comics_list_ui(
                     },
                     BorderColor::all(AppColors::BORDER),
                     BackgroundColor(AppColors::SURFACE),
+                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
                 ))
                 .with_children(|pagination| {
                     // 上一页按钮
@@ -907,15 +910,31 @@ pub fn update_comics_images(
         return;
     }
 
+    // 调试日志（trace 级别）
+    static LAST_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let last = LAST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+    if last != placeholder_count {
+        LAST_COUNT.store(placeholder_count, std::sync::atomic::Ordering::Relaxed);
+        tracing::trace!(
+            "[Comics] 占位符数量: {}, 漫画数量: {}, 缓存图片数: {}",
+            placeholder_count,
+            comics_state.comics.len(),
+            image_cache.loaded_count()
+        );
+    }
+
+    let mut replaced_count = 0;
     for (placeholder_entity, child_of) in placeholder_query.iter() {
         // 找到父卡片
         let parent_entity: Entity = child_of.parent();
         let Ok(card) = card_query.get(parent_entity) else {
+            tracing::warn!("[Comics] 找不到占位符的父卡片");
             continue;
         };
 
         // 找到对应的漫画
         let Some(comic) = comics_state.comics.iter().find(|c| c.id == card.comic_id) else {
+            tracing::warn!("[Comics] 找不到漫画: {}", card.comic_id);
             continue;
         };
 
@@ -944,6 +963,11 @@ pub fn update_comics_images(
             commands
                 .entity(parent_entity)
                 .insert_children(0, &[image_entity]);
+            replaced_count += 1;
         }
+    }
+
+    if replaced_count > 0 {
+        tracing::trace!("[Comics] 替换了 {} 个封面图片", replaced_count);
     }
 }

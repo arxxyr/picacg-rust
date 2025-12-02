@@ -34,6 +34,7 @@ impl Plugin for UiPlugin {
             .add_message::<NavigateToReaderEvent>()
             .add_message::<NavigateToProxySettingsEvent>()
             .add_message::<NavigateBackEvent>()
+            .add_message::<NavigateForwardEvent>()
             .add_message::<NavigateToLoginEvent>()
             .add_message::<PrevPageEvent>()
             .add_message::<NextPageEvent>()
@@ -133,14 +134,137 @@ impl Plugin for UiPlugin {
                 Update,
                 update_comics_content_size.run_if(in_state(AppRoute::ComicsList)),
             )
+            // 漫画详情页面
+            .add_systems(
+                OnEnter(AppRoute::ComicDetail),
+                (
+                    ensure_main_layout,
+                    setup_detail_ui,
+                    trigger_load_comic_detail,
+                )
+                    .chain(),
+            )
+            .add_systems(OnExit(AppRoute::ComicDetail), cleanup_detail_ui)
+            .add_systems(
+                Update,
+                (
+                    episode_card_interaction,
+                    start_read_button_interaction,
+                    like_button_interaction,
+                    favorite_button_interaction,
+                    download_button_interaction,
+                    refresh_detail_ui,
+                    update_cover_image,
+                    handle_detail_scroll,
+                    clamp_detail_scroll,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::ComicDetail)),
+            )
+            // 设置页面
+            .add_systems(
+                OnEnter(AppRoute::Settings),
+                (ensure_main_layout, setup_settings_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Settings), cleanup_settings_ui)
+            .add_systems(
+                Update,
+                (
+                    download_path_input_interaction,
+                    download_path_keyboard_input,
+                    update_download_path_display,
+                    clear_cache_button_interaction,
+                    save_settings_button_interaction,
+                    handle_settings_scroll,
+                    clamp_settings_scroll,
+                    update_settings_content_size,
+                    // 代理设置交互
+                    proxy_enabled_checkbox_interaction,
+                    proxy_type_button_interaction,
+                    proxy_host_input_interaction,
+                    proxy_port_input_interaction,
+                    proxy_input_keyboard,
+                    // 日志等级交互
+                    log_level_button_interaction,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Settings)),
+            )
+            // 下载管理页面
+            .add_systems(
+                OnEnter(AppRoute::Downloads),
+                (
+                    ensure_main_layout,
+                    load_incomplete_downloads,
+                    setup_downloads_ui,
+                )
+                    .chain(),
+            )
+            .add_systems(OnExit(AppRoute::Downloads), cleanup_downloads_ui)
+            .add_systems(
+                Update,
+                (
+                    open_download_folder_interaction,
+                    completed_download_item_interaction,
+                    // 下载控制按钮交互
+                    pause_download_button_interaction,
+                    resume_download_button_interaction,
+                    delete_download_button_interaction,
+                    refresh_downloads_ui,
+                    handle_downloads_scroll,
+                    update_downloads_content_size,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Downloads)),
+            )
+            // 首页（占位）
+            .add_systems(
+                OnEnter(AppRoute::Home),
+                (ensure_main_layout, setup_home_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Home), cleanup_home_ui)
+            // 搜索页（占位）
+            .add_systems(
+                OnEnter(AppRoute::Search),
+                (ensure_main_layout, setup_search_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Search), cleanup_search_ui)
+            // 排行榜页（占位）
+            .add_systems(
+                OnEnter(AppRoute::Rankings),
+                (ensure_main_layout, setup_rankings_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Rankings), cleanup_rankings_ui)
+            // 收藏页（占位）
+            .add_systems(
+                OnEnter(AppRoute::Favorites),
+                (ensure_main_layout, setup_favorites_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Favorites), cleanup_favorites_ui)
             // 侧边栏交互（在主布局存在时运行）
             .add_systems(
                 Update,
                 (sidebar_button_interaction, update_sidebar_active_state)
                     .run_if(any_with_component::<MainLayoutRoot>),
             )
-            // 全局导航
-            .add_systems(Update, handle_back_navigation);
+            // 全局导航（handle_back_navigation 处理键盘输入，handle_navigation_messages
+            // 处理导航消息）
+            .add_systems(Update, (handle_back_navigation, handle_navigation_messages));
     }
 }
 
@@ -167,5 +291,19 @@ fn trigger_load_categories(
     // 如果分类列表为空，触发加载
     if categories_state.categories.is_empty() && !categories_state.is_loading {
         load_messages.write(LoadCategoriesRequest);
+    }
+}
+
+/// 触发加载漫画详情（进入详情页面时）
+fn trigger_load_comic_detail(
+    detail_state: Res<ComicDetailState>,
+    mut load_messages: MessageWriter<LoadComicDetailRequest>,
+) {
+    // 如果有漫画 ID 且没有数据，触发加载
+    if !detail_state.comic_id.is_empty() && detail_state.comic.is_none() && !detail_state.is_loading
+    {
+        load_messages.write(LoadComicDetailRequest {
+            comic_id: detail_state.comic_id.clone(),
+        });
     }
 }

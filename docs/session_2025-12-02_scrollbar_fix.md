@@ -118,3 +118,66 @@ scrollbar.spawn((
 
 - `CLAUDE.md` - 添加 "常见陷阱" 章节
 - `~/.claude/CLAUDE.md` - 添加 "10.3 Bevy ECS Query 组件缺失" 章节
+
+---
+
+# 2025-12-03 更新
+
+## 下载章节顺序修复
+
+### 问题描述
+
+下载漫画时章节顺序是倒序的（从最后一章开始下载），用户希望从第一章开始下载。
+
+### 日志表现
+
+```
+第 31 章共 48 张图片
+第 31 章下载完成: 成功=0, 跳过=48, 失败=0
+第 30 章共 33 张图片
+第 30 章下载完成: 成功=0, 跳过=33, 失败=0
+第 29 章共 35 张图片
+...
+```
+
+### 根本原因
+
+API 返回的章节列表 `detail_state.episodes` 本身是倒序的（从大到小），代码直接遍历这个列表进行下载，导致下载顺序也是倒序。
+
+### 修复方案
+
+在 `handle_download_comic` 和 `handle_resume_download` 函数中，对章节列表进行排序：
+
+```rust
+// src/plugins/api_plugin.rs
+
+// 新下载
+let mut episodes_to_download: Vec<i32> = if event.episodes.is_empty() {
+    detail_state.episodes.iter().map(|e| e.order).collect()
+} else {
+    event.episodes.clone()
+};
+// 从第一章开始下载（正序）
+episodes_to_download.sort();
+
+// 恢复下载
+let task_info = download_state.find_task(&comic_id).map(|fsm| {
+    let mut episode_orders = fsm.meta.episode_orders.clone();
+    // 从第一章开始下载（正序）
+    episode_orders.sort();
+    // ...
+});
+```
+
+### 修改文件
+
+| 文件 | 修改内容 |
+|------|----------|
+| `src/plugins/api_plugin.rs:943-944` | 新下载时排序章节列表 |
+| `src/plugins/api_plugin.rs:1384-1386` | 恢复下载时排序章节列表 |
+
+### 经验总结
+
+**API 返回数据顺序不可信**：
+- 不要假设 API 返回的列表顺序符合预期
+- 如果需要特定顺序，应该显式排序

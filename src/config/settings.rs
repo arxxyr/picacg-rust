@@ -94,6 +94,46 @@ pub struct LoginSettings {
     pub saved_password: String,
 }
 
+/// 日志等级
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        LogLevel::Info
+    }
+}
+
+impl LogLevel {
+    /// 转换为 tracing 的 Level
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
+
+    /// 获取显示名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            LogLevel::Trace => "Trace (最详细)",
+            LogLevel::Debug => "Debug (调试)",
+            LogLevel::Info => "Info (默认)",
+            LogLevel::Warn => "Warn (警告)",
+            LogLevel::Error => "Error (错误)",
+        }
+    }
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -102,12 +142,18 @@ pub struct AppSettings {
     /// 登录设置
     #[serde(default)]
     pub login: LoginSettings,
+    /// 日志等级
+    #[serde(default)]
+    pub log_level: LogLevel,
     /// 下载并发数
     pub download_workers: usize,
     /// HTTP 并发数
     pub http_workers: usize,
     /// 缓存路径
     pub cache_path: PathBuf,
+    /// 下载保存路径（空字符串表示使用默认路径：程序目录/Downloads）
+    #[serde(default)]
+    pub download_path: String,
 }
 
 impl Default for AppSettings {
@@ -115,9 +161,11 @@ impl Default for AppSettings {
         AppSettings {
             proxy: ProxySettings::default(),
             login: LoginSettings::default(),
+            log_level: LogLevel::default(),
             download_workers: 5,
             http_workers: 5,
             cache_path: PathBuf::from("cache"),
+            download_path: String::new(), // 空字符串表示使用默认路径
         }
     }
 }

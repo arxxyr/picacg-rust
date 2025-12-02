@@ -1,6 +1,8 @@
 //! UI 组件标记
 //!
-//! 定义用于标识 UI 实体的组件
+//! 定义用于标识 UI 实体的组件，部分预留
+
+#![allow(dead_code)]
 
 use bevy::prelude::*;
 
@@ -94,6 +96,7 @@ pub enum SidebarRoute {
     Home,
     Categories,
     Search,
+    Rankings,
     Favorites,
     Downloads,
     Settings,

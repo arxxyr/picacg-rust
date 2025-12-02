@@ -181,6 +181,7 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|scrollbar| {
             // 滚动条轨道（与滑块同级，ZIndex 较低）
@@ -511,8 +512,8 @@ pub fn handle_categories_scroll(
             let old_scroll = scroll_position.y;
             scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
 
-            // 详细日志：每次滚动时输出
-            tracing::info!(
+            // 详细日志：每次滚动时输出（trace 级别）
+            tracing::trace!(
                 "[Categories] 滚动: delta={:.1}, old={:.1}, new={:.1}, max={:.1}, content={:.1}, viewport={:.1}",
                 scroll_delta,
                 old_scroll,
@@ -603,7 +604,7 @@ pub fn update_categories_content_size(
         let last = LAST_DEBUG.load(std::sync::atomic::Ordering::Relaxed);
         if current_hash != last {
             LAST_DEBUG.store(current_hash, std::sync::atomic::Ordering::Relaxed);
-            tracing::info!(
+            tracing::trace!(
                 "[Categories] scale={:.2}, cards={}, cols={}, rows={}, viewport={:.0}, content={:.0}, max_scroll={:.0}",
                 scale_factor,
                 card_count,

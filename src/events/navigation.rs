@@ -31,9 +31,13 @@ pub struct NavigateToReaderEvent {
 #[derive(Message)]
 pub struct NavigateToProxySettingsEvent;
 
-/// 返回上一页
+/// 返回上一页（后退）
 #[derive(Message)]
 pub struct NavigateBackEvent;
+
+/// 前进到下一页
+#[derive(Message)]
+pub struct NavigateForwardEvent;
 
 /// 返回登录页
 #[derive(Message)]
