@@ -189,6 +189,63 @@ let click_ratio = (track_top_y - cursor_y_bevy) / track_height;
 
 ---
 
+## 常见陷阱
+
+### Query 组件缺失导致查询返回空
+
+**问题场景：** Query 需要某个组件，但实体没有该组件，导致查询返回 0 个实体。
+
+**典型案例：GlobalTransform 缺失**
+
+```rust
+// ❌ 错误：查询需要 GlobalTransform，但 UI 实体可能没有
+pub fn scrollbar_track_click(
+    track_query: Query<(&ScrollbarTrack, &GlobalTransform, &ComputedNode)>,
+) {
+    for (track, transform, computed) in &track_query {
+        // 如果实体没有 GlobalTransform，这里永远不会执行！
+    }
+}
+```
+
+**症状：**
+- 系统函数不报错，但完全没有响应
+- 调试时发现 `track_query.iter().count() == 0`
+- 其他不需要该组件的 Query 可以正常匹配到实体
+
+**根本原因：**
+- Bevy UI 节点默认**不包含** `Transform`/`GlobalTransform`
+- 只有显式添加 `Transform` 组件后，Bevy 才会自动添加 `GlobalTransform`
+
+**修复方法：** 在创建实体时添加 `Transform::default()`
+
+```rust
+// ✅ 正确：显式添加 Transform，Bevy 会自动添加 GlobalTransform
+scrollbar.spawn((
+    ScrollbarTrack { scroll_container },
+    Button,
+    Interaction::default(),
+    Node { /* ... */ },
+    BackgroundColor(TRACK_COLOR),
+    // 添加 Transform 以获得 GlobalTransform
+    Transform::default(),
+));
+```
+
+**诊断技巧：**
+1. 添加调试日志检查 Query 匹配数量：`info!("实体数量={}", query.iter().count())`
+2. 对比工作正常的 Query 和有问题的 Query，找出组件差异
+3. 检查实体创建代码，确认是否缺少必要组件
+
+**相关组件依赖：**
+| 组件 | 自动添加条件 |
+|------|-------------|
+| `GlobalTransform` | 需要显式添加 `Transform` |
+| `ComputedNode` | UI 节点自动获得 |
+| `Interaction` | 需要显式添加，配合 `Button` 或 `FocusPolicy` |
+
+---
+
 ## 调试技巧
 
 1. **使用完整堆栈追踪**
