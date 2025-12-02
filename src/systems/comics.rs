@@ -1,8 +1,6 @@
 //! 漫画列表系统
 
-use bevy::{
-    input::mouse::MouseWheel, prelude::*, ui::RelativeCursorPosition, window::PrimaryWindow,
-};
+use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy, window::PrimaryWindow};
 
 use crate::{
     components::*,
@@ -262,6 +260,13 @@ pub fn setup_comics_list_ui(
 }
 
 /// 内联创建滚动条（用于 ChildSpawnerCommands）
+///
+/// 布局结构：
+/// ScrollbarContainer (Absolute, right=0)
+///   ├── ScrollbarTrack (Button, fills 100%, ZIndex=0)
+///   └── ScrollbarThumb (Button, Absolute, ZIndex=1)
+///
+/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
 fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
     parent
         .spawn((
@@ -272,46 +277,50 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                 position_type: PositionType::Absolute,
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
                 ..default()
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
         ))
         .with_children(|scrollbar| {
-            // 滚动条轨道
-            scrollbar
-                .spawn((
-                    ScrollbarTrack { scroll_container },
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        position_type: PositionType::Relative,
-                        ..default()
-                    },
-                    BackgroundColor(TRACK_COLOR),
-                    RelativeCursorPosition::default(),
-                ))
-                .with_children(|track| {
-                    // 滚动条滑块
-                    track.spawn((
-                        ScrollbarThumb { scroll_container },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Px(THUMB_MIN_HEIGHT),
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(0.0),
-                            left: Val::Px(0.0),
-                            ..default()
-                        },
-                        BackgroundColor(THUMB_COLOR),
-                        BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ));
-                });
+            // 滚动条轨道（与滑块同级，ZIndex 较低）
+            scrollbar.spawn((
+                ScrollbarTrack { scroll_container },
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(TRACK_COLOR),
+                ZIndex(0),
+                // 添加 Transform 以获得 GlobalTransform（滚动条点击需要）
+                Transform::default(),
+            ));
+
+            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
+            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
+            scrollbar.spawn((
+                ScrollbarThumb { scroll_container },
+                Button,
+                Interaction::default(),
+                FocusPolicy::Block,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(THUMB_MIN_HEIGHT),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(THUMB_COLOR),
+                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
+                ZIndex(1),
+            ));
         });
 }
 

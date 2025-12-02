@@ -6,7 +6,6 @@
 //! - 自动计算滑块大小和位置
 
 use bevy::{prelude::*, window::PrimaryWindow};
-use tracing::info;
 
 use crate::components::*;
 
@@ -164,15 +163,18 @@ pub fn scrollbar_thumb_interaction(
 }
 
 /// 轨道点击跳转系统
-/// 使用轨道的 Interaction 组件检测点击，手动计算相对位置
+/// 使用 GlobalTransform 和 ComputedNode 精确计算鼠标相对于轨道的位置
 pub fn scrollbar_track_click(
     window_query: Query<&Window, With<PrimaryWindow>>,
-    track_query: Query<(
-        &ScrollbarTrack,
-        &Interaction,
-        &GlobalTransform,
-        &ComputedNode,
-    )>,
+    track_query: Query<
+        (
+            &ScrollbarTrack,
+            &Interaction,
+            &GlobalTransform,
+            &ComputedNode,
+        ),
+        (Changed<Interaction>, With<ScrollbarTrack>),
+    >,
     thumb_query: Query<(&ScrollbarThumb, &Node)>,
     mut scroll_query: Query<(
         Entity,
@@ -180,7 +182,7 @@ pub fn scrollbar_track_click(
         &ComputedNode,
         Option<&ContentSizeInfo>,
     )>,
-    drag_state: Res<ScrollbarDragState>,
+    mut drag_state: ResMut<ScrollbarDragState>,
 ) {
     // 如果正在拖拽滑块，不处理轨道点击
     if drag_state.is_dragging {
@@ -195,14 +197,11 @@ pub fn scrollbar_track_click(
         return;
     };
 
-    let scale_factor = get_scale_factor(&window_query);
+    let scale_factor = window.scale_factor() as f32;
     let window_height = window.height();
 
-    // 将屏幕坐标转换为 Bevy UI 坐标（翻转 Y 轴）
-    let cursor_y_bevy = window_height - cursor_pos.y;
-
     for (track, interaction, track_transform, track_computed) in &track_query {
-        // 只处理被按下的轨道
+        // 只处理刚变为 Pressed 状态的轨道
         if *interaction != Interaction::Pressed {
             continue;
         }
@@ -213,15 +212,22 @@ pub fn scrollbar_track_click(
             continue;
         }
 
-        // 获取轨道中心位置（Bevy UI 坐标系）
-        let track_center = track_transform.translation();
-        // 轨道顶部 Y 坐标（Bevy 坐标系中，Y 增大 = 向上）
-        let track_top_y = track_center.y + track_height / 2.0;
+        // GlobalTransform 在 Bevy UI 中可能返回物理像素坐标，需要转换为逻辑像素
+        // 注意：这是一个假设，需要通过日志验证
+        let track_center_y = track_transform.translation().y / scale_factor;
 
-        // 点击位置相对于轨道顶部的距离
+        // 将鼠标从屏幕坐标转换为 Bevy UI 坐标
+        // 屏幕坐标: (0, 0) 在左上角，Y向下
+        // Bevy UI 坐标: (0, 0) 在窗口中心，Y向上
+        let cursor_y_bevy = window_height / 2.0 - cursor_pos.y;
+
+        // 轨道顶部 Y 坐标（Bevy 坐标系中，Y 增大 = 向上，所以顶部 = 中心 + 高度/2）
+        let track_top_y = track_center_y + track_height / 2.0;
+
+        // 点击位置相对于轨道顶部的偏移（向下为正）
         let click_offset_from_top = track_top_y - cursor_y_bevy;
 
-        // 点击比例（0.0 = 顶部，1.0 = 底部）
+        // 计算点击比例（0.0 = 顶部，1.0 = 底部）
         let click_ratio = (click_offset_from_top / track_height).clamp(0.0, 1.0);
 
         let scroll_container = track.scroll_container;
@@ -254,8 +260,19 @@ pub fn scrollbar_track_click(
             break;
         }
 
-        // 如果点击在滑块范围内，跳过（让滑块拖拽处理）
+        // 如果点击在滑块范围内，开始拖拽（因为滑块接收不到事件，由轨道代为处理）
         if has_thumb && click_ratio >= thumb_top_ratio && click_ratio <= thumb_bottom_ratio {
+            // 获取当前滚动位置
+            let scroll_y = scroll_query
+                .iter()
+                .find(|(entity, _, _, _)| *entity == scroll_container)
+                .map(|(_, sp, _, _)| sp.y)
+                .unwrap_or(0.0);
+
+            // 获取鼠标位置并开始拖拽
+            if let Some(cursor_pos) = window.cursor_position() {
+                drag_state.start_drag(scroll_container, cursor_pos.y, scroll_y);
+            }
             continue;
         }
 
@@ -276,11 +293,6 @@ pub fn scrollbar_track_click(
             let max_scroll = (content_height - viewport_height).max(0.0);
             let target_scroll = click_ratio * max_scroll;
             scroll_position.y = target_scroll.clamp(0.0, max_scroll);
-
-            info!(
-                "[滚动条] 轨道点击: click_ratio={:.3}, target_scroll={:.1}, max_scroll={:.1}",
-                click_ratio, target_scroll, max_scroll
-            );
 
             break;
         }
