@@ -1109,10 +1109,11 @@ fn spawn_download_task(
             let total_pages = all_pictures.len() as i32;
             tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
 
-            // 下载每张图片
+            // 下载每张图片（首次尝试）
             let mut success_count = 0;
             let mut skip_count = 0;
-            let mut fail_count = 0;
+            // 记录失败的图片：(索引, URL, 文件路径)
+            let mut failed_images: Vec<(usize, String, std::path::PathBuf)> = Vec::new();
 
             for (pic_idx, picture) in all_pictures.iter().enumerate() {
                 // 检查是否已暂停
@@ -1166,15 +1167,16 @@ fn spawn_download_task(
                     continue;
                 }
 
-                // 下载图片
-                match download_image_to_file(&url, &file_path).await {
+                // 下载图片（30秒超时）
+                match download_image_to_file(&url, &file_path, 30).await {
                     Ok(_) => {
                         success_count += 1;
                     }
                     Err(e) => {
-                        fail_count += 1;
-                        tracing::error!(
-                            "✗ 第{}章 {}/{} 下载失败: {}",
+                        // 记录失败的图片，稍后重试
+                        failed_images.push((pic_idx, url.clone(), file_path.clone()));
+                        tracing::warn!(
+                            "⚠ 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
                             episode_order,
                             pic_idx + 1,
                             total_pages,
@@ -1184,12 +1186,118 @@ fn spawn_download_task(
                 }
             }
 
+            // 重试失败的图片（最多重试 3 次）
+            const MAX_RETRIES: u32 = 3;
+            let mut retry_count = 0;
+
+            while !failed_images.is_empty() && retry_count < MAX_RETRIES {
+                retry_count += 1;
+                let retry_delay = std::time::Duration::from_secs(5 * retry_count as u64);
+
+                tracing::info!(
+                    "第 {} 章有 {} 张图片下载失败，{}秒后进行第 {} 次重试...",
+                    episode_order,
+                    failed_images.len(),
+                    retry_delay.as_secs(),
+                    retry_count
+                );
+
+                // 等待一段时间再重试
+                tokio::time::sleep(retry_delay).await;
+
+                // 检查是否已暂停
+                if control.is_pause_requested() {
+                    tracing::info!("下载已暂停: {}", comic_id);
+                    let comic_id_clone = comic_id.clone();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(DownloadPausedEvent {
+                            comic_id: comic_id_clone,
+                        });
+                    })
+                    .await;
+                    return;
+                }
+
+                // 发送重试进度
+                let comic_id_clone = comic_id.clone();
+                let retry_status = format!(
+                    "第{}章 重试 {}/{}（剩余 {} 张）",
+                    episode_order,
+                    retry_count,
+                    MAX_RETRIES,
+                    failed_images.len()
+                );
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadProgressEvent {
+                        comic_id: comic_id_clone,
+                        current_episode: ep_idx as i32 + 1,
+                        total_episodes,
+                        current_page: total_pages,
+                        total_pages,
+                        status: retry_status,
+                    });
+                })
+                .await;
+
+                // 重试下载
+                let mut still_failed: Vec<(usize, String, std::path::PathBuf)> = Vec::new();
+
+                for (pic_idx, url, file_path) in failed_images.drain(..) {
+                    // 如果文件已存在（可能被其他进程下载），跳过
+                    if file_path.exists() {
+                        success_count += 1;
+                        tracing::info!(
+                            "✓ 第{}章 {}/{} 文件已存在",
+                            episode_order,
+                            pic_idx + 1,
+                            total_pages
+                        );
+                        continue;
+                    }
+
+                    // 重试时使用更长的超时（60秒）
+                    match download_image_to_file(&url, &file_path, 60).await {
+                        Ok(_) => {
+                            success_count += 1;
+                            tracing::info!(
+                                "✓ 第{}章 {}/{} 重试成功",
+                                episode_order,
+                                pic_idx + 1,
+                                total_pages
+                            );
+                        }
+                        Err(e) => {
+                            still_failed.push((pic_idx, url, file_path));
+                            tracing::warn!(
+                                "⚠ 第{}章 {}/{} 重试失败: {}",
+                                episode_order,
+                                pic_idx + 1,
+                                total_pages,
+                                e
+                            );
+                        }
+                    }
+                }
+
+                failed_images = still_failed;
+            }
+
+            // 统计最终失败数量
+            let final_fail_count = failed_images.len();
+            if final_fail_count > 0 {
+                tracing::error!(
+                    "✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
+                    episode_order,
+                    final_fail_count
+                );
+            }
+
             tracing::info!(
                 "第 {} 章下载完成: 成功={}, 跳过={}, 失败={}",
                 episode_order,
                 success_count,
                 skip_count,
-                fail_count
+                final_fail_count
             );
         }
 
@@ -1207,7 +1315,12 @@ fn spawn_download_task(
 }
 
 /// 下载图片到文件（使用代理设置和签名头部）
-async fn download_image_to_file(url: &str, file_path: &std::path::Path) -> Result<(), String> {
+/// timeout_secs: 下载超时时间（秒），默认 30 秒
+async fn download_image_to_file(
+    url: &str,
+    file_path: &std::path::Path,
+    timeout_secs: u64,
+) -> Result<(), String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use hmac::{Hmac, Mac};
@@ -1227,8 +1340,8 @@ async fn download_image_to_file(url: &str, file_path: &std::path::Path) -> Resul
     drop(settings);
 
     let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .connect_timeout(std::time::Duration::from_secs(15))
         .danger_accept_invalid_certs(true)
         .redirect(reqwest::redirect::Policy::limited(10));
 
