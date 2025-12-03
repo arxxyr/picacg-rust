@@ -154,6 +154,9 @@ pub struct AppSettings {
     /// 下载保存路径（空字符串表示使用默认路径：程序目录/Downloads）
     #[serde(default)]
     pub download_path: String,
+    /// 数据库路径（空字符串表示使用默认路径）
+    #[serde(default)]
+    pub database_path: String,
 }
 
 impl Default for AppSettings {
@@ -166,6 +169,7 @@ impl Default for AppSettings {
             http_workers: 5,
             cache_path: PathBuf::from("cache"),
             download_path: String::new(), // 空字符串表示使用默认路径
+            database_path: String::new(), // 空字符串表示使用默认路径
         }
     }
 }
@@ -211,5 +215,17 @@ impl AppSettings {
             .unwrap_or_else(|| PathBuf::from("."));
         path.push("config.toml");
         path
+    }
+
+    /// 获取数据库文件路径
+    pub fn get_database_path(&self) -> PathBuf {
+        if !self.database_path.is_empty() {
+            return PathBuf::from(&self.database_path);
+        }
+
+        // 默认路径：配置目录/picacg.db
+        directories::ProjectDirs::from("com", "picacg", "picacg")
+            .map(|dirs| dirs.data_dir().join("picacg.db"))
+            .unwrap_or_else(|| PathBuf::from("picacg.db"))
     }
 }

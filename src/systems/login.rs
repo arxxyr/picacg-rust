@@ -19,6 +19,7 @@ pub struct AppColors;
 impl AppColors {
     pub const BACKGROUND: Color = Color::srgb(0.1, 0.1, 0.15);
     pub const SURFACE: Color = Color::srgb(0.15, 0.15, 0.2);
+    pub const CARD_BG: Color = Color::srgb(0.18, 0.18, 0.25);
     pub const PRIMARY: Color = Color::srgb(0.2, 0.4, 0.8);
     pub const PRIMARY_HOVER: Color = Color::srgb(0.25, 0.45, 0.85);
     pub const PRIMARY_PRESSED: Color = Color::srgb(0.15, 0.35, 0.7);

@@ -60,6 +60,10 @@ impl Plugin for ApiPlugin {
             .add_message::<DownloadPausedEvent>()
             .add_message::<ResumeDownloadRequest>()
             .add_message::<RedownloadRequest>()
+            // 搜索相关消息
+            .add_message::<SearchComicsRequestEvent>()
+            .add_message::<SearchResultsLoadedEvent>()
+            .add_message::<SearchFailedEvent>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -103,6 +107,8 @@ impl Plugin for ApiPlugin {
                     handle_redownload,
                 ),
             )
+            // 注册系统 - 搜索
+            .add_systems(Update, (handle_search_request, handle_search_response))
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -1012,23 +1018,314 @@ fn spawn_download_task(
     control: std::sync::Arc<SharedTaskControl>,
 ) {
     runtime.spawn_background_task(move |mut ctx| async move {
-        let download_path = std::path::PathBuf::from(&save_path);
+        execute_download_task(
+            &mut ctx,
+            client,
+            comic_id,
+            save_path,
+            episodes_to_download,
+            total_episodes,
+            control,
+        )
+        .await;
+    });
+}
 
-        // 创建下载目录
-        if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
+/// 执行下载任务（核心下载逻辑）
+///
+/// 可以从任何有 TaskContext 的异步上下文中调用
+async fn execute_download_task(
+    ctx: &mut bevy_tokio_tasks::TaskContext,
+    client: ApiClient,
+    comic_id: String,
+    save_path: String,
+    episodes_to_download: Vec<i32>,
+    total_episodes: i32,
+    control: std::sync::Arc<SharedTaskControl>,
+) {
+    let download_path = std::path::PathBuf::from(&save_path);
+
+    // 创建下载目录
+    if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
+        let comic_id_clone = comic_id.clone();
+        ctx.run_on_main_thread(move |ctx| {
+            ctx.world.write_message(DownloadFailedEvent {
+                comic_id: comic_id_clone,
+                error: format!("创建目录失败: {}", e),
+            });
+        })
+        .await;
+        return;
+    }
+
+    // 逐章节下载
+    for (ep_idx, episode_order) in episodes_to_download.iter().enumerate() {
+        let episode_order = *episode_order;
+
+        // 检查是否已暂停
+        if control.is_pause_requested() {
+            tracing::info!("下载已暂停: {}", comic_id);
+            let comic_id_clone = comic_id.clone();
             ctx.run_on_main_thread(move |ctx| {
-                ctx.world.write_message(DownloadFailedEvent {
-                    comic_id,
-                    error: format!("创建目录失败: {}", e),
+                ctx.world.write_message(DownloadPausedEvent {
+                    comic_id: comic_id_clone,
                 });
             })
             .await;
             return;
         }
 
-        // 逐章节下载
-        for (ep_idx, episode_order) in episodes_to_download.iter().enumerate() {
-            let episode_order = *episode_order;
+        // 发送进度更新
+        let comic_id_clone = comic_id.clone();
+        ctx.run_on_main_thread(move |ctx| {
+            ctx.world.write_message(DownloadProgressEvent {
+                comic_id: comic_id_clone,
+                current_episode: ep_idx as i32 + 1,
+                total_episodes,
+                current_page: 0,
+                total_pages: 0,
+                status: format!("正在获取第 {} 章图片列表...", episode_order),
+            });
+        })
+        .await;
+
+        // 创建章节目录
+        let ep_folder = download_path.join(format!("第{}章", episode_order));
+        if let Err(e) = tokio::fs::create_dir_all(&ep_folder).await {
+            let comic_id_clone = comic_id.clone();
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(DownloadFailedEvent {
+                    comic_id: comic_id_clone,
+                    error: format!("创建章节目录失败: {}", e),
+                });
+            })
+            .await;
+            return;
+        }
+
+        // 获取该章节所有图片
+        let mut all_pictures = Vec::new();
+        let mut page = 1;
+        loop {
+            use crate::api::endpoints::comic::GetPicturesRequest;
+
+            let request = GetPicturesRequest {
+                comic_id: comic_id.clone(),
+                episode_order,
+                page,
+            };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    all_pictures.extend(response.pages.docs);
+                    if page >= response.pages.pages {
+                        break;
+                    }
+                    page += 1;
+                }
+                Err(e) => {
+                    let comic_id_clone = comic_id.clone();
+                    let error = format!("获取第 {} 章图片列表失败: {}", episode_order, e);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(DownloadFailedEvent {
+                            comic_id: comic_id_clone,
+                            error,
+                        });
+                    })
+                    .await;
+                    return;
+                }
+            }
+        }
+
+        let total_pages = all_pictures.len() as i32;
+        tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
+
+        // 并发下载配置（类似 Python 的 DownloadThreadNum）
+        let download_workers = AppSettings::global().read().download_workers;
+        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(download_workers));
+
+        // 准备下载任务列表
+        let mut download_tasks: Vec<(usize, String, std::path::PathBuf)> = Vec::new();
+        let mut skip_count = 0;
+
+        for (pic_idx, picture) in all_pictures.iter().enumerate() {
+            let url = picture.media.url();
+
+            // 确定文件扩展名
+            let ext = url
+                .rsplit('.')
+                .next()
+                .and_then(|e| {
+                    let e = e.to_lowercase();
+                    if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
+                        Some(e)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "jpg".to_string());
+
+            let file_path = ep_folder.join(format!("{:04}.{}", pic_idx + 1, ext));
+
+            // 如果文件已存在，跳过（支持断点续传）
+            if file_path.exists() {
+                skip_count += 1;
+                continue;
+            }
+
+            download_tasks.push((pic_idx, url, file_path));
+        }
+
+        // 发送初始进度
+        let comic_id_clone = comic_id.clone();
+        let pending_count = download_tasks.len();
+        ctx.run_on_main_thread(move |ctx| {
+            ctx.world.write_message(DownloadProgressEvent {
+                comic_id: comic_id_clone,
+                current_episode: ep_idx as i32 + 1,
+                total_episodes,
+                current_page: 0,
+                total_pages,
+                status: format!(
+                    "第{}章 并发下载中（{} 个线程，待下载 {} 张）",
+                    episode_order, download_workers, pending_count
+                ),
+            });
+        })
+        .await;
+
+        // 并发下载（类似 Python 的 _downloadQueue 模式）
+        let completed_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(skip_count));
+        let failed_images = std::sync::Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let mut handles = Vec::new();
+
+        for (pic_idx, url, file_path) in download_tasks {
+            // 检查是否已暂停
+            if control.is_pause_requested() {
+                tracing::info!("下载已暂停: {}", comic_id);
+                let comic_id_clone = comic_id.clone();
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadPausedEvent {
+                        comic_id: comic_id_clone,
+                    });
+                })
+                .await;
+                return;
+            }
+
+            let semaphore = semaphore.clone();
+            let control = control.clone();
+            let completed_count = completed_count.clone();
+            let failed_images = failed_images.clone();
+            let episode_order = episode_order;
+            let total_pages = total_pages;
+
+            // 启动并发下载任务
+            let handle = tokio::spawn(async move {
+                // 获取信号量许可（控制并发数）
+                let _permit = semaphore.acquire().await.unwrap();
+
+                // 检查是否已暂停
+                if control.is_pause_requested() {
+                    return;
+                }
+
+                // 下载图片（30秒超时）
+                match download_image_to_file(&url, &file_path, 30).await {
+                    Ok(_) => {
+                        completed_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    Err(e) => {
+                        // 记录失败的图片，稍后重试
+                        failed_images.lock().push((pic_idx, url, file_path));
+                        tracing::warn!(
+                            "⚠ 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
+                            episode_order,
+                            pic_idx + 1,
+                            total_pages,
+                            e
+                        );
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // 进度监控：每300ms发送一次进度更新
+        let mut last_reported = 0usize;
+        loop {
+            // 检查是否所有任务都完成了
+            let mut all_done = true;
+            for handle in &handles {
+                if !handle.is_finished() {
+                    all_done = false;
+                    break;
+                }
+            }
+
+            // 获取当前完成数量
+            let current_count = completed_count.load(std::sync::atomic::Ordering::SeqCst);
+
+            // 如果有新进度，发送更新
+            if current_count != last_reported {
+                last_reported = current_count;
+                let comic_id_clone = comic_id.clone();
+                let current_page = current_count as i32;
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadProgressEvent {
+                        comic_id: comic_id_clone,
+                        current_episode: ep_idx as i32 + 1,
+                        total_episodes,
+                        current_page,
+                        total_pages,
+                        status: format!(
+                            "第{}章 下载中 {}/{}",
+                            episode_order, current_page, total_pages
+                        ),
+                    });
+                })
+                .await;
+            }
+
+            if all_done {
+                break;
+            }
+
+            // 等待一段时间再检查
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+
+        // 等待所有任务完成（确保清理）
+        for handle in handles {
+            let _ = handle.await;
+        }
+
+        let success_count = completed_count.load(std::sync::atomic::Ordering::SeqCst);
+        let mut failed_images = std::sync::Arc::try_unwrap(failed_images)
+            .map(|mutex| mutex.into_inner())
+            .unwrap_or_else(|arc| arc.lock().clone());
+
+        // 并发重试失败的图片（最多重试 3 次）
+        const MAX_RETRIES: u32 = 3;
+        let mut retry_count = 0;
+        let mut success_count = success_count; // 转为可变
+
+        while !failed_images.is_empty() && retry_count < MAX_RETRIES {
+            retry_count += 1;
+            let retry_delay = std::time::Duration::from_secs(5 * retry_count as u64);
+
+            tracing::info!(
+                "第 {} 章有 {} 张图片下载失败，{}秒后进行第 {} 次重试...",
+                episode_order,
+                failed_images.len(),
+                retry_delay.as_secs(),
+                retry_count
+            );
+
+            // 等待一段时间再重试
+            tokio::time::sleep(retry_delay).await;
 
             // 检查是否已暂停
             if control.is_pause_requested() {
@@ -1043,222 +1340,67 @@ fn spawn_download_task(
                 return;
             }
 
-            // 发送进度更新
+            // 发送重试进度
             let comic_id_clone = comic_id.clone();
+            let retry_status = format!(
+                "第{}章 并发重试 {}/{}（剩余 {} 张）",
+                episode_order,
+                retry_count,
+                MAX_RETRIES,
+                failed_images.len()
+            );
             ctx.run_on_main_thread(move |ctx| {
                 ctx.world.write_message(DownloadProgressEvent {
                     comic_id: comic_id_clone,
                     current_episode: ep_idx as i32 + 1,
                     total_episodes,
-                    current_page: 0,
-                    total_pages: 0,
-                    status: format!("正在获取第 {} 章图片列表...", episode_order),
+                    current_page: total_pages,
+                    total_pages,
+                    status: retry_status,
                 });
             })
             .await;
 
-            // 创建章节目录
-            let ep_folder = download_path.join(format!("第{}章", episode_order));
-            if let Err(e) = tokio::fs::create_dir_all(&ep_folder).await {
-                let comic_id_clone = comic_id.clone();
-                ctx.run_on_main_thread(move |ctx| {
-                    ctx.world.write_message(DownloadFailedEvent {
-                        comic_id: comic_id_clone,
-                        error: format!("创建章节目录失败: {}", e),
-                    });
-                })
-                .await;
-                return;
-            }
+            // 并发重试下载
+            let retry_success_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let still_failed = std::sync::Arc::new(parking_lot::Mutex::new(Vec::<(
+                usize,
+                String,
+                std::path::PathBuf,
+            )>::new()));
+            let mut retry_handles = Vec::new();
 
-            // 获取该章节所有图片
-            let mut all_pictures = Vec::new();
-            let mut page = 1;
-            loop {
-                use crate::api::endpoints::comic::GetPicturesRequest;
-
-                let request = GetPicturesRequest {
-                    comic_id: comic_id.clone(),
-                    episode_order,
-                    page,
-                };
-
-                match client.request(request).await {
-                    Ok(response) => {
-                        all_pictures.extend(response.pages.docs);
-                        if page >= response.pages.pages {
-                            break;
-                        }
-                        page += 1;
-                    }
-                    Err(e) => {
-                        let comic_id_clone = comic_id.clone();
-                        let error = format!("获取第 {} 章图片列表失败: {}", episode_order, e);
-                        ctx.run_on_main_thread(move |ctx| {
-                            ctx.world.write_message(DownloadFailedEvent {
-                                comic_id: comic_id_clone,
-                                error,
-                            });
-                        })
-                        .await;
-                        return;
-                    }
-                }
-            }
-
-            let total_pages = all_pictures.len() as i32;
-            tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
-
-            // 下载每张图片（首次尝试）
-            let mut success_count = 0;
-            let mut skip_count = 0;
-            // 记录失败的图片：(索引, URL, 文件路径)
-            let mut failed_images: Vec<(usize, String, std::path::PathBuf)> = Vec::new();
-
-            for (pic_idx, picture) in all_pictures.iter().enumerate() {
-                // 检查是否已暂停
-                if control.is_pause_requested() {
-                    tracing::info!("下载已暂停: {}", comic_id);
-                    let comic_id_clone = comic_id.clone();
-                    ctx.run_on_main_thread(move |ctx| {
-                        ctx.world.write_message(DownloadPausedEvent {
-                            comic_id: comic_id_clone,
-                        });
-                    })
-                    .await;
-                    return;
-                }
-
-                let url = picture.media.url();
-
-                // 发送进度更新
-                let comic_id_clone = comic_id.clone();
-                ctx.run_on_main_thread(move |ctx| {
-                    ctx.world.write_message(DownloadProgressEvent {
-                        comic_id: comic_id_clone,
-                        current_episode: ep_idx as i32 + 1,
-                        total_episodes,
-                        current_page: pic_idx as i32 + 1,
-                        total_pages,
-                        status: format!("第{}章 {}/{}", episode_order, pic_idx + 1, total_pages),
-                    });
-                })
-                .await;
-
-                // 确定文件扩展名
-                let ext = url
-                    .rsplit('.')
-                    .next()
-                    .and_then(|e| {
-                        let e = e.to_lowercase();
-                        if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
-                            Some(e)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| "jpg".to_string());
-
-                let file_path = ep_folder.join(format!("{:04}.{}", pic_idx + 1, ext));
-
-                // 如果文件已存在，跳过（支持断点续传）
+            for (pic_idx, url, file_path) in failed_images.drain(..) {
+                // 如果文件已存在（可能被其他进程下载），跳过
                 if file_path.exists() {
-                    skip_count += 1;
+                    retry_success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    tracing::info!(
+                        "✓ 第{}章 {}/{} 文件已存在",
+                        episode_order,
+                        pic_idx + 1,
+                        total_pages
+                    );
                     continue;
                 }
 
-                // 下载图片（30秒超时）
-                match download_image_to_file(&url, &file_path, 30).await {
-                    Ok(_) => {
-                        success_count += 1;
-                    }
-                    Err(e) => {
-                        // 记录失败的图片，稍后重试
-                        failed_images.push((pic_idx, url.clone(), file_path.clone()));
-                        tracing::warn!(
-                            "⚠ 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
-                            episode_order,
-                            pic_idx + 1,
-                            total_pages,
-                            e
-                        );
-                    }
-                }
-            }
+                let semaphore = semaphore.clone();
+                let control = control.clone();
+                let retry_success_count = retry_success_count.clone();
+                let still_failed = still_failed.clone();
+                let episode_order = episode_order;
+                let total_pages = total_pages;
 
-            // 重试失败的图片（最多重试 3 次）
-            const MAX_RETRIES: u32 = 3;
-            let mut retry_count = 0;
+                let handle = tokio::spawn(async move {
+                    let _permit = semaphore.acquire().await.unwrap();
 
-            while !failed_images.is_empty() && retry_count < MAX_RETRIES {
-                retry_count += 1;
-                let retry_delay = std::time::Duration::from_secs(5 * retry_count as u64);
-
-                tracing::info!(
-                    "第 {} 章有 {} 张图片下载失败，{}秒后进行第 {} 次重试...",
-                    episode_order,
-                    failed_images.len(),
-                    retry_delay.as_secs(),
-                    retry_count
-                );
-
-                // 等待一段时间再重试
-                tokio::time::sleep(retry_delay).await;
-
-                // 检查是否已暂停
-                if control.is_pause_requested() {
-                    tracing::info!("下载已暂停: {}", comic_id);
-                    let comic_id_clone = comic_id.clone();
-                    ctx.run_on_main_thread(move |ctx| {
-                        ctx.world.write_message(DownloadPausedEvent {
-                            comic_id: comic_id_clone,
-                        });
-                    })
-                    .await;
-                    return;
-                }
-
-                // 发送重试进度
-                let comic_id_clone = comic_id.clone();
-                let retry_status = format!(
-                    "第{}章 重试 {}/{}（剩余 {} 张）",
-                    episode_order,
-                    retry_count,
-                    MAX_RETRIES,
-                    failed_images.len()
-                );
-                ctx.run_on_main_thread(move |ctx| {
-                    ctx.world.write_message(DownloadProgressEvent {
-                        comic_id: comic_id_clone,
-                        current_episode: ep_idx as i32 + 1,
-                        total_episodes,
-                        current_page: total_pages,
-                        total_pages,
-                        status: retry_status,
-                    });
-                })
-                .await;
-
-                // 重试下载
-                let mut still_failed: Vec<(usize, String, std::path::PathBuf)> = Vec::new();
-
-                for (pic_idx, url, file_path) in failed_images.drain(..) {
-                    // 如果文件已存在（可能被其他进程下载），跳过
-                    if file_path.exists() {
-                        success_count += 1;
-                        tracing::info!(
-                            "✓ 第{}章 {}/{} 文件已存在",
-                            episode_order,
-                            pic_idx + 1,
-                            total_pages
-                        );
-                        continue;
+                    if control.is_pause_requested() {
+                        return;
                     }
 
                     // 重试时使用更长的超时（60秒）
                     match download_image_to_file(&url, &file_path, 60).await {
                         Ok(_) => {
-                            success_count += 1;
+                            retry_success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             tracing::info!(
                                 "✓ 第{}章 {}/{} 重试成功",
                                 episode_order,
@@ -1267,7 +1409,7 @@ fn spawn_download_task(
                             );
                         }
                         Err(e) => {
-                            still_failed.push((pic_idx, url, file_path));
+                            still_failed.lock().push((pic_idx, url, file_path));
                             tracing::warn!(
                                 "⚠ 第{}章 {}/{} 重试失败: {}",
                                 episode_order,
@@ -1277,41 +1419,51 @@ fn spawn_download_task(
                             );
                         }
                     }
-                }
+                });
 
-                failed_images = still_failed;
+                retry_handles.push(handle);
             }
 
-            // 统计最终失败数量
-            let final_fail_count = failed_images.len();
-            if final_fail_count > 0 {
-                tracing::error!(
-                    "✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
-                    episode_order,
-                    final_fail_count
-                );
+            // 等待所有重试任务完成
+            for handle in retry_handles {
+                let _ = handle.await;
             }
 
-            tracing::info!(
-                "第 {} 章下载完成: 成功={}, 跳过={}, 失败={}",
+            success_count += retry_success_count.load(std::sync::atomic::Ordering::SeqCst);
+            failed_images = std::sync::Arc::try_unwrap(still_failed)
+                .map(|mutex| mutex.into_inner())
+                .unwrap_or_else(|arc| arc.lock().clone());
+        }
+
+        // 统计最终失败数量
+        let final_fail_count = failed_images.len();
+        if final_fail_count > 0 {
+            tracing::error!(
+                "✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
                 episode_order,
-                success_count,
-                skip_count,
                 final_fail_count
             );
         }
 
-        // 下载完成
-        let comic_id_clone = comic_id.clone();
-        let save_path_clone = save_path.clone();
-        ctx.run_on_main_thread(move |ctx| {
-            ctx.world.write_message(DownloadCompletedEvent {
-                comic_id: comic_id_clone,
-                save_path: save_path_clone,
-            });
-        })
-        .await;
-    });
+        tracing::info!(
+            "第 {} 章下载完成: 成功={}, 跳过={}, 失败={}",
+            episode_order,
+            success_count,
+            skip_count,
+            final_fail_count
+        );
+    }
+
+    // 下载完成
+    let comic_id_clone = comic_id.clone();
+    let save_path_clone = save_path.clone();
+    ctx.run_on_main_thread(move |ctx| {
+        ctx.world.write_message(DownloadCompletedEvent {
+            comic_id: comic_id_clone,
+            save_path: save_path_clone,
+        });
+    })
+    .await;
 }
 
 /// 下载图片到文件（使用代理设置和签名头部）
@@ -1693,41 +1845,130 @@ fn handle_redownload(
                 tracing::warn!("保存元数据失败: {}", e);
             }
 
-            // 发送下载请求到主线程
-            ctx.run_on_main_thread(move |ctx| {
-                // 添加任务到状态
-                let mut download_state = ctx.world.resource_mut::<DownloadManagerState>();
+            // 发送下载请求到主线程，获取控制器
+            let control = ctx
+                .run_on_main_thread(move |ctx| {
+                    // 添加任务到状态
+                    let mut download_state = ctx.world.resource_mut::<DownloadManagerState>();
 
-                // 添加新任务
-                download_state.add_task(meta.clone());
+                    // 添加新任务
+                    download_state.add_task(meta.clone());
 
-                // 获取控制器
-                let control = download_state
-                    .find_task(&comic_id_clone)
-                    .map(|fsm| fsm.get_control())
-                    .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()));
+                    // 获取控制器
+                    let control = download_state
+                        .find_task(&meta.comic_id)
+                        .map(|fsm| fsm.get_control())
+                        .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()));
 
-                // 标记为下载中
-                download_state
-                    .downloading_ids
-                    .insert(comic_id_clone.clone());
+                    // 标记为下载中
+                    download_state.downloading_ids.insert(meta.comic_id.clone());
 
-                // 获取 runtime 和 api_client
-                let runtime = ctx.world.resource::<TokioTasksRuntime>();
-                let api_client = ctx.world.resource::<ApiClientResource>();
+                    control
+                })
+                .await;
 
-                // 启动下载任务
-                spawn_download_task(
-                    runtime,
-                    api_client.0.clone(),
-                    comic_id_clone,
-                    save_path_clone,
-                    episode_orders,
-                    total_episodes,
-                    control,
-                );
-            })
+            // 在当前异步上下文中执行下载（内联下载逻辑）
+            execute_download_task(
+                &mut ctx,
+                client,
+                comic_id_clone,
+                save_path_clone,
+                episode_orders,
+                total_episodes,
+                control,
+            )
             .await;
         });
+    }
+}
+
+// ==================== 搜索处理 ====================
+
+/// 处理搜索请求
+fn handle_search_request(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<SearchComicsRequestEvent>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let keyword = event.keyword.clone();
+        let page = event.page;
+        let sort = event.sort.clone();
+
+        tracing::info!(
+            "搜索请求: keyword={}, page={}, sort={}",
+            keyword,
+            page,
+            sort
+        );
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::SearchComicsRequest;
+
+            let request = SearchComicsRequest {
+                keyword: keyword.clone(),
+                page,
+                sort,
+            };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let count = response.comics.docs.len();
+                    let total_pages = response.comics.pages;
+                    tracing::info!(
+                        "搜索成功: keyword={}, 结果数={}, 总页数={}",
+                        keyword,
+                        count,
+                        total_pages
+                    );
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(SearchResultsLoadedEvent {
+                            comics: response.comics.docs,
+                            total_pages: response.comics.pages,
+                            keyword,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    tracing::error!("搜索失败: {}", error);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(SearchFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理搜索响应
+fn handle_search_response(
+    mut loaded_messages: MessageReader<SearchResultsLoadedEvent>,
+    mut failed_messages: MessageReader<SearchFailedEvent>,
+    mut search_state: ResMut<SearchState>,
+    mut image_messages: MessageWriter<LoadImageRequest>,
+) {
+    for event in loaded_messages.read() {
+        search_state.is_loading = false;
+        search_state.has_searched = true;
+        search_state.results = event.comics.clone();
+        search_state.total_pages = event.total_pages;
+        search_state.error = None;
+
+        // 触发加载封面图片
+        for comic in &event.comics {
+            image_messages.write(LoadImageRequest {
+                url: comic.thumb.url(),
+            });
+        }
+    }
+
+    for event in failed_messages.read() {
+        search_state.is_loading = false;
+        search_state.has_searched = true;
+        search_state.error = Some(event.error.clone());
     }
 }

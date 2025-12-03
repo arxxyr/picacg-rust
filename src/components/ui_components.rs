@@ -91,7 +91,7 @@ pub struct SidebarButton {
 }
 
 /// 侧边栏路由
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SidebarRoute {
     Home,
     Categories,

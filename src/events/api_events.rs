@@ -139,6 +139,30 @@ pub struct PicturesLoadFailedEvent {
     pub error: String,
 }
 
+// ==================== 搜索消息 ====================
+
+/// 搜索漫画请求
+#[derive(Message)]
+pub struct SearchComicsRequestEvent {
+    pub keyword: String,
+    pub page: i32,
+    pub sort: String,
+}
+
+/// 搜索结果加载完成
+#[derive(Message)]
+pub struct SearchResultsLoadedEvent {
+    pub comics: Vec<Comic>,
+    pub total_pages: i32,
+    pub keyword: String,
+}
+
+/// 搜索失败
+#[derive(Message)]
+pub struct SearchFailedEvent {
+    pub error: String,
+}
+
 // ==================== 点赞/收藏消息 ====================
 
 /// 点赞漫画请求

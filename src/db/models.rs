@@ -141,3 +141,100 @@ impl DbHistory {
         self.last_page = page;
     }
 }
+
+// 下载任务数据库实体
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DbDownloadTask {
+    pub comic_id: String,
+    pub comic_title: String,
+    pub total_episodes: i64,
+    pub episode_orders: String, // JSON 数组
+    pub save_path: String,
+    pub state: String,              // Queued/Downloading/Paused/Completed/Failed
+    pub state_data: Option<String>, // JSON: { current_episode, current_page, error }
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 下载状态附加数据（序列化为 JSON 存储）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadStateData {
+    #[serde(default)]
+    pub current_episode: i32,
+    #[serde(default)]
+    pub current_page: i32,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl Default for DownloadStateData {
+    fn default() -> Self {
+        Self {
+            current_episode: 0,
+            current_page: 0,
+            error: None,
+        }
+    }
+}
+
+impl DbDownloadTask {
+    /// 创建新的下载任务
+    pub fn new(
+        comic_id: String,
+        comic_title: String,
+        episode_orders: Vec<i32>,
+        save_path: String,
+    ) -> Self {
+        let now = Utc::now().timestamp();
+        Self {
+            comic_id,
+            comic_title,
+            total_episodes: episode_orders.len() as i64,
+            episode_orders: serde_json::to_string(&episode_orders).unwrap_or_default(),
+            save_path,
+            state: "Queued".to_string(),
+            state_data: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// 获取章节顺序列表
+    pub fn get_episode_orders(&self) -> Vec<i32> {
+        serde_json::from_str(&self.episode_orders).unwrap_or_default()
+    }
+
+    /// 获取状态数据
+    pub fn get_state_data(&self) -> DownloadStateData {
+        self.state_data
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default()
+    }
+
+    /// 设置状态数据
+    pub fn set_state_data(&mut self, data: &DownloadStateData) {
+        self.state_data = serde_json::to_string(data).ok();
+        self.updated_at = Utc::now().timestamp();
+    }
+
+    /// 是否已完成
+    pub fn is_completed(&self) -> bool {
+        self.state == "Completed"
+    }
+
+    /// 是否正在下载
+    pub fn is_downloading(&self) -> bool {
+        self.state == "Downloading"
+    }
+
+    /// 是否可以暂停
+    pub fn can_pause(&self) -> bool {
+        self.state == "Queued" || self.state == "Downloading"
+    }
+
+    /// 是否可以恢复
+    pub fn can_resume(&self) -> bool {
+        self.state == "Paused" || self.state == "Failed"
+    }
+}

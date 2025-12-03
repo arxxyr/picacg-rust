@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use crate::{
     components::{ContentArea, ContentSizeInfo, ScrollbarThumb, ScrollbarTrack},
     config::settings::AppSettings,
-    events::{RedownloadRequest, ResumeDownloadRequest},
+    events::{DownloadCompletedEvent, RedownloadRequest, ResumeDownloadRequest},
     resources::{ComicDownloadStatus, DownloadManagerState},
     systems::login::{AppColors, FONT_PATH},
 };
@@ -89,74 +89,112 @@ pub struct OpenCompletedFolderButton {
 
 /// 扫描下载目录，获取已完成的下载列表
 ///
-/// 通过检查 `.download_meta.json` 元数据文件来判断下载是否真正完成。
-/// 如果元数据显示 `Completed` 状态，则认为下载完成。
-/// 如果没有元数据文件但有章节子文件夹，也认为是已完成（兼容旧数据）。
+/// 首先从数据库加载已完成的下载任务。
+/// 然后扫描文件系统中的旧数据（兼容旧版本）。
 ///
 /// `downloading_ids`: 正在下载中的漫画 ID 列表，用于过滤避免重复显示
 fn scan_completed_downloads(
     downloading_ids: &std::collections::HashSet<String>,
 ) -> Vec<CompletedDownload> {
-    use crate::resources::DownloadTaskMeta;
+    use crate::{
+        db::database::{Database, run_db_operation},
+        resources::DownloadTaskMeta,
+    };
 
     let download_path = get_download_base_path();
     let mut downloads = Vec::new();
+    let mut known_comic_ids = std::collections::HashSet::new();
 
-    if !download_path.exists() {
-        tracing::debug!("下载目录不存在: {:?}", download_path);
-        return downloads;
+    // 1. 首先从数据库加载已完成的下载任务
+    let db_tasks = run_db_operation(async {
+        let db = Database::global().read();
+        db.get_completed_download_tasks().await
+    })
+    .unwrap_or_default();
+
+    for db_task in db_tasks {
+        // 跳过正在下载中的漫画
+        if downloading_ids.contains(&db_task.comic_id) {
+            tracing::debug!("跳过正在下载的漫画: {}", db_task.comic_title);
+            continue;
+        }
+
+        // 从 save_path 提取文件夹名称
+        let folder_name = std::path::Path::new(&db_task.save_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&db_task.comic_title)
+            .to_string();
+
+        let episode_count = db_task.get_episode_orders().len();
+
+        downloads.push(CompletedDownload {
+            comic_id: db_task.comic_id.clone(),
+            folder_name,
+            episode_count,
+            path: db_task.save_path.clone(),
+        });
+
+        known_comic_ids.insert(db_task.comic_id);
     }
 
-    // 遍历下载目录中的子文件夹
-    if let Ok(entries) = std::fs::read_dir(&download_path) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let folder_name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("未知")
-                    .to_string();
+    // 2. 向后兼容：扫描文件系统中的旧数据
+    if download_path.exists() {
+        if let Ok(entries) = std::fs::read_dir(&download_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let folder_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("未知")
+                        .to_string();
 
-                let path_str = path.to_string_lossy().to_string();
+                    let path_str = path.to_string_lossy().to_string();
 
-                // 检查是否有元数据文件
-                if let Ok(meta) = DownloadTaskMeta::load(&path_str) {
-                    // 跳过正在下载中的漫画
-                    if downloading_ids.contains(&meta.comic_id) {
-                        tracing::debug!("跳过正在下载的漫画: {}", folder_name);
-                        continue;
-                    }
+                    // 检查是否有旧的元数据文件
+                    if let Ok(meta) = DownloadTaskMeta::load(&path_str) {
+                        // 跳过已从数据库加载的
+                        if known_comic_ids.contains(&meta.comic_id) {
+                            continue;
+                        }
 
-                    // 只有已完成状态才显示在已下载列表
-                    if meta.state.is_completed() {
-                        let episode_count = meta.episode_orders.len();
-                        downloads.push(CompletedDownload {
-                            comic_id: meta.comic_id.clone(),
-                            folder_name,
-                            episode_count,
-                            path: path_str,
-                        });
-                    }
-                    // 未完成的不显示在已下载列表（会显示在下载中列表）
-                } else {
-                    // 没有元数据文件，使用旧的逻辑（兼容旧数据）
-                    // 统计章节数量（子文件夹数量）
-                    let episode_count = if let Ok(sub_entries) = std::fs::read_dir(&path) {
-                        sub_entries.flatten().filter(|e| e.path().is_dir()).count()
+                        // 跳过正在下载中的漫画
+                        if downloading_ids.contains(&meta.comic_id) {
+                            tracing::debug!("跳过正在下载的漫画: {}", folder_name);
+                            continue;
+                        }
+
+                        // 只有已完成状态才显示在已下载列表
+                        if meta.state.is_completed() {
+                            let episode_count = meta.episode_orders.len();
+                            downloads.push(CompletedDownload {
+                                comic_id: meta.comic_id.clone(),
+                                folder_name,
+                                episode_count,
+                                path: path_str,
+                            });
+                            known_comic_ids.insert(meta.comic_id);
+                        }
                     } else {
-                        0
-                    };
+                        // 没有元数据文件，使用旧的逻辑（兼容旧数据）
+                        // 统计章节数量（子文件夹数量）
+                        let episode_count = if let Ok(sub_entries) = std::fs::read_dir(&path) {
+                            sub_entries.flatten().filter(|e| e.path().is_dir()).count()
+                        } else {
+                            0
+                        };
 
-                    // 只有包含章节的才算已下载的漫画
-                    // 注意：没有元数据的旧数据无法重新下载（没有 comic_id）
-                    if episode_count > 0 {
-                        downloads.push(CompletedDownload {
-                            comic_id: String::new(), // 旧数据没有 comic_id
-                            folder_name,
-                            episode_count,
-                            path: path_str,
-                        });
+                        // 只有包含章节的才算已下载的漫画
+                        // 注意：没有元数据的旧数据无法重新下载（没有 comic_id）
+                        if episode_count > 0 {
+                            downloads.push(CompletedDownload {
+                                comic_id: String::new(), // 旧数据没有 comic_id
+                                folder_name,
+                                episode_count,
+                                path: path_str,
+                            });
+                        }
                     }
                 }
             }
@@ -1281,10 +1319,12 @@ pub fn delete_download_button_interaction(
 
 /// 重新下载按钮交互
 pub fn redownload_button_interaction(
+    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &RedownloadButton),
         Changed<Interaction>,
     >,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
@@ -1298,6 +1338,15 @@ pub fn redownload_button_interaction(
                     comic_id: btn.comic_id.clone(),
                 });
                 tracing::info!("请求重新下载/检查更新: {}", btn.comic_id);
+
+                // 从已下载列表中移除该项目（避免重复）
+                for (entity, item) in completed_item_query.iter() {
+                    if item.comic_id == btn.comic_id {
+                        commands.entity(entity).despawn();
+                        tracing::debug!("已从已下载列表移除: {}", btn.comic_id);
+                        break;
+                    }
+                }
             }
             Interaction::Hovered => {
                 *bg_color = BackgroundColor(redownload_color.with_alpha(0.3));
@@ -1352,6 +1401,84 @@ pub fn open_completed_folder_button_interaction(
             Interaction::None => {
                 *bg_color = BackgroundColor(folder_color.with_alpha(0.2));
             }
+        }
+    }
+}
+
+/// 处理下载完成后的 UI 更新
+/// 将任务从下载中列表移动到已下载列表
+pub fn handle_download_completed_ui(
+    mut commands: Commands,
+    mut messages: MessageReader<DownloadCompletedEvent>,
+    download_state: Res<DownloadManagerState>,
+    task_item_query: Query<(Entity, &DownloadTaskItem)>,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    completed_list_query: Query<Entity, With<CompletedDownloadList>>,
+    asset_server: Res<AssetServer>,
+) {
+    for event in messages.read() {
+        let comic_id = &event.comic_id;
+        let save_path = &event.save_path;
+
+        tracing::info!("UI: 下载完成，移动任务到已下载列表: {}", comic_id);
+
+        // 1. 找到并移除下载中的任务 UI
+        for (entity, task_item) in task_item_query.iter() {
+            if task_item.comic_id == *comic_id {
+                commands.entity(entity).despawn();
+                tracing::debug!("已移除下载任务 UI: {}", comic_id);
+                break;
+            }
+        }
+
+        // 2. 检查是否已存在于已下载列表（避免重复）
+        let mut already_exists = false;
+        for (entity, item) in completed_item_query.iter() {
+            if item.comic_id == *comic_id {
+                // 已存在，移除旧的（稍后会添加新的）
+                commands.entity(entity).despawn();
+                tracing::debug!("移除已存在的已下载项: {}", comic_id);
+                already_exists = true;
+                break;
+            }
+        }
+        let _ = already_exists; // 标记使用
+
+        // 3. 从 FSM 状态中获取漫画标题
+        let comic_title = download_state
+            .find_task(comic_id)
+            .map(|fsm| fsm.meta.comic_title.clone())
+            .unwrap_or_else(|| {
+                // 如果找不到，从保存路径提取文件夹名
+                std::path::Path::new(save_path)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("未知漫画")
+                    .to_string()
+            });
+
+        let episode_count = download_state
+            .find_task(comic_id)
+            .map(|fsm| fsm.meta.episode_orders.len())
+            .unwrap_or(0);
+
+        // 4. 添加到已下载列表
+        if let Ok(list_entity) = completed_list_query.single() {
+            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let download = CompletedDownload {
+                comic_id: comic_id.clone(),
+                folder_name: comic_title,
+                path: save_path.clone(),
+                episode_count,
+            };
+
+            commands.entity(list_entity).with_children(|parent| {
+                spawn_completed_download_item(parent, &font, &download);
+            });
+
+            tracing::info!("已添加到已下载列表: {}", comic_id);
+        } else {
+            tracing::warn!("未找到已下载列表容器，可能不在下载页面");
         }
     }
 }

@@ -4,9 +4,12 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 
 use crate::{
+    components::SidebarRoute,
     events::*,
     resources::{AppRoute, ComicDetailState, ComicsListState},
 };
@@ -18,6 +21,38 @@ pub struct NavigationHistory {
     pub back_stack: Vec<AppRoute>,
     /// 前进栈：存储后退后的页面
     pub forward_stack: Vec<AppRoute>,
+    /// 每个侧边栏分区最后访问的路由
+    pub section_last_routes: HashMap<SidebarRoute, AppRoute>,
+}
+
+/// 获取 AppRoute 对应的 SidebarRoute
+pub fn get_sidebar_route(route: &AppRoute) -> Option<SidebarRoute> {
+    match route {
+        AppRoute::Home => Some(SidebarRoute::Home),
+        AppRoute::Categories
+        | AppRoute::ComicsList
+        | AppRoute::ComicDetail
+        | AppRoute::ReadView => Some(SidebarRoute::Categories),
+        AppRoute::Search => Some(SidebarRoute::Search),
+        AppRoute::Rankings => Some(SidebarRoute::Rankings),
+        AppRoute::Favorites => Some(SidebarRoute::Favorites),
+        AppRoute::Downloads => Some(SidebarRoute::Downloads),
+        AppRoute::Settings => Some(SidebarRoute::Settings),
+        AppRoute::Login | AppRoute::ProxySettings => None,
+    }
+}
+
+/// 获取 SidebarRoute 的默认 AppRoute
+pub fn get_default_route(sidebar_route: SidebarRoute) -> AppRoute {
+    match sidebar_route {
+        SidebarRoute::Home => AppRoute::Home,
+        SidebarRoute::Categories => AppRoute::Categories,
+        SidebarRoute::Search => AppRoute::Search,
+        SidebarRoute::Rankings => AppRoute::Rankings,
+        SidebarRoute::Favorites => AppRoute::Favorites,
+        SidebarRoute::Downloads => AppRoute::Downloads,
+        SidebarRoute::Settings => AppRoute::Settings,
+    }
 }
 
 impl NavigationHistory {
@@ -25,6 +60,22 @@ impl NavigationHistory {
     pub fn push(&mut self, route: AppRoute) {
         self.back_stack.push(route);
         self.forward_stack.clear();
+    }
+
+    /// 更新某个侧边栏分区的最后访问路由
+    pub fn update_section_route(&mut self, route: &AppRoute) {
+        if let Some(sidebar_route) = get_sidebar_route(route) {
+            self.section_last_routes
+                .insert(sidebar_route, route.clone());
+        }
+    }
+
+    /// 获取某个侧边栏分区的最后访问路由
+    pub fn get_section_route(&self, sidebar_route: SidebarRoute) -> AppRoute {
+        self.section_last_routes
+            .get(&sidebar_route)
+            .cloned()
+            .unwrap_or_else(|| get_default_route(sidebar_route))
     }
 
     /// 后退导航
@@ -176,5 +227,15 @@ pub fn handle_back_navigation(
         if keyboard_input.just_pressed(KeyCode::ArrowRight) {
             forward_events.write(NavigateForwardEvent);
         }
+    }
+}
+
+/// 追踪路由变化，更新各分区的最后访问路由
+pub fn track_route_changes(
+    current_route: Res<State<AppRoute>>,
+    mut history: ResMut<NavigationHistory>,
+) {
+    if current_route.is_changed() {
+        history.update_section_route(current_route.get());
     }
 }

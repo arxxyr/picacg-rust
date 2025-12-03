@@ -38,7 +38,18 @@ fn main() {
     } else {
         tracing::info!("代理未启用");
     }
+
+    // 获取数据库路径
+    let db_path = settings.get_database_path();
     drop(settings);
+
+    // 初始化数据库
+    tracing::info!("正在初始化数据库: {:?}", db_path);
+    db::database::db_runtime().block_on(async {
+        if let Err(e) = db::database::Database::init(db_path).await {
+            tracing::error!("数据库初始化失败: {}", e);
+        }
+    });
 
     // 配置 assets 路径 (确保能找到字体)
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

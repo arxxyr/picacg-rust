@@ -402,7 +402,96 @@ fn spawn_comic_card(
                     ..default()
                 },
                 TextColor(AppColors::TEXT_SECONDARY),
+                Node {
+                    margin: UiRect::bottom(Val::Px(4.0)),
+                    ..default()
+                },
             ));
+
+            // 分类标签容器
+            if !comic.categories.is_empty() {
+                card.spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                })
+                .with_children(|tags_container| {
+                    // 最多显示 3 个分类
+                    for category in comic.categories.iter().take(3) {
+                        tags_container
+                            .spawn((
+                                Node {
+                                    padding: UiRect::new(
+                                        Val::Px(4.0),
+                                        Val::Px(4.0),
+                                        Val::Px(1.0),
+                                        Val::Px(1.0),
+                                    ),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
+                                BorderRadius::all(Val::Px(2.0)),
+                            ))
+                            .with_children(|badge| {
+                                badge.spawn((
+                                    Text::new(category),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 10.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                                ));
+                            });
+                    }
+                });
+            }
+
+            // 标签容器
+            if !comic.tags.is_empty() {
+                card.spawn(Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    margin: UiRect::top(Val::Px(2.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                })
+                .with_children(|tags_container| {
+                    // 最多显示 3 个标签
+                    for tag in comic.tags.iter().take(3) {
+                        tags_container
+                            .spawn((
+                                Node {
+                                    padding: UiRect::new(
+                                        Val::Px(4.0),
+                                        Val::Px(4.0),
+                                        Val::Px(1.0),
+                                        Val::Px(1.0),
+                                    ),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
+                                BorderRadius::all(Val::Px(2.0)),
+                            ))
+                            .with_children(|badge| {
+                                badge.spawn((
+                                    Text::new(tag),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 10.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.9, 0.7, 0.9)),
+                                ));
+                            });
+                    }
+                });
+            }
         });
 }
 

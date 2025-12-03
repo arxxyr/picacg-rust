@@ -9,7 +9,10 @@ use bevy::prelude::*;
 use crate::{
     components::*,
     resources::*,
-    systems::login::{AppColors, FONT_PATH},
+    systems::{
+        login::{AppColors, FONT_PATH},
+        navigation::NavigationHistory,
+    },
 };
 
 /// 侧边栏宽度
@@ -392,6 +395,7 @@ pub fn sidebar_button_interaction(
     >,
     current_route: Res<State<AppRoute>>,
     mut next_route: ResMut<NextState<AppRoute>>,
+    history: Res<NavigationHistory>,
 ) {
     for (interaction, mut bg_color, mut border_color, sidebar_btn) in &mut interaction_query {
         // 判断是否为当前激活的路由
@@ -414,16 +418,8 @@ pub fn sidebar_button_interaction(
                 *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
                 *border_color = BorderColor::all(AppColors::PRIMARY);
 
-                // 导航到对应页面
-                let target_route = match sidebar_btn.route {
-                    SidebarRoute::Home => AppRoute::Home,
-                    SidebarRoute::Categories => AppRoute::Categories,
-                    SidebarRoute::Search => AppRoute::Search,
-                    SidebarRoute::Rankings => AppRoute::Rankings,
-                    SidebarRoute::Favorites => AppRoute::Favorites,
-                    SidebarRoute::Downloads => AppRoute::Downloads,
-                    SidebarRoute::Settings => AppRoute::Settings,
-                };
+                // 使用保存的最后访问路由，而不是默认路由
+                let target_route = history.get_section_route(sidebar_btn.route);
                 next_route.set(target_route);
             }
             Interaction::Hovered => {

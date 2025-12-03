@@ -59,6 +59,9 @@ pub enum PicacgError {
     #[error("无效的参数: {0}")]
     InvalidArgument(String),
 
+    #[error("内部错误: {0}")]
+    InternalError(String),
+
     // 其他
     #[error("未知错误: {0}")]
     Unknown(String),

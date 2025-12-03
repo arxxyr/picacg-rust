@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS system (
     version INTEGER PRIMARY KEY
 );
 
--- 插入初始版本号
-INSERT INTO system (version) VALUES (1);
+-- 插入初始版本号（幂等）
+INSERT OR IGNORE INTO system (version) VALUES (1);
 
 -- 漫画表
 CREATE TABLE IF NOT EXISTS book (

@@ -9,12 +9,57 @@ use sqlx::{
 use tracing::{debug, info};
 
 use crate::{
-    db::models::{DbBook, DbCategoryCount, DbFavorite, DbHistory},
+    db::models::{
+        DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DownloadStateData,
+    },
     error::Result,
 };
 
 // 数据库单例
 static DATABASE: OnceCell<RwLock<Database>> = OnceCell::new();
+
+// 数据库专用的 tokio 运行时（用于在非异步上下文中执行数据库操作）
+static DB_RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
+    once_cell::sync::Lazy::new(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("无法创建数据库运行时")
+    });
+
+/// 获取数据库专用运行时
+pub fn db_runtime() -> &'static tokio::runtime::Runtime {
+    &DB_RUNTIME
+}
+
+/// 在适当的运行时上下文中执行异步操作
+///
+/// 如果当前已经在 tokio 运行时中（例如 bevy-tokio-tasks 的工作线程），
+/// 则使用 `spawn_blocking` 来避免嵌套 `block_on` 的问题。
+/// 否则使用专用的数据库运行时。
+pub fn run_db_operation<F, T>(future: F) -> T
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    // 检查是否在 tokio 运行时中
+    if let Ok(_handle) = tokio::runtime::Handle::try_current() {
+        // 已经在 tokio 运行时中，使用 spawn_blocking + block_on 来执行
+        // 这样可以避免 "Cannot start a runtime from within a runtime" 错误
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                // 在新线程中使用 db_runtime
+                db_runtime().block_on(future)
+            })
+            .join()
+            .expect("数据库操作线程 panic")
+        })
+    } else {
+        // 不在 tokio 运行时中，直接使用 db_runtime
+        db_runtime().block_on(future)
+    }
+}
 
 pub struct Database {
     pool: SqlitePool,
@@ -59,6 +104,13 @@ impl Database {
         info!("正在运行数据库迁移...");
         sqlx::query(include_str!(
             "../../migrations/20250104000001_initial_schema.sql"
+        ))
+        .execute(&pool)
+        .await?;
+
+        // 运行下载任务表迁移
+        sqlx::query(include_str!(
+            "../../migrations/20250104000002_download_tasks.sql"
         ))
         .execute(&pool)
         .await?;
@@ -342,5 +394,128 @@ impl Database {
             .await?;
 
         Ok(count)
+    }
+
+    // ==================== 下载任务相关操作 ====================
+
+    /// 插入或更新下载任务
+    pub async fn upsert_download_task(&self, task: &DbDownloadTask) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO download_task (
+                comic_id, comic_title, total_episodes, episode_orders,
+                save_path, state, state_data, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(comic_id) DO UPDATE SET
+                comic_title = excluded.comic_title,
+                total_episodes = excluded.total_episodes,
+                episode_orders = excluded.episode_orders,
+                save_path = excluded.save_path,
+                state = excluded.state,
+                state_data = excluded.state_data,
+                updated_at = excluded.updated_at
+            "#,
+        )
+        .bind(&task.comic_id)
+        .bind(&task.comic_title)
+        .bind(task.total_episodes)
+        .bind(&task.episode_orders)
+        .bind(&task.save_path)
+        .bind(&task.state)
+        .bind(&task.state_data)
+        .bind(task.created_at)
+        .bind(task.updated_at)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 更新下载任务状态
+    pub async fn update_download_task_state(
+        &self,
+        comic_id: &str,
+        state: &str,
+        state_data: Option<&DownloadStateData>,
+    ) -> Result<()> {
+        let state_data_json = state_data.and_then(|d| serde_json::to_string(d).ok());
+        let now = chrono::Utc::now().timestamp();
+
+        sqlx::query(
+            "UPDATE download_task SET state = ?, state_data = ?, updated_at = ? WHERE comic_id = ?",
+        )
+        .bind(state)
+        .bind(&state_data_json)
+        .bind(now)
+        .bind(comic_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 获取下载任务
+    pub async fn get_download_task(&self, comic_id: &str) -> Result<Option<DbDownloadTask>> {
+        let task =
+            sqlx::query_as::<_, DbDownloadTask>("SELECT * FROM download_task WHERE comic_id = ?")
+                .bind(comic_id)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        Ok(task)
+    }
+
+    /// 获取所有未完成的下载任务
+    pub async fn get_incomplete_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
+        let tasks = sqlx::query_as::<_, DbDownloadTask>(
+            "SELECT * FROM download_task WHERE state != 'Completed' ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(tasks)
+    }
+
+    /// 获取所有已完成的下载任务
+    pub async fn get_completed_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
+        let tasks = sqlx::query_as::<_, DbDownloadTask>(
+            "SELECT * FROM download_task WHERE state = 'Completed' ORDER BY updated_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(tasks)
+    }
+
+    /// 获取所有下载任务
+    pub async fn get_all_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
+        let tasks = sqlx::query_as::<_, DbDownloadTask>(
+            "SELECT * FROM download_task ORDER BY created_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(tasks)
+    }
+
+    /// 删除下载任务
+    pub async fn delete_download_task(&self, comic_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM download_task WHERE comic_id = ?")
+            .bind(comic_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// 检查下载任务是否存在
+    pub async fn download_task_exists(&self, comic_id: &str) -> Result<bool> {
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM download_task WHERE comic_id = ?")
+                .bind(comic_id)
+                .fetch_one(&self.pool)
+                .await?;
+
+        Ok(count > 0)
     }
 }

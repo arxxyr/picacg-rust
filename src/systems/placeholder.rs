@@ -13,10 +13,6 @@ use crate::{
 #[derive(Component)]
 pub struct HomeRoot;
 
-/// 搜索页根标记
-#[derive(Component)]
-pub struct SearchRoot;
-
 /// 排行榜页根标记
 #[derive(Component)]
 pub struct RankingsRoot;
@@ -147,42 +143,6 @@ pub fn setup_home_ui(
 }
 
 pub fn cleanup_home_ui(mut commands: Commands, query: Query<Entity, With<HomeRoot>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-}
-
-// ==================== 搜索 ====================
-
-pub fn setup_search_ui(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    content_area_query: Query<Entity, With<ContentArea>>,
-) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
-
-    let content_area = match content_area_query.iter().next() {
-        Some(entity) => entity,
-        None => {
-            tracing::warn!("搜索页：找不到内容区域");
-            return;
-        }
-    };
-
-    spawn_placeholder_page(
-        &mut commands,
-        content_area,
-        font,
-        SearchRoot,
-        "搜索",
-        "🔍",
-        "搜索漫画、作者、标签",
-    );
-
-    tracing::info!("搜索页 UI 已创建");
-}
-
-pub fn cleanup_search_ui(mut commands: Commands, query: Query<Entity, With<SearchRoot>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }

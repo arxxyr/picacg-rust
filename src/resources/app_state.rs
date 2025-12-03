@@ -131,6 +131,42 @@ impl Default for ComicsListState {
     }
 }
 
+/// 搜索状态
+#[derive(Resource)]
+pub struct SearchState {
+    /// 搜索关键词
+    pub keyword: String,
+    /// 搜索结果
+    pub results: Vec<Comic>,
+    /// 当前页码
+    pub page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 排序方式
+    pub sort: String,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 是否已执行过搜索
+    pub has_searched: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+impl Default for SearchState {
+    fn default() -> Self {
+        Self {
+            keyword: String::new(),
+            results: Vec::new(),
+            page: 1,
+            total_pages: 1,
+            sort: "dd".to_string(),
+            is_loading: false,
+            has_searched: false,
+            error: None,
+        }
+    }
+}
+
 /// 漫画详情状态
 #[derive(Resource, Default)]
 pub struct ComicDetailState {
@@ -361,7 +397,7 @@ impl DownloadState {
     }
 }
 
-/// 下载任务元数据（持久化到 JSON 文件）
+/// 下载任务元数据（持久化到数据库）
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DownloadTaskMeta {
     /// 漫画 ID
@@ -407,36 +443,178 @@ impl DownloadTaskMeta {
         }
     }
 
-    /// 获取元数据文件路径
+    /// 获取元数据文件路径（兼容旧版本）
     pub fn meta_file_path(save_path: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(save_path).join(".download_meta.json")
     }
 
-    /// 保存元数据到文件
-    pub fn save(&self) -> Result<(), String> {
-        let path = Self::meta_file_path(&self.save_path);
+    /// 转换为数据库实体
+    pub fn to_db_task(&self) -> crate::db::models::DbDownloadTask {
+        use crate::db::models::{DbDownloadTask, DownloadStateData};
 
-        // 确保目录存在
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
-        }
+        let mut db_task = DbDownloadTask::new(
+            self.comic_id.clone(),
+            self.comic_title.clone(),
+            self.episode_orders.clone(),
+            self.save_path.clone(),
+        );
 
-        let json = serde_json::to_string_pretty(self).map_err(|e| format!("序列化失败: {}", e))?;
-        std::fs::write(&path, json).map_err(|e| format!("写入文件失败: {}", e))?;
+        // 设置状态
+        let (state_str, state_data) = match &self.state {
+            DownloadState::Queued => ("Queued".to_string(), DownloadStateData::default()),
+            DownloadState::Downloading {
+                current_episode,
+                current_page,
+            } => (
+                "Downloading".to_string(),
+                DownloadStateData {
+                    current_episode: *current_episode,
+                    current_page: *current_page,
+                    error: None,
+                },
+            ),
+            DownloadState::Paused {
+                current_episode,
+                current_page,
+            } => (
+                "Paused".to_string(),
+                DownloadStateData {
+                    current_episode: *current_episode,
+                    current_page: *current_page,
+                    error: None,
+                },
+            ),
+            DownloadState::Completed => ("Completed".to_string(), DownloadStateData::default()),
+            DownloadState::Failed(err) => (
+                "Failed".to_string(),
+                DownloadStateData {
+                    current_episode: 0,
+                    current_page: 0,
+                    error: Some(err.clone()),
+                },
+            ),
+        };
 
-        Ok(())
+        db_task.state = state_str;
+        db_task.set_state_data(&state_data);
+        db_task.created_at = self.created_at;
+        db_task.updated_at = self.updated_at;
+
+        db_task
     }
 
-    /// 从文件加载元数据
-    pub fn load(save_path: &str) -> Result<Self, String> {
-        let path = Self::meta_file_path(save_path);
+    /// 从数据库实体创建
+    pub fn from_db_task(db_task: &crate::db::models::DbDownloadTask) -> Self {
+        let state_data = db_task.get_state_data();
 
-        if !path.exists() {
-            return Err("元数据文件不存在".to_string());
+        let state = match db_task.state.as_str() {
+            "Queued" => DownloadState::Queued,
+            "Downloading" => DownloadState::Downloading {
+                current_episode: state_data.current_episode,
+                current_page: state_data.current_page,
+            },
+            "Paused" => DownloadState::Paused {
+                current_episode: state_data.current_episode,
+                current_page: state_data.current_page,
+            },
+            "Completed" => DownloadState::Completed,
+            "Failed" => DownloadState::Failed(state_data.error.unwrap_or_default()),
+            _ => DownloadState::Queued,
+        };
+
+        Self {
+            comic_id: db_task.comic_id.clone(),
+            comic_title: db_task.comic_title.clone(),
+            total_episodes: db_task.total_episodes as i32,
+            episode_orders: db_task.get_episode_orders(),
+            save_path: db_task.save_path.clone(),
+            state,
+            created_at: db_task.created_at,
+            updated_at: db_task.updated_at,
+        }
+    }
+
+    /// 保存元数据到数据库
+    pub fn save(&self) -> Result<(), String> {
+        use crate::db::database::{Database, run_db_operation};
+
+        let db_task = self.to_db_task();
+
+        // 使用 run_db_operation 自动处理运行时上下文
+        run_db_operation(async move {
+            let db = Database::global().read();
+            db.upsert_download_task(&db_task)
+                .await
+                .map_err(|e| format!("保存到数据库失败: {}", e))
+        })
+    }
+
+    /// 从数据库加载元数据
+    pub fn load(save_path: &str) -> Result<Self, String> {
+        use crate::db::database::{Database, run_db_operation};
+
+        let save_path_owned = save_path.to_string();
+
+        // 首先尝试从数据库加载（通过 save_path 查找）
+        let result: Result<Option<Self>, String> = run_db_operation(async move {
+            let db = Database::global().read();
+            let tasks = db
+                .get_all_download_tasks()
+                .await
+                .map_err(|e| format!("数据库查询失败: {}", e))?;
+
+            // 通过 save_path 查找
+            for task in tasks {
+                if task.save_path == save_path_owned {
+                    return Ok(Some(Self::from_db_task(&task)));
+                }
+            }
+            Ok(None)
+        });
+
+        if let Ok(Some(meta)) = result {
+            return Ok(meta);
         }
 
-        let json = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))?;
-        serde_json::from_str(&json).map_err(|e| format!("解析 JSON 失败: {}", e))
+        // 数据库中没有找到，尝试从旧的 JSON 文件加载（向后兼容）
+        let path = Self::meta_file_path(save_path);
+        if path.exists() {
+            let json =
+                std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+            let meta: Self =
+                serde_json::from_str(&json).map_err(|e| format!("解析 JSON 失败: {}", e))?;
+
+            // 迁移到数据库
+            if let Err(e) = meta.save() {
+                tracing::warn!("迁移下载任务到数据库失败: {}", e);
+            } else {
+                // 迁移成功后删除旧文件
+                let _ = std::fs::remove_file(&path);
+                tracing::info!("已迁移下载任务到数据库: {}", meta.comic_title);
+            }
+
+            return Ok(meta);
+        }
+
+        Err("下载任务不存在".to_string())
+    }
+
+    /// 从数据库加载元数据（通过 comic_id）
+    pub fn load_by_comic_id(comic_id: &str) -> Result<Self, String> {
+        use crate::db::database::{Database, run_db_operation};
+
+        let comic_id_owned = comic_id.to_string();
+
+        run_db_operation(async move {
+            let db = Database::global().read();
+            let task = db
+                .get_download_task(&comic_id_owned)
+                .await
+                .map_err(|e| format!("数据库查询失败: {}", e))?
+                .ok_or_else(|| "下载任务不存在".to_string())?;
+
+            Ok(Self::from_db_task(&task))
+        })
     }
 
     /// 更新状态并保存
@@ -449,12 +627,24 @@ impl DownloadTaskMeta {
         self.save()
     }
 
-    /// 删除元数据文件
+    /// 删除下载任务
     pub fn delete(&self) -> Result<(), String> {
+        use crate::db::database::{Database, run_db_operation};
+
+        let comic_id = self.comic_id.clone();
+
+        // 从数据库删除
+        let _ = run_db_operation(async move {
+            let db = Database::global().read();
+            db.delete_download_task(&comic_id).await
+        });
+
+        // 同时删除旧的 JSON 文件（如果存在）
         let path = Self::meta_file_path(&self.save_path);
         if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| format!("删除文件失败: {}", e))?;
+            let _ = std::fs::remove_file(&path);
         }
+
         Ok(())
     }
 }
@@ -691,52 +881,94 @@ impl DownloadManagerState {
         self.downloading_ids.remove(comic_id);
     }
 
-    /// 从下载目录加载未完成的任务
+    /// 从数据库加载未完成的任务
     pub fn load_incomplete_tasks(&mut self, download_base_path: &std::path::Path) {
-        // 扫描下载目录中的所有子文件夹
-        if !download_base_path.exists() {
-            tracing::debug!("下载目录不存在: {:?}", download_base_path);
-            return;
+        use crate::db::database::{Database, run_db_operation};
+
+        // 首先尝试从数据库加载
+        let db_tasks: Vec<crate::db::models::DbDownloadTask> = run_db_operation(async {
+            let db = Database::global().read();
+            db.get_incomplete_download_tasks().await
+        })
+        .unwrap_or_default();
+
+        for db_task in db_tasks {
+            let meta = DownloadTaskMeta::from_db_task(&db_task);
+
+            // 检查是否已经存在
+            if self.find_task(&meta.comic_id).is_some() {
+                tracing::debug!("任务已存在，跳过: {}", meta.comic_title);
+                continue;
+            }
+
+            tracing::info!("从数据库加载下载任务: {}", meta.comic_title);
+            let mut fsm = DownloadTaskFSM::new(meta);
+
+            // 如果任务状态是 Downloading，自动转换为 Paused
+            // （因为程序重启后后台下载任务已停止）
+            if let DownloadState::Downloading {
+                current_episode,
+                current_page,
+            } = fsm.meta.state.clone()
+            {
+                fsm.meta.state = DownloadState::Paused {
+                    current_episode,
+                    current_page,
+                };
+                // 保存状态变更
+                let _ = fsm.meta.save();
+                tracing::info!(
+                    "将任务状态从 Downloading 转换为 Paused: {}",
+                    fsm.meta.comic_title
+                );
+            }
+            self.fsm_tasks.push(fsm);
         }
 
-        if let Ok(entries) = std::fs::read_dir(download_base_path) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_dir() {
-                    // 检查是否有元数据文件
-                    let meta_path = path.join(".download_meta.json");
-                    if meta_path.exists() {
-                        if let Ok(meta) = DownloadTaskMeta::load(path.to_str().unwrap_or_default())
-                        {
-                            // 只加载未完成的任务
-                            if !meta.state.is_completed() {
-                                // 检查是否已经存在
-                                if self.find_task(&meta.comic_id).is_some() {
-                                    tracing::debug!("任务已存在，跳过: {}", meta.comic_title);
-                                    continue;
-                                }
+        // 向后兼容：扫描下载目录中的旧 JSON 文件
+        if download_base_path.exists() {
+            if let Ok(entries) = std::fs::read_dir(download_base_path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        // 检查是否有旧的元数据文件
+                        let meta_path = path.join(".download_meta.json");
+                        if meta_path.exists() {
+                            if let Ok(meta) =
+                                DownloadTaskMeta::load(path.to_str().unwrap_or_default())
+                            {
+                                // 只加载未完成的任务
+                                if !meta.state.is_completed() {
+                                    // 检查是否已经存在（可能已从数据库加载）
+                                    if self.find_task(&meta.comic_id).is_some() {
+                                        tracing::debug!("任务已存在，跳过: {}", meta.comic_title);
+                                        continue;
+                                    }
 
-                                tracing::info!("加载未完成的下载任务: {}", meta.comic_title);
-                                let mut fsm = DownloadTaskFSM::new(meta);
-                                // 如果任务状态是 Downloading，自动转换为 Paused
-                                // （因为程序重启后后台下载任务已停止）
-                                if let DownloadState::Downloading {
-                                    current_episode,
-                                    current_page,
-                                } = fsm.meta.state.clone()
-                                {
-                                    fsm.meta.state = DownloadState::Paused {
+                                    tracing::info!(
+                                        "从旧文件加载并迁移下载任务: {}",
+                                        meta.comic_title
+                                    );
+                                    let mut fsm = DownloadTaskFSM::new(meta);
+
+                                    // 如果任务状态是 Downloading，自动转换为 Paused
+                                    if let DownloadState::Downloading {
                                         current_episode,
                                         current_page,
-                                    };
-                                    // 保存状态变更
-                                    let _ = fsm.meta.save();
-                                    tracing::info!(
-                                        "将任务状态从 Downloading 转换为 Paused: {}",
-                                        fsm.meta.comic_title
-                                    );
+                                    } = fsm.meta.state.clone()
+                                    {
+                                        fsm.meta.state = DownloadState::Paused {
+                                            current_episode,
+                                            current_page,
+                                        };
+                                        let _ = fsm.meta.save();
+                                        tracing::info!(
+                                            "将任务状态从 Downloading 转换为 Paused: {}",
+                                            fsm.meta.comic_title
+                                        );
+                                    }
+                                    self.fsm_tasks.push(fsm);
                                 }
-                                self.fsm_tasks.push(fsm);
                             }
                         }
                     }

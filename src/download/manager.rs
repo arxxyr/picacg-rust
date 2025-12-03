@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    path::Path,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -11,12 +10,13 @@ use reqwest::Client;
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncSeekExt, AsyncWriteExt},
-    sync::{Semaphore, mpsc},
+    sync::mpsc,
     time::sleep,
 };
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    config::settings::AppSettings,
     download::task::{DownloadEvent, DownloadHandle, DownloadStatus, DownloadTask},
     error::{PicacgError, Result},
 };
@@ -27,8 +27,8 @@ pub static DOWNLOAD_MANAGER: Lazy<DownloadManager> = Lazy::new(DownloadManager::
 /// 下载管理器配置
 #[derive(Debug, Clone)]
 pub struct DownloadConfig {
-    /// 最大并发下载数
-    pub max_concurrent: usize,
+    /// 下载线程数（类似 Python 的 DownloadThreadNum）
+    pub download_thread_num: usize,
     /// 下载超时时间（秒）
     pub timeout_secs: u64,
     /// 每个任务的最大重试次数
@@ -41,8 +41,10 @@ pub struct DownloadConfig {
 
 impl Default for DownloadConfig {
     fn default() -> Self {
+        // 从全局设置读取下载线程数
+        let download_workers = AppSettings::global().read().download_workers;
         Self {
-            max_concurrent: 5,
+            download_thread_num: download_workers,
             timeout_secs: 60,
             max_retries: 3,
             progress_interval_ms: 500,
@@ -51,22 +53,35 @@ impl Default for DownloadConfig {
     }
 }
 
+/// 内部下载任务（包含任务和句柄）
+struct InternalDownloadTask {
+    task: DownloadTask,
+    handle: DownloadHandle,
+}
+
 /// 下载管理器
+///
+/// 参考 Python 版本设计：
+/// - 使用固定数量的 worker 线程（download_thread_num）
+/// - 每个 worker 从队列中取任务执行
+/// - 类似 Python 的 `_downloadQueue.get(True)` 模式
 pub struct DownloadManager {
-    /// HTTP 客户端
+    /// HTTP 客户端（每个 worker 共享）
     client: Client,
     /// 任务映射表
     tasks: Arc<RwLock<HashMap<u64, DownloadTask>>>,
     /// 任务句柄映射表
     handles: Arc<RwLock<HashMap<u64, DownloadHandle>>>,
-    /// 事件发送器
+    /// 下载事件发送器
     event_tx: mpsc::UnboundedSender<DownloadEvent>,
-    /// 事件接收器（用于订阅）
+    /// 下载事件接收器（用于外部订阅）
     event_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<DownloadEvent>>>>,
-    /// 并发控制信号量
-    semaphore: Arc<Semaphore>,
+    /// 下载任务队列发送端（类似 Python 的 _downloadQueue.put）
+    download_queue_tx: mpsc::UnboundedSender<InternalDownloadTask>,
     /// 配置
     config: Arc<RwLock<DownloadConfig>>,
+    /// worker 是否已启动
+    workers_started: Arc<RwLock<bool>>,
 }
 
 impl DownloadManager {
@@ -74,20 +89,170 @@ impl DownloadManager {
     pub fn new() -> Self {
         let config = DownloadConfig::default();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (download_queue_tx, download_queue_rx) = mpsc::unbounded_channel();
 
         let client = Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs))
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
+        let manager = Self {
             client,
             tasks: Arc::new(RwLock::new(HashMap::new())),
             handles: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
             event_rx: Arc::new(RwLock::new(Some(event_rx))),
-            semaphore: Arc::new(Semaphore::new(config.max_concurrent)),
-            config: Arc::new(RwLock::new(config)),
+            download_queue_tx,
+            config: Arc::new(RwLock::new(config.clone())),
+            workers_started: Arc::new(RwLock::new(false)),
+        };
+
+        // 启动 worker 线程
+        manager.start_workers(download_queue_rx, config.download_thread_num);
+
+        manager
+    }
+
+    /// 启动下载 worker 线程
+    ///
+    /// 类似 Python 版本：
+    /// ```python
+    /// for i in range(self.downloadNum):
+    ///     thread = threading.Thread(target=self.RunDownload, args=[i])
+    ///     thread.start()
+    /// ```
+    fn start_workers(
+        &self,
+        download_queue_rx: mpsc::UnboundedReceiver<InternalDownloadTask>,
+        worker_count: usize,
+    ) {
+        let mut already_started = self.workers_started.write();
+        if *already_started {
+            return;
+        }
+        *already_started = true;
+
+        // 将接收端包装为可共享的
+        let rx = Arc::new(tokio::sync::Mutex::new(download_queue_rx));
+
+        info!("启动 {} 个下载 worker 线程", worker_count);
+
+        for worker_id in 0..worker_count {
+            let rx = rx.clone();
+            let client = self.client.clone();
+            let tasks = self.tasks.clone();
+            let handles = self.handles.clone();
+            let config = self.config.clone();
+
+            // 启动 worker 任务
+            // 类似 Python 的 threading.Thread(target=self.RunDownload, args=[i])
+            tokio::spawn(async move {
+                Self::run_download_worker(worker_id, rx, client, tasks, handles, config).await;
+            });
+        }
+    }
+
+    /// 下载 worker 运行循环
+    ///
+    /// 类似 Python 版本：
+    /// ```python
+    /// def RunDownload(self, index):
+    ///     while True:
+    ///         task = self._downloadQueue.get(True)  # 阻塞等待
+    ///         self._downloadQueue.task_done()
+    ///         if task == "":
+    ///             break
+    ///         self._Download(task, index)
+    /// ```
+    async fn run_download_worker(
+        worker_id: usize,
+        rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<InternalDownloadTask>>>,
+        client: Client,
+        tasks: Arc<RwLock<HashMap<u64, DownloadTask>>>,
+        handles: Arc<RwLock<HashMap<u64, DownloadHandle>>>,
+        config: Arc<RwLock<DownloadConfig>>,
+    ) {
+        debug!("Download worker {} 已启动", worker_id);
+
+        loop {
+            // 从队列获取任务（类似 Python 的 _downloadQueue.get(True)）
+            let internal_task = {
+                let mut rx_guard = rx.lock().await;
+                rx_guard.recv().await
+            };
+
+            let Some(internal_task) = internal_task else {
+                // 队列关闭，退出 worker
+                info!("Download worker {} 退出（队列已关闭）", worker_id);
+                break;
+            };
+
+            let task = internal_task.task;
+            let handle = internal_task.handle;
+
+            debug!(
+                "Download worker {} 开始处理任务 {}: {}",
+                worker_id, task.id, task.url
+            );
+
+            // 发送开始事件
+            handle.send_event(DownloadEvent::Started(task.id));
+
+            // 更新状态为下载中
+            if let Some(t) = tasks.write().get_mut(&task.id) {
+                t.status = DownloadStatus::Downloading;
+            }
+
+            // 执行下载
+            let config_snapshot = config.read().clone();
+            let result = Self::download_file(
+                client.clone(),
+                task.clone(),
+                handle.clone(),
+                tasks.clone(),
+                config_snapshot,
+            )
+            .await;
+
+            // 处理下载结果
+            match result {
+                Ok(_) => {
+                    // 更新状态为完成
+                    if let Some(t) = tasks.write().get_mut(&task.id) {
+                        t.status = DownloadStatus::Completed;
+                    }
+                    handle.send_event(DownloadEvent::Completed(task.id));
+                    info!("Download worker {} 完成任务 {}", worker_id, task.id);
+                }
+                Err(e) => {
+                    if handle.is_cancelled() {
+                        // 任务被取消
+                        if let Some(t) = tasks.write().get_mut(&task.id) {
+                            t.status = DownloadStatus::Cancelled;
+                        }
+                        handle.send_event(DownloadEvent::Cancelled(task.id));
+                        info!("Download worker {} 任务 {} 已取消", worker_id, task.id);
+                    } else {
+                        // 下载失败
+                        let error_msg = e.to_string();
+                        if let Some(t) = tasks.write().get_mut(&task.id) {
+                            t.status = DownloadStatus::Failed;
+                            t.error = Some(error_msg.clone());
+                        }
+                        handle.send_event(DownloadEvent::Failed {
+                            task_id: task.id,
+                            error: error_msg.clone(),
+                        });
+                        error!(
+                            "Download worker {} 任务 {} 失败: {}",
+                            worker_id, task.id, error_msg
+                        );
+                    }
+                }
+            }
+
+            // 清理句柄
+            handles.write().remove(&task.id);
         }
     }
 
@@ -112,6 +277,8 @@ impl DownloadManager {
     }
 
     /// 添加下载任务
+    ///
+    /// 类似 Python 的 `_downloadQueue.put(task)`
     pub fn add_task(&self, mut task: DownloadTask) -> Result<u64> {
         let task_id = task.id;
 
@@ -136,9 +303,16 @@ impl DownloadManager {
         self.tasks.write().insert(task_id, task.clone());
         self.handles.write().insert(task_id, handle.clone());
 
-        // 启动下载任务
-        self.spawn_download_task(task, handle);
+        // 将任务放入下载队列（类似 Python 的 _downloadQueue.put）
+        let internal_task = InternalDownloadTask { task, handle };
+        if self.download_queue_tx.send(internal_task).is_err() {
+            error!("无法将任务 {} 放入下载队列", task_id);
+            self.tasks.write().remove(&task_id);
+            self.handles.write().remove(&task_id);
+            return Err(PicacgError::InternalError("下载队列已关闭".to_string()));
+        }
 
+        debug!("任务 {} 已加入下载队列", task_id);
         Ok(task_id)
     }
 
@@ -181,70 +355,6 @@ impl DownloadManager {
         });
     }
 
-    /// 生成下载任务
-    fn spawn_download_task(&self, task: DownloadTask, handle: DownloadHandle) {
-        let client = self.client.clone();
-        let tasks = self.tasks.clone();
-        let handles = self.handles.clone();
-        let semaphore = self.semaphore.clone();
-        let config = self.config.read().clone();
-
-        tokio::spawn(async move {
-            // 获取信号量许可（控制并发数）
-            let _permit = semaphore.acquire().await.unwrap();
-
-            // 发送开始事件
-            handle.send_event(DownloadEvent::Started(task.id));
-
-            // 更新状态为下载中
-            if let Some(t) = tasks.write().get_mut(&task.id) {
-                t.status = DownloadStatus::Downloading;
-            }
-
-            // 执行下载
-            let result =
-                Self::download_file(client, task.clone(), handle.clone(), tasks.clone(), config)
-                    .await;
-
-            // 处理下载结果
-            match result {
-                Ok(_) => {
-                    // 更新状态为完成
-                    if let Some(t) = tasks.write().get_mut(&task.id) {
-                        t.status = DownloadStatus::Completed;
-                    }
-                    handle.send_event(DownloadEvent::Completed(task.id));
-                    info!("下载任务 {} 完成", task.id);
-                }
-                Err(e) => {
-                    if handle.is_cancelled() {
-                        // 任务被取消
-                        if let Some(t) = tasks.write().get_mut(&task.id) {
-                            t.status = DownloadStatus::Cancelled;
-                        }
-                        handle.send_event(DownloadEvent::Cancelled(task.id));
-                        info!("下载任务 {} 已取消", task.id);
-                    } else {
-                        // 下载失败
-                        let error_msg = e.to_string();
-                        if let Some(t) = tasks.write().get_mut(&task.id) {
-                            t.status = DownloadStatus::Failed;
-                            t.error = Some(error_msg.clone());
-                        }
-                        handle.send_event(DownloadEvent::Failed {
-                            task_id: task.id,
-                            error: error_msg.clone(),
-                        });
-                        error!("下载任务 {} 失败: {}", task.id, error_msg);
-                    }
-                }
-            }
-
-            // 清理句柄
-            handles.write().remove(&task.id);
-        });
-    }
-
     /// 下载文件
     async fn download_file(
         client: Client,
@@ -275,7 +385,7 @@ impl DownloadManager {
                         task.id, retries, config.max_retries
                     );
 
-                    // 等待后重试
+                    // 等待后重试（指数退避）
                     sleep(Duration::from_secs(2u64.pow(retries))).await;
                 }
             }
