@@ -225,7 +225,9 @@ impl Plugin for UiPlugin {
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
                     refresh_downloads_ui,
+                    add_new_task_ui,
                     handle_download_completed_ui,
+                    update_download_titles,
                     handle_downloads_scroll,
                     update_downloads_content_size,
                     // 滚动条系统

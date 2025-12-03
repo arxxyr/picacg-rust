@@ -746,23 +746,22 @@ pub fn search_input_interaction(
                 *border_color = BorderColor::all(AppColors::PRIMARY);
                 *bg_color = BackgroundColor(AppColors::CARD_BG);
 
-                // 设置 IME 位置（输入框左下角）
+                // 启用 IME 并设置位置
                 if let Ok(mut window) = window_query.single_mut() {
-                    let scale_factor = window.scale_factor();
-                    let pos = transform.translation();
-                    let size = computed.size() / scale_factor;
+                    window.ime_enabled = true;
 
-                    // 计算输入框在屏幕坐标系中的位置
-                    // Bevy UI 坐标系：中心为原点，Y 向上
-                    // 屏幕坐标系：左上为原点，Y 向下
-                    let window_center_x = window.width() / 2.0;
-                    let window_center_y = window.height() / 2.0;
-
-                    let screen_x = window_center_x + pos.x - size.x / 2.0;
-                    let screen_y = window_center_y - pos.y + size.y / 2.0;
-
-                    window.ime_position = bevy::math::Vec2::new(screen_x, screen_y);
-                    tracing::info!("设置 IME 位置: ({}, {})", screen_x, screen_y);
+                    // 使用当前鼠标位置设置 IME 候选框位置
+                    if let Some(cursor_pos) = window.cursor_position() {
+                        let scale_factor = window.scale_factor();
+                        let input_height = computed.size().y / scale_factor;
+                        // IME 候选框显示在点击位置下方
+                        let ime_x = cursor_pos.x;
+                        let ime_y = cursor_pos.y + input_height / 2.0 + 5.0;
+                        window.ime_position = bevy::math::Vec2::new(ime_x, ime_y);
+                        tracing::info!("启用 IME，位置: ({:.0}, {:.0})", ime_x, ime_y);
+                    } else {
+                        tracing::info!("启用 IME");
+                    }
                 }
             }
             Interaction::Hovered => {
@@ -1551,12 +1550,19 @@ pub fn refresh_search_ui(
 pub fn unfocus_search_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut input_query: Query<(&Interaction, &mut SearchInputField, &mut BorderColor)>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
         for (interaction, mut input, mut border) in input_query.iter_mut() {
             if *interaction == Interaction::None && input.focused {
                 input.focused = false;
                 *border = BorderColor::all(AppColors::BORDER);
+
+                // 禁用 IME
+                if let Ok(mut window) = window_query.single_mut() {
+                    window.ime_enabled = false;
+                    tracing::info!("输入框失去焦点，禁用 IME");
+                }
             }
         }
     }

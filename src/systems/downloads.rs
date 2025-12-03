@@ -55,6 +55,14 @@ pub struct DownloadsScrollContainer;
 #[derive(Component)]
 pub struct DownloadTaskList;
 
+/// "下载中" 区域容器（包含标题和任务列表）
+#[derive(Component)]
+pub struct DownloadingSection;
+
+/// "下载中" 标题文本
+#[derive(Component)]
+pub struct DownloadingTitleText;
+
 /// 已完成下载项目（历史记录）
 #[derive(Debug, Clone)]
 pub struct CompletedDownload {
@@ -74,6 +82,14 @@ pub struct CompletedDownloadItem {
 /// 已下载列表容器标记
 #[derive(Component)]
 pub struct CompletedDownloadList;
+
+/// "已下载" 区域容器
+#[derive(Component)]
+pub struct CompletedSection;
+
+/// "已下载" 标题文本
+#[derive(Component)]
+pub struct CompletedTitleText;
 
 /// 重新下载按钮标记
 #[derive(Component)]
@@ -328,73 +344,113 @@ pub fn setup_downloads_ui(
                                 .collect();
 
                             let has_active_tasks = !active_tasks.is_empty();
-                            if has_active_tasks {
-                                // 进行中标题
-                                scroll.spawn((
-                                    Text::new(format!("📥 下载中 ({})", active_tasks.len())),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                    Node {
-                                        margin: UiRect::bottom(Val::Px(10.0)),
-                                        ..default()
-                                    },
-                                ));
 
-                                scroll
-                                    .spawn((
-                                        DownloadTaskList,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            row_gap: Val::Px(10.0),
-                                            margin: UiRect::bottom(Val::Px(20.0)),
+                            // 始终创建"下载中"区域（初始可能隐藏）
+                            scroll
+                                .spawn((
+                                    DownloadingSection,
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        flex_direction: FlexDirection::Column,
+                                        display: if has_active_tasks {
+                                            Display::Flex
+                                        } else {
+                                            Display::None
+                                        },
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|section| {
+                                    // 进行中标题
+                                    section.spawn((
+                                        DownloadingTitleText,
+                                        Text::new(format!("📥 下载中 ({})", active_tasks.len())),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 16.0,
                                             ..default()
                                         },
-                                    ))
-                                    .with_children(|list| {
-                                        for task in &active_tasks {
-                                            spawn_download_task_item(list, &font, task);
-                                        }
-                                    });
-                            }
-
-                            // 已下载列表
-                            if !completed_downloads.is_empty() {
-                                // 已下载标题
-                                scroll.spawn((
-                                    Text::new(format!("📚 已下载 ({})", completed_downloads.len())),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                    Node {
-                                        margin: UiRect::bottom(Val::Px(10.0)),
-                                        ..default()
-                                    },
-                                ));
-
-                                scroll
-                                    .spawn((
-                                        CompletedDownloadList,
+                                        TextColor(AppColors::TEXT),
                                         Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            row_gap: Val::Px(10.0),
+                                            margin: UiRect::bottom(Val::Px(10.0)),
                                             ..default()
                                         },
-                                    ))
-                                    .with_children(|list| {
-                                        for download in &completed_downloads {
-                                            spawn_completed_download_item(list, &font, download);
-                                        }
-                                    });
-                            }
+                                    ));
+
+                                    // 任务列表容器
+                                    section
+                                        .spawn((
+                                            DownloadTaskList,
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                flex_direction: FlexDirection::Column,
+                                                row_gap: Val::Px(10.0),
+                                                margin: UiRect::bottom(Val::Px(20.0)),
+                                                ..default()
+                                            },
+                                        ))
+                                        .with_children(|list| {
+                                            for task in &active_tasks {
+                                                spawn_download_task_item(list, &font, task);
+                                            }
+                                        });
+                                });
+
+                            // 已下载列表（始终创建，初始可能隐藏）
+                            let has_completed = !completed_downloads.is_empty();
+                            scroll
+                                .spawn((
+                                    CompletedSection,
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        flex_direction: FlexDirection::Column,
+                                        display: if has_completed {
+                                            Display::Flex
+                                        } else {
+                                            Display::None
+                                        },
+                                        ..default()
+                                    },
+                                ))
+                                .with_children(|section| {
+                                    // 已下载标题
+                                    section.spawn((
+                                        CompletedTitleText,
+                                        Text::new(format!(
+                                            "📚 已下载 ({})",
+                                            completed_downloads.len()
+                                        )),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 16.0,
+                                            ..default()
+                                        },
+                                        TextColor(AppColors::TEXT),
+                                        Node {
+                                            margin: UiRect::bottom(Val::Px(10.0)),
+                                            ..default()
+                                        },
+                                    ));
+
+                                    // 列表容器
+                                    section
+                                        .spawn((
+                                            CompletedDownloadList,
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                flex_direction: FlexDirection::Column,
+                                                row_gap: Val::Px(10.0),
+                                                ..default()
+                                            },
+                                        ))
+                                        .with_children(|list| {
+                                            for download in &completed_downloads {
+                                                spawn_completed_download_item(
+                                                    list, &font, download,
+                                                );
+                                            }
+                                        });
+                                });
 
                             // 如果都为空，显示空状态
                             if !has_active_tasks && completed_downloads.is_empty() {
@@ -1125,6 +1181,321 @@ pub fn refresh_downloads_ui(
         download_state.fsm_tasks.len(),
         download_state.downloading_ids.len()
     );
+}
+
+/// 动态添加新任务的 UI（检测没有 UI 的任务并创建）
+pub fn add_new_task_ui(
+    mut commands: Commands,
+    download_state: Res<DownloadManagerState>,
+    task_list_query: Query<Entity, With<DownloadTaskList>>,
+    mut section_query: Query<&mut Node, With<DownloadingSection>>,
+    mut title_query: Query<&mut Text, With<DownloadingTitleText>>,
+    existing_items_query: Query<&DownloadTaskItem>,
+    asset_server: Res<AssetServer>,
+) {
+    // 只在状态变化时检查
+    if !download_state.is_changed() {
+        return;
+    }
+
+    // 获取所有活跃任务
+    let active_tasks: Vec<_> = download_state
+        .active_tasks()
+        .into_iter()
+        .map(|fsm| fsm.to_ui_task())
+        .collect();
+
+    if active_tasks.is_empty() {
+        return;
+    }
+
+    // 获取已存在 UI 的任务 ID
+    let existing_ids: std::collections::HashSet<_> = existing_items_query
+        .iter()
+        .map(|item| item.comic_id.clone())
+        .collect();
+
+    // 找出没有 UI 的新任务
+    let new_tasks: Vec<_> = active_tasks
+        .iter()
+        .filter(|task| !existing_ids.contains(&task.comic_id))
+        .collect();
+
+    if new_tasks.is_empty() {
+        return;
+    }
+
+    // 显示"下载中"区域（如果之前是隐藏的）
+    if let Ok(mut section_node) = section_query.single_mut() {
+        if section_node.display == Display::None {
+            section_node.display = Display::Flex;
+            tracing::info!("显示下载中区域");
+        }
+    }
+
+    // 更新标题文本
+    if let Ok(mut title_text) = title_query.single_mut() {
+        **title_text = format!("📥 下载中 ({})", active_tasks.len());
+    }
+
+    // 获取任务列表容器
+    let Ok(list_entity) = task_list_query.single() else {
+        tracing::warn!(
+            "没有找到下载任务列表容器，需要 {} 个新任务 UI",
+            new_tasks.len()
+        );
+        return;
+    };
+
+    let font: Handle<Font> = asset_server.load(crate::systems::login::FONT_PATH);
+
+    // 为每个新任务添加 UI
+    for task in new_tasks {
+        tracing::info!("动态添加下载任务 UI: {}", task.comic_title);
+
+        let task_entity = commands
+            .spawn((
+                DownloadTaskItem {
+                    comic_id: task.comic_id.clone(),
+                },
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(12.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
+                BorderColor::all(AppColors::BORDER),
+                BorderRadius::all(Val::Px(4.0)),
+            ))
+            .with_children(|item| {
+                // 标题和按钮行
+                item.spawn(Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    ..default()
+                })
+                .with_children(|row| {
+                    // 标题
+                    row.spawn((
+                        Text::new(&task.comic_title),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+
+                    // 按钮容器
+                    row.spawn(Node {
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|btns| {
+                        // 暂停按钮
+                        btns.spawn((
+                            PauseDownloadButton {
+                                comic_id: task.comic_id.clone(),
+                            },
+                            Button,
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                display: Display::Flex,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.6, 0.5, 0.2)),
+                            BorderRadius::all(Val::Px(3.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("暂停"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                        // 继续按钮
+                        btns.spawn((
+                            ResumeDownloadButton {
+                                comic_id: task.comic_id.clone(),
+                            },
+                            Button,
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                display: Display::None,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.3, 0.6, 0.3)),
+                            BorderRadius::all(Val::Px(3.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("继续"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                        // 删除按钮
+                        btns.spawn((
+                            DeleteDownloadButton {
+                                comic_id: task.comic_id.clone(),
+                            },
+                            Button,
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                display: Display::None,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
+                            BorderRadius::all(Val::Px(3.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("删除"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                    });
+                });
+
+                // 进度条容器
+                item.spawn(Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(4.0),
+                    ..default()
+                })
+                .insert(BackgroundColor(Color::srgb(0.2, 0.2, 0.25)))
+                .insert(BorderRadius::all(Val::Px(2.0)))
+                .with_children(|bar_bg| {
+                    bar_bg.spawn((
+                        DownloadProgressBar {
+                            comic_id: task.comic_id.clone(),
+                        },
+                        Node {
+                            width: Val::Percent(0.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(AppColors::PRIMARY),
+                        BorderRadius::all(Val::Px(2.0)),
+                    ));
+                });
+
+                // 状态文本
+                item.spawn((
+                    DownloadStatusText {
+                        comic_id: task.comic_id.clone(),
+                    },
+                    Text::new("准备中..."),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+            })
+            .id();
+
+        // 添加到任务列表容器
+        commands.entity(list_entity).add_child(task_entity);
+    }
+}
+
+/// 更新下载页面标题数字（基于实际 UI 元素数量）
+pub fn update_download_titles(
+    task_items_query: Query<&DownloadTaskItem>,
+    completed_items_query: Query<&CompletedDownloadItem>,
+    mut downloading_title_query: Query<
+        &mut Text,
+        (With<DownloadingTitleText>, Without<CompletedTitleText>),
+    >,
+    mut completed_title_query: Query<
+        &mut Text,
+        (With<CompletedTitleText>, Without<DownloadingTitleText>),
+    >,
+    mut downloading_section_query: Query<
+        &mut Node,
+        (With<DownloadingSection>, Without<CompletedSection>),
+    >,
+    mut completed_section_query: Query<
+        &mut Node,
+        (With<CompletedSection>, Without<DownloadingSection>),
+    >,
+) {
+    let task_count = task_items_query.iter().count();
+    let completed_count = completed_items_query.iter().count();
+
+    // 更新下载中标题和区域显示状态
+    if let Ok(mut title) = downloading_title_query.single_mut() {
+        let new_text = format!("📥 下载中 ({})", task_count);
+        if **title != new_text {
+            **title = new_text;
+        }
+    }
+    if let Ok(mut section) = downloading_section_query.single_mut() {
+        let should_display = task_count > 0;
+        let new_display = if should_display {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if section.display != new_display {
+            section.display = new_display;
+        }
+    }
+
+    // 更新已下载标题和区域显示状态
+    if let Ok(mut title) = completed_title_query.single_mut() {
+        let new_text = format!("📚 已下载 ({})", completed_count);
+        if **title != new_text {
+            **title = new_text;
+        }
+    }
+    if let Ok(mut section) = completed_section_query.single_mut() {
+        let should_display = completed_count > 0;
+        let new_display = if should_display {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if section.display != new_display {
+            section.display = new_display;
+        }
+    }
 }
 
 /// 处理下载页面滚动
