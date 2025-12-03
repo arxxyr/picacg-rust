@@ -52,12 +52,13 @@ sha2 = "0.10"
 hex = "0.4"
 
 # === 工具库（保留） ===
-uuid = { version = "1.7", features = ["v4"] }
+uuid = { version = "1.19.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 urlencoding = "2.1"
 parking_lot = "0.12"
 once_cell = "1.19"
 directories = "6.0"
+arboard = "3.6.1"  # 剪贴板支持
 
 # === 数据库（保留） ===
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono"] }

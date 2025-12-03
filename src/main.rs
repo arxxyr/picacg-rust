@@ -69,6 +69,7 @@ fn main() {
                     primary_window: Some(Window {
                         title: "PicACG - Rust Bevy 版".to_string(),
                         resolution: (1024u32, 768u32).into(),
+                        ime_enabled: true, // 启用输入法支持
                         ..default()
                     }),
                     ..default()

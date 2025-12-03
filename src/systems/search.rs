@@ -760,20 +760,19 @@ pub fn handle_search_keyboard_input(
     mut text_query: Query<(&mut Text, &mut TextColor), With<SearchInputText>>,
     mut search_state: ResMut<SearchState>,
     mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+    key_input: Res<ButtonInput<KeyCode>>,
 ) {
     // 检查是否有聚焦的输入框
     let has_focus = input_query.iter().any(|input| input.focused);
+
+    // 检查修饰键状态
+    let ctrl_pressed =
+        key_input.pressed(KeyCode::ControlLeft) || key_input.pressed(KeyCode::ControlRight);
 
     for event in keyboard_events.read() {
         if event.state != bevy::input::ButtonState::Pressed {
             continue;
         }
-
-        tracing::info!(
-            "搜索键盘事件: key={:?}, has_focus={}",
-            event.logical_key,
-            has_focus
-        );
 
         if !has_focus {
             continue;
@@ -805,12 +804,57 @@ pub fn handle_search_keyboard_input(
                 }
             }
             Key::Character(input) => {
-                for c in input.chars() {
-                    if !c.is_control() {
-                        search_state.keyword.push(c);
+                // 处理 Ctrl 组合键
+                if ctrl_pressed {
+                    match input.as_str() {
+                        "v" | "V" => {
+                            // Ctrl+V 粘贴
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    // 过滤控制字符，只保留可打印字符
+                                    let filtered: String =
+                                        text.chars().filter(|c| !c.is_control()).collect();
+                                    search_state.keyword.push_str(&filtered);
+                                    update_input_text(&search_state.keyword, &mut text_query);
+                                    tracing::info!("粘贴内容: {:?}", filtered);
+                                }
+                            }
+                        }
+                        "a" | "A" => {
+                            // Ctrl+A 全选（这里实现为清空，因为没有选择状态）
+                            // 实际上什么都不做，防止 'a' 被输入
+                        }
+                        "c" | "C" => {
+                            // Ctrl+C 复制当前内容到剪贴板
+                            if !search_state.keyword.is_empty() {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(&search_state.keyword);
+                                    tracing::info!("复制内容: {:?}", search_state.keyword);
+                                }
+                            }
+                        }
+                        "x" | "X" => {
+                            // Ctrl+X 剪切（复制并清空）
+                            if !search_state.keyword.is_empty() {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(&search_state.keyword);
+                                    tracing::info!("剪切内容: {:?}", search_state.keyword);
+                                }
+                                search_state.keyword.clear();
+                                update_input_text(&search_state.keyword, &mut text_query);
+                            }
+                        }
+                        _ => {}
                     }
+                } else {
+                    // 普通字符输入
+                    for c in input.chars() {
+                        if !c.is_control() {
+                            search_state.keyword.push(c);
+                        }
+                    }
+                    update_input_text(&search_state.keyword, &mut text_query);
                 }
-                update_input_text(&search_state.keyword, &mut text_query);
             }
             _ => {}
         }
