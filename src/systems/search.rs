@@ -167,6 +167,8 @@ pub fn setup_search_ui(
                         BorderColor::all(AppColors::BORDER),
                         BackgroundColor(AppColors::CARD_BG),
                         BorderRadius::all(Val::Px(4.0)),
+                        Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
+                                               * 位置计算） */
                     ))
                     .with_children(|input| {
                         let display_text = if search_state.keyword.is_empty() {
@@ -727,17 +729,41 @@ pub fn search_input_interaction(
             &mut BackgroundColor,
             &mut BorderColor,
             &mut SearchInputField,
+            &GlobalTransform,
+            &ComputedNode,
         ),
         Changed<Interaction>,
     >,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input, transform, computed) in
+        interaction_query.iter_mut()
+    {
         match *interaction {
             Interaction::Pressed => {
                 input.focused = true;
                 tracing::info!("搜索输入框获得焦点");
                 *border_color = BorderColor::all(AppColors::PRIMARY);
                 *bg_color = BackgroundColor(AppColors::CARD_BG);
+
+                // 设置 IME 位置（输入框左下角）
+                if let Ok(mut window) = window_query.single_mut() {
+                    let scale_factor = window.scale_factor();
+                    let pos = transform.translation();
+                    let size = computed.size() / scale_factor;
+
+                    // 计算输入框在屏幕坐标系中的位置
+                    // Bevy UI 坐标系：中心为原点，Y 向上
+                    // 屏幕坐标系：左上为原点，Y 向下
+                    let window_center_x = window.width() / 2.0;
+                    let window_center_y = window.height() / 2.0;
+
+                    let screen_x = window_center_x + pos.x - size.x / 2.0;
+                    let screen_y = window_center_y - pos.y + size.y / 2.0;
+
+                    window.ime_position = bevy::math::Vec2::new(screen_x, screen_y);
+                    tracing::info!("设置 IME 位置: ({}, {})", screen_x, screen_y);
+                }
             }
             Interaction::Hovered => {
                 if !input.focused {
@@ -1218,6 +1244,8 @@ pub fn refresh_search_ui(
                         BorderColor::all(input_border_color),
                         BackgroundColor(AppColors::CARD_BG),
                         BorderRadius::all(Val::Px(4.0)),
+                        Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
+                                               * 位置计算） */
                     ))
                     .with_children(|input| {
                         let display_text = if search_state.keyword.is_empty() {

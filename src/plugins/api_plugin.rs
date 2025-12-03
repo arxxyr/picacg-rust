@@ -1769,6 +1769,27 @@ fn handle_redownload(
         // 先移除已完成的任务（如果存在）
         download_state.remove_task(&comic_id);
 
+        // 立即添加一个"准备中"状态的临时任务，避免任务从列表消失
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let temp_meta = DownloadTaskMeta {
+            comic_id: comic_id.clone(),
+            comic_title: comic_title.clone(),
+            save_path: save_path.clone(),
+            episode_orders: vec![],
+            total_episodes: 0,
+            state: DownloadState::Downloading {
+                current_episode: 0,
+                current_page: 0,
+            },
+            created_at: now,
+            updated_at: now,
+        };
+        download_state.add_task(temp_meta);
+        download_state.downloading_ids.insert(comic_id.clone());
+
         let client = api_client.0.clone();
         let comic_id_clone = comic_id.clone();
         let save_path_clone = save_path.clone();
@@ -1845,25 +1866,25 @@ fn handle_redownload(
                 tracing::warn!("保存元数据失败: {}", e);
             }
 
-            // 发送下载请求到主线程，获取控制器
+            // 发送下载请求到主线程，更新任务并获取控制器
             let control = ctx
                 .run_on_main_thread(move |ctx| {
-                    // 添加任务到状态
                     let mut download_state = ctx.world.resource_mut::<DownloadManagerState>();
 
-                    // 添加新任务
-                    download_state.add_task(meta.clone());
-
-                    // 获取控制器
-                    let control = download_state
-                        .find_task(&meta.comic_id)
-                        .map(|fsm| fsm.get_control())
-                        .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()));
-
-                    // 标记为下载中
-                    download_state.downloading_ids.insert(meta.comic_id.clone());
-
-                    control
+                    // 更新现有任务（替换临时任务）
+                    if let Some(fsm) = download_state.find_task_mut(&meta.comic_id) {
+                        // 更新元数据
+                        fsm.meta = meta.clone();
+                        fsm.get_control()
+                    } else {
+                        // 如果任务不存在（理论上不应该发生），添加新任务
+                        download_state.add_task(meta.clone());
+                        download_state.downloading_ids.insert(meta.comic_id.clone());
+                        download_state
+                            .find_task(&meta.comic_id)
+                            .map(|fsm| fsm.get_control())
+                            .unwrap_or_else(|| std::sync::Arc::new(SharedTaskControl::new()))
+                    }
                 })
                 .await;
 
