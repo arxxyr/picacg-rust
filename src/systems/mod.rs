@@ -15,6 +15,7 @@ mod placeholder;
 mod proxy_settings;
 mod reader;
 mod scrollbar;
+mod search;
 mod settings;
 mod setup;
 
@@ -29,5 +30,6 @@ pub use placeholder::*;
 pub use proxy_settings::*;
 pub use reader::*;
 pub use scrollbar::*;
+pub use search::*;
 pub use settings::*;
 pub use setup::*;

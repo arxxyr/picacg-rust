@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2025-12-02
+> 最后更新: 2025-12-03
 
 ## 其他
  - git commit 带emoji
@@ -47,6 +47,41 @@ fn keyboard_input(
     }
 }
 ```
+
+### IME 输入法支持 (Bevy 0.17)
+
+**重要：** `KeyboardInput` 只能处理英文直接输入，中文输入法需要使用 `Ime` 事件。
+
+```rust
+use bevy::window::Ime;
+
+fn handle_ime_input(
+    mut ime_events: MessageReader<Ime>,
+) {
+    for event in ime_events.read() {
+        match event {
+            Ime::Commit { value, .. } => {
+                // IME 提交的文本（用户确认输入后）
+                // value 是完整的输入字符串，如 "你好"
+                keyword.push_str(value);
+            }
+            Ime::Preedit { value, cursor, .. } => {
+                // IME 预览文本（输入过程中的候选）
+                // 可用于显示输入法预览
+            }
+            Ime::Enabled { .. } => { /* IME 启用 */ }
+            Ime::Disabled { .. } => { /* IME 禁用 */ }
+        }
+    }
+}
+```
+
+**注意事项：**
+- 英文输入：使用 `KeyboardInput` + `Key::Character`
+- 中文输入：使用 `Ime::Commit` 事件
+- 两个系统需要同时注册才能支持双语输入
+
+---
 
 ### 字体加载配置
 
@@ -411,6 +446,66 @@ scrollbar.spawn((
 | `GlobalTransform` | 需要显式添加 `Transform` |
 | `ComputedNode` | UI 节点自动获得 |
 | `Interaction` | 需要显式添加，配合 `Button` 或 `FocusPolicy` |
+
+---
+
+### UI 重建导致输入框焦点丢失
+
+**问题场景：** 输入框输入一个字符后焦点丢失，需要重新点击才能继续输入。
+
+**典型案例：SearchState 变化触发 UI 重建**
+
+```rust
+// ❌ 错误：每次 keyword 变化都重建整个 UI，焦点状态丢失
+pub fn refresh_search_ui(search_state: Res<SearchState>, ...) {
+    if !search_state.is_changed() { return; }
+
+    // 重建 UI 时，focused 被重置为 false
+    header.spawn((
+        SearchInputField { focused: false },  // ← 焦点丢失！
+        ...
+    ));
+}
+```
+
+**症状：**
+- 输入第一个字符后焦点立即丢失
+- 日志显示 `has_focus=true`（第一个字符），然后 `has_focus=false`（后续字符）
+- 必须用鼠标重新点击输入框
+
+**根本原因：**
+- `ResMut<SearchState>` 被修改时，`is_changed()` 返回 `true`
+- `refresh_search_ui` 系统重建整个 UI
+- 新创建的 `SearchInputField` 组件 `focused` 字段被重置
+
+**修复方法：** 在重建 UI 前保存焦点状态，重建后恢复
+
+```rust
+// ✅ 正确：保存并恢复焦点状态
+pub fn refresh_search_ui(
+    input_query: Query<&SearchInputField>,
+    ...
+) {
+    // 1. 保存焦点状态
+    let was_focused = input_query.iter().any(|input| input.focused);
+
+    // 2. 销毁旧 UI
+    for entity in search_root_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // 3. 重建时恢复焦点
+    let border_color = if was_focused { PRIMARY } else { BORDER };
+    header.spawn((
+        SearchInputField { focused: was_focused },  // ← 恢复焦点
+        BorderColor::all(border_color),             // ← 恢复边框颜色
+        ...
+    ));
+}
+```
+
+**相关 Commit：**
+- `fix: 修复搜索输入框焦点丢失和中文输入法问题`
 
 ---
 

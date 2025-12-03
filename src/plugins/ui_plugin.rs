@@ -27,6 +27,7 @@ impl Plugin for UiPlugin {
             .init_resource::<NavigationHistory>()
             .init_resource::<AppFont>()
             .init_resource::<ScrollbarDragState>()
+            .init_resource::<SearchState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -224,6 +225,7 @@ impl Plugin for UiPlugin {
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
                     refresh_downloads_ui,
+                    handle_download_completed_ui,
                     handle_downloads_scroll,
                     update_downloads_content_size,
                     // 滚动条系统
@@ -241,12 +243,35 @@ impl Plugin for UiPlugin {
                 (ensure_main_layout, setup_home_ui).chain(),
             )
             .add_systems(OnExit(AppRoute::Home), cleanup_home_ui)
-            // 搜索页（占位）
+            // 搜索页
             .add_systems(
                 OnEnter(AppRoute::Search),
                 (ensure_main_layout, setup_search_ui).chain(),
             )
             .add_systems(OnExit(AppRoute::Search), cleanup_search_ui)
+            .add_systems(
+                Update,
+                (
+                    search_input_interaction,
+                    handle_search_keyboard_input,
+                    handle_search_ime_input,
+                    search_button_interaction,
+                    search_result_card_interaction,
+                    search_pagination_interaction,
+                    handle_search_scroll,
+                    update_search_content_size,
+                    update_search_images,
+                    refresh_search_ui,
+                    unfocus_search_input,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Search)),
+            )
             // 排行榜页（占位）
             .add_systems(
                 OnEnter(AppRoute::Rankings),
@@ -266,8 +291,15 @@ impl Plugin for UiPlugin {
                     .run_if(any_with_component::<MainLayoutRoot>),
             )
             // 全局导航（handle_back_navigation 处理键盘输入，handle_navigation_messages
-            // 处理导航消息）
-            .add_systems(Update, (handle_back_navigation, handle_navigation_messages));
+            // 处理导航消息，track_route_changes 追踪路由变化）
+            .add_systems(
+                Update,
+                (
+                    handle_back_navigation,
+                    handle_navigation_messages,
+                    track_route_changes,
+                ),
+            );
     }
 }
 
