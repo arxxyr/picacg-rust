@@ -103,6 +103,40 @@ App::new()
     )
 ```
 
+### Nerd Font 图标使用
+
+项目使用 **SarasaTermSCNerd** 字体，内置 Nerd Font 图标。在 UI 按钮中使用图标代替 emoji（emoji 可能显示为乱码）。
+
+**常用图标码：**
+
+| 功能 | Unicode | 图标 | Nerd Font 名称 |
+|-----|---------|------|---------------|
+| 暂停 | `\u{F03E4}` | 󰏤 | nf-md-pause |
+| 播放 | `\u{F040A}` | 󰐊 | nf-md-play |
+| 刷新 | `\u{F0453}` | 󰑓 | nf-md-refresh |
+| 删除 | `\u{F01B4}` | 󰆴 | nf-md-delete |
+| 同步 | `\u{F04E6}` | 󰓦 | nf-md-sync |
+| 文件夹 | `\u{F0770}` | 󰝰 | nf-md-folder_open |
+| 下载 | `\u{F01DA}` | 󰇚 | nf-md-download |
+| 搜索 | `\u{F0349}` | 󰍉 | nf-md-magnify |
+| 设置 | `\u{F0493}` | 󰒓 | nf-md-cog |
+| 首页 | `\u{F02DC}` | 󰋜 | nf-md-home |
+
+**使用示例：**
+```rust
+btn.spawn((
+    Text::new("\u{F03E4}"),  // 󰏤 nf-md-pause
+    TextFont {
+        font: font.clone(),
+        font_size: 14.0,
+        ..default()
+    },
+    TextColor(Color::WHITE),
+));
+```
+
+**查找更多图标：** https://www.nerdfonts.com/cheat-sheet
+
 ---
 
 ### Bevy 0.17 DPI 缩放处理

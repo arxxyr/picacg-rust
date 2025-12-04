@@ -227,6 +227,7 @@ impl Plugin for UiPlugin {
                     // 下载控制按钮交互
                     pause_download_button_interaction,
                     resume_download_button_interaction,
+                    retry_download_button_interaction,
                     delete_download_button_interaction,
                     // 已下载项按钮交互
                     redownload_button_interaction,

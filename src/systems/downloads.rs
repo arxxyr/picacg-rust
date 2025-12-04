@@ -263,6 +263,12 @@ pub struct DeleteDownloadButton {
     pub comic_id: String,
 }
 
+/// 重试下载按钮标记
+#[derive(Component)]
+pub struct RetryDownloadButton {
+    pub comic_id: String,
+}
+
 /// 加载未完成的下载任务（进入下载页面时调用）
 pub fn load_incomplete_downloads(mut download_state: ResMut<DownloadManagerState>) {
     let download_path = get_download_base_path();
@@ -518,7 +524,7 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("📁 打开文件夹"),
+                        Text::new("\u{F0770} 打开文件夹"), // 󰝰 nf-md-folder_open
                         TextFont {
                             font: font.clone(),
                             font_size: 13.0,
@@ -606,16 +612,15 @@ fn spawn_download_task_item(
         0.0
     };
 
-    // 判断是否可以暂停/继续
+    // 判断是否可以暂停/继续/重试
     let can_pause = matches!(
         task.status,
         ComicDownloadStatus::Downloading | ComicDownloadStatus::Waiting
     );
-    let can_resume = matches!(
-        task.status,
-        ComicDownloadStatus::Paused | ComicDownloadStatus::Failed(_)
-    );
-    let can_delete = !matches!(task.status, ComicDownloadStatus::Downloading);
+    let can_resume = matches!(task.status, ComicDownloadStatus::Paused);
+    let can_retry = matches!(task.status, ComicDownloadStatus::Failed(_));
+    // 删除按钮始终可见（下载中时作为"取消"功能）
+    let can_delete = true;
 
     parent
         .spawn((
@@ -729,7 +734,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "⏸",
+                                "\u{F03E4}", // 󰏤 nf-md-pause
                                 PauseDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -737,11 +742,11 @@ fn spawn_download_task_item(
                                 can_pause,
                             );
 
-                            // 继续按钮（始终创建，通过 display 控制可见性）
+                            // 继续按钮（暂停状态显示）
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "▶",
+                                "\u{F040A}", // 󰐊 nf-md-play
                                 ResumeDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -749,11 +754,23 @@ fn spawn_download_task_item(
                                 can_resume,
                             );
 
-                            // 删除按钮（始终创建，通过 display 控制可见性）
+                            // 重试按钮（失败状态显示）
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "✕",
+                                "\u{F0453}", // 󰑓 nf-md-refresh
+                                RetryDownloadButton {
+                                    comic_id: task.comic_id.clone(),
+                                },
+                                Color::srgb(0.7, 0.5, 0.2),
+                                can_retry,
+                            );
+
+                            // 删除按钮（始终可见）
+                            spawn_control_button_with_display(
+                                btns,
+                                font,
+                                "\u{F01B4}", // 󰆴 nf-md-delete
                                 DeleteDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -909,7 +926,7 @@ fn spawn_completed_download_item(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("🔄"),
+                                Text::new("\u{F04E6}"), // 󰓦 nf-md-sync
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -940,7 +957,7 @@ fn spawn_completed_download_item(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("📁"),
+                            Text::new("\u{F0770}"), // 󰝰 nf-md-folder_open
                             TextFont {
                                 font: font.clone(),
                                 font_size: 14.0,
@@ -1068,12 +1085,21 @@ pub fn refresh_downloads_ui(
         (&ResumeDownloadButton, &mut Node),
         (Without<DownloadProgressBar>, Without<PauseDownloadButton>),
     >,
+    mut retry_btn_query: Query<
+        (&RetryDownloadButton, &mut Node),
+        (
+            Without<DownloadProgressBar>,
+            Without<PauseDownloadButton>,
+            Without<ResumeDownloadButton>,
+        ),
+    >,
     mut delete_btn_query: Query<
         (&DeleteDownloadButton, &mut Node),
         (
             Without<DownloadProgressBar>,
             Without<PauseDownloadButton>,
             Without<ResumeDownloadButton>,
+            Without<RetryDownloadButton>,
         ),
     >,
 ) {
@@ -1136,11 +1162,10 @@ pub fn refresh_downloads_ui(
             task.status,
             ComicDownloadStatus::Downloading | ComicDownloadStatus::Waiting
         );
-        let can_resume = matches!(
-            task.status,
-            ComicDownloadStatus::Paused | ComicDownloadStatus::Failed(_)
-        );
-        let can_delete = !matches!(task.status, ComicDownloadStatus::Downloading);
+        let can_resume = matches!(task.status, ComicDownloadStatus::Paused);
+        let can_retry = matches!(task.status, ComicDownloadStatus::Failed(_));
+        // 删除按钮始终可见
+        let can_delete = true;
 
         // 更新暂停按钮可见性
         for (btn, mut node) in pause_btn_query.iter_mut() {
@@ -1157,6 +1182,17 @@ pub fn refresh_downloads_ui(
         for (btn, mut node) in resume_btn_query.iter_mut() {
             if btn.comic_id == task.comic_id {
                 node.display = if can_resume {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+            }
+        }
+
+        // 更新重试按钮可见性
+        for (btn, mut node) in retry_btn_query.iter_mut() {
+            if btn.comic_id == task.comic_id {
+                node.display = if can_retry {
                     Display::Flex
                 } else {
                     Display::None
@@ -1303,12 +1339,10 @@ pub fn add_new_task_ui(
                             },
                             Button,
                             Node {
-                                padding: UiRect::new(
-                                    Val::Px(8.0),
-                                    Val::Px(8.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
+                                width: Val::Px(24.0),
+                                height: Val::Px(24.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
                                 display: Display::Flex,
                                 ..default()
                             },
@@ -1317,29 +1351,27 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("暂停"),
+                                Text::new("\u{F03E4}"), // 󰏤 nf-md-pause
                                 TextFont {
                                     font: font.clone(),
-                                    font_size: 11.0,
+                                    font_size: 14.0,
                                     ..default()
                                 },
                                 TextColor(AppColors::TEXT),
                             ));
                         });
 
-                        // 继续按钮
+                        // 继续按钮（暂停状态）
                         btns.spawn((
                             ResumeDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
                             Button,
                             Node {
-                                padding: UiRect::new(
-                                    Val::Px(8.0),
-                                    Val::Px(8.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
+                                width: Val::Px(24.0),
+                                height: Val::Px(24.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
                                 display: Display::None,
                                 ..default()
                             },
@@ -1348,30 +1380,57 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("继续"),
+                                Text::new("\u{F040A}"), // 󰐊 nf-md-play
                                 TextFont {
                                     font: font.clone(),
-                                    font_size: 11.0,
+                                    font_size: 14.0,
                                     ..default()
                                 },
                                 TextColor(AppColors::TEXT),
                             ));
                         });
 
-                        // 删除按钮
+                        // 重试按钮（失败状态）
+                        btns.spawn((
+                            RetryDownloadButton {
+                                comic_id: task.comic_id.clone(),
+                            },
+                            Button,
+                            Node {
+                                width: Val::Px(24.0),
+                                height: Val::Px(24.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                display: Display::None,
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.7, 0.5, 0.2)),
+                            BorderRadius::all(Val::Px(3.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("\u{F0453}"), // 󰑓 nf-md-refresh
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                        // 删除按钮（始终可见）
                         btns.spawn((
                             DeleteDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
                             Button,
                             Node {
-                                padding: UiRect::new(
-                                    Val::Px(8.0),
-                                    Val::Px(8.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
-                                display: Display::None,
+                                width: Val::Px(24.0),
+                                height: Val::Px(24.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                display: Display::Flex, // 始终可见
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
@@ -1379,10 +1438,10 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("删除"),
+                                Text::new("\u{F01B4}"), // 󰆴 nf-md-delete
                                 TextFont {
                                     font: font.clone(),
-                                    font_size: 11.0,
+                                    font_size: 14.0,
                                     ..default()
                                 },
                                 TextColor(AppColors::TEXT),
@@ -1683,6 +1742,36 @@ pub fn delete_download_button_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.2));
+            }
+        }
+    }
+}
+
+/// 重试下载按钮交互（失败状态下的重试）
+pub fn retry_download_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &RetryDownloadButton),
+        Changed<Interaction>,
+    >,
+    mut resume_messages: MessageWriter<ResumeDownloadRequest>,
+) {
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let retry_color = Color::srgb(0.7, 0.5, 0.2);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(retry_color.with_alpha(0.4));
+
+                // 发送恢复下载请求（重试本质上就是恢复）
+                resume_messages.write(ResumeDownloadRequest {
+                    comic_id: btn.comic_id.clone(),
+                });
+                tracing::info!("请求重试下载: {}", btn.comic_id);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(retry_color.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(retry_color.with_alpha(0.2));
             }
         }
     }
