@@ -199,6 +199,9 @@ pub struct AppSettings {
     /// 数据库路径（空字符串表示使用默认路径）
     #[serde(default)]
     pub database_path: String,
+    /// 启动后自动开始未完成的下载
+    #[serde(default)]
+    pub auto_resume_downloads: bool,
 }
 
 impl Default for AppSettings {
@@ -212,6 +215,7 @@ impl Default for AppSettings {
             cache_path: PathBuf::from("cache"),
             download_path: String::new(), // 空字符串表示使用默认路径
             database_path: String::new(), // 空字符串表示使用默认路径
+            auto_resume_downloads: false, // 默认不自动恢复下载
         }
     }
 }

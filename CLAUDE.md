@@ -80,6 +80,24 @@ fn handle_ime_input(
 - 英文输入：使用 `KeyboardInput` + `Key::Character`
 - 中文输入：使用 `Ime::Commit` 事件
 - 两个系统需要同时注册才能支持双语输入
+ 经验总结
+
+
+
+Bevy 0.17 IME（输入法）支持要点
+
+1. 启用 IME 的必要条件：
+- 在输入框获取焦点时设置 window.ime_enabled = true
+- 设置 window.ime_position 指定 IME 候选框位置
+- 失去焦点时设置 window.ime_enabled = false
+2. Query 需要 GlobalTransform 时的注意事项（参考 CLAUDE.md 10.3）：
+- Bevy UI 节点默认不包含 Transform/GlobalTransform
+- 需要显式添加 Transform::default() 组件，Bevy 才会自动添加 GlobalTransform
+- 否则 Query 会返回空结果
+3. rfd 文件对话框：
+- rfd::FileDialog::new().pick_folder() 是同步阻塞调用
+- 适合简单场景，复杂场景可考虑异步版本
+
 
 ---
 
@@ -729,7 +747,7 @@ PageRoot (Column, 100% height)
 │   ├── ScrollContainer (100% height, overflow: scroll_y)
 │   │   ├── 内容1
 │   │   ├── 内容2
-│   │   └── 底部间距 (height: 120px)  ← 确保最后内容可滚动到可见区域
+│   │   └── 底部间距 (height: 30px)  ← 确保最后内容可滚动到可见区域
 │   └── Scrollbar (Absolute 定位)
 └── BottomBar (固定高度，如 60px)
 ```
@@ -739,9 +757,9 @@ PageRoot (Column, 100% height)
 1. **ContentWrapper 必须设置 `overflow: Overflow::clip()`**
    - 防止滚动内容溢出到 BottomBar 区域
 
-2. **底部间距要足够大（推荐 100-120px）**
+2. **底部间距设置（推荐 30px）**
    - 确保最后的内容可以完全滚动到可见区域
-   - 不被 BottomBar 遮挡
+   - 过大的 padding 可能导致布局计算问题
 
 3. **使用 Flexbox 自动分配空间**
    ```rust
@@ -790,8 +808,8 @@ root.spawn(Node {
 
             // 底部间距
             scroll.spawn(Node {
-                height: Val::Px(120.0),
-                min_height: Val::Px(120.0),
+                height: Val::Px(30.0),
+                min_height: Val::Px(30.0),
                 ..default()
             });
         });
@@ -801,6 +819,140 @@ root.spawn(Node {
     spawn_bottom_bar(root);
 });
 ```
+
+---
+
+## 通用分页组件
+
+实现了泛型分页组件模块 `src/systems/pagination.rs`，支持多个页面复用。
+
+### 使用方法
+
+**1. 定义页面标记类型：**
+```rust
+pub struct FavoritesPage;
+pub struct ComicsPage;
+```
+
+**2. 创建分页 UI：**
+```rust
+use crate::systems::pagination::spawn_pagination_controls;
+
+spawn_pagination_controls::<FavoritesPage>(
+    parent,
+    &font,
+    current_page,  // u32
+    total_pages,   // u32
+);
+```
+
+**3. 处理分页交互：**
+```rust
+use crate::systems::pagination::{
+    check_pagination_interaction, PaginationPrevButton, PaginationNextButton,
+};
+
+pub fn pagination_interaction(
+    prev_query: Query<&Interaction, (Changed<Interaction>, With<PaginationPrevButton<FavoritesPage>>)>,
+    next_query: Query<&Interaction, (Changed<Interaction>, With<PaginationNextButton<FavoritesPage>>)>,
+    // ...
+) {
+    // 返回 Some(true) = 下一页, Some(false) = 上一页, None = 无操作
+    if let Some(is_next) = check_pagination_interaction::<FavoritesPage>(
+        &prev_query, &next_query, current_page, total_pages
+    ) {
+        // 处理翻页...
+    }
+}
+```
+
+**4. 更新分页显示：**
+```rust
+use crate::systems::pagination::{update_pagination_display, PaginationPageText};
+
+pub fn refresh_pagination_ui(
+    mut page_text_query: Query<&mut Text, With<PaginationPageText<FavoritesPage>>>,
+    mut prev_btn_query: Query<&mut BackgroundColor, (With<PaginationPrevButton<FavoritesPage>>, Without<PaginationNextButton<FavoritesPage>>)>,
+    mut next_btn_query: Query<&mut BackgroundColor, (With<PaginationNextButton<FavoritesPage>>, Without<PaginationPrevButton<FavoritesPage>>)>,
+) {
+    update_pagination_display::<FavoritesPage>(
+        &mut page_text_query,
+        &mut prev_btn_query,
+        &mut next_btn_query,
+        current_page,
+        total_pages,
+    );
+}
+```
+
+### 组件列表
+
+| 组件 | 用途 |
+|------|------|
+| `PaginationControl<T>` | 分页容器标记 |
+| `PaginationPrevButton<T>` | 上一页按钮标记 |
+| `PaginationNextButton<T>` | 下一页按钮标记 |
+| `PaginationPageText<T>` | 页码文本标记 |
+
+### 已使用的页面
+- `FavoritesPage` - 收藏页面 (`favorites.rs`)
+- `ComicsPage` - 漫画列表页面 (`comics.rs`)
+
+---
+
+## 登录状态与异步操作
+
+### 问题：启动时自动下载报错"未登录"
+
+**场景：** 启用"启动后自动恢复下载"设置后，启动时会立即尝试下载，但此时用户还没有登录。
+
+**解决方案：** 使用事件系统等待登录成功
+
+```rust
+// 1. 定义登录成功事件 (events/api_events.rs)
+#[derive(Message)]
+pub struct UserLoggedInEvent;
+
+// 2. 登录成功时发送事件 (api_plugin.rs)
+fn handle_login_response(
+    mut user_logged_in_messages: MessageWriter<UserLoggedInEvent>,
+    // ...
+) {
+    if login_success {
+        user_logged_in_messages.write(UserLoggedInEvent);
+    }
+}
+
+// 3. 监听事件后再执行操作 (api_plugin.rs)
+fn auto_resume_downloads_on_startup(
+    mut has_run: Local<bool>,
+    mut user_logged_in_events: MessageReader<UserLoggedInEvent>,
+    // ...
+) {
+    // 只执行一次
+    if *has_run {
+        for _ in user_logged_in_events.read() {} // 消费事件
+        return;
+    }
+
+    // 等待登录成功事件
+    let mut logged_in = false;
+    for _ in user_logged_in_events.read() {
+        logged_in = true;
+    }
+    if !logged_in {
+        return;
+    }
+
+    *has_run = true;
+    // 执行需要登录后才能进行的操作...
+}
+```
+
+**关键点：**
+- 使用 `Local<bool>` 确保只执行一次
+- 在 `has_run = true` 后仍需消费事件，避免累积
+- 注册事件：`.add_message::<UserLoggedInEvent>()`
 
 ---
 
@@ -826,15 +978,31 @@ root.spawn(Node {
 
 ## 待办事项
 
+### 当前功能开发
 - [ ] 清理编译警告（未使用的导入和变量）
 - [ ] 完善漫画详情页面
 - [ ] 实现基础阅读器
 - [x] 实现搜索功能
-- [ ] 实现收藏/历史管理
+- [x] 实现收藏页面
 - [x] 下载管理 UI
 - [x] 优化图片加载性能（MAX_CONCURRENT_LOADS 从 5 提升到 15）
 - [x] 修复瀑布式系统与 refresh 函数冲突问题（分类、漫画列表、排行榜）
 - [x] 修复排行榜标签切换不刷新问题
+- [x] 通用分页组件（favorites.rs, comics.rs 已使用）
+- [x] 登录状态管理（自动下载等待登录成功后再执行）
+
+### 后续规划：GUI 库抽象
+> 待当前功能稳定后进行
+
+- [ ] 抽取通用 GUI 组件为独立 crate
+  - 自定义滚动条系统（ScrollContainer, ScrollbarTrack, ScrollbarThumb）
+  - 瀑布流卡片布局（WaterfallGrid, CardCreationState）
+  - 按钮样式（PrimaryButton, SecondaryButton, IconButton）
+  - 输入框组件（TextInput with IME support）
+  - 固定底部栏布局（FixedBottomBar）
+  - 标签页组件（TabBar, TabButton）
+  - 通用分页组件（PaginationControl, spawn_pagination_controls）
+- [ ] 发布为独立 crate：`bevy_ui_toolkit` 或 `bevy_picacg_ui`
 
 ---
 

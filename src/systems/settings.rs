@@ -124,6 +124,18 @@ impl Default for LogLevelInputState {
     }
 }
 
+// ==================== 自动恢复下载设置组件 ====================
+
+/// 自动恢复下载勾选框
+#[derive(Component)]
+pub struct AutoResumeDownloadsCheckbox;
+
+/// 自动恢复下载设置状态
+#[derive(Resource)]
+pub struct AutoResumeDownloadsState {
+    pub enabled: bool,
+}
+
 /// 创建设置页面 UI
 pub fn setup_settings_ui(
     mut commands: Commands,
@@ -161,6 +173,11 @@ pub fn setup_settings_ui(
     // 初始化日志等级状态
     commands.insert_resource(LogLevelInputState {
         level: settings.log_level,
+    });
+
+    // 初始化自动恢复下载状态
+    commands.insert_resource(AutoResumeDownloadsState {
+        enabled: settings.auto_resume_downloads,
     });
 
     // 在内容区域下创建设置页面
@@ -225,6 +242,11 @@ pub fn setup_settings_ui(
                                     section,
                                     &font,
                                     &settings.download_path,
+                                );
+                                spawn_auto_resume_downloads_setting(
+                                    section,
+                                    &font,
+                                    settings.auto_resume_downloads,
                                 );
                             });
 
@@ -406,6 +428,92 @@ fn spawn_download_path_setting(
                     } else {
                         AppColors::TEXT
                     }),
+                ));
+            });
+        });
+}
+
+/// 创建自动恢复下载设置
+fn spawn_auto_resume_downloads_setting(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    is_enabled: bool,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(16.0)),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 左侧标签和说明
+            row.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|left| {
+                    left.spawn((
+                        Text::new("启动后自动开始下载"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+                    left.spawn((
+                        Text::new("程序启动时自动恢复未完成的下载任务"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+
+            // 右侧勾选框
+            row.spawn((
+                AutoResumeDownloadsCheckbox,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    Color::srgb(0.12, 0.12, 0.16)
+                }),
+                BorderColor::all(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    AppColors::BORDER
+                }),
+                BorderRadius::all(Val::Px(4.0)),
+            ))
+            .with_children(|checkbox| {
+                // 勾选标记（使用 Nerd Font 图标）
+                checkbox.spawn((
+                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
                 ));
             });
         });
@@ -1003,6 +1111,7 @@ pub fn cleanup_settings_ui(mut commands: Commands, query: Query<Entity, With<Set
     commands.remove_resource::<DownloadPathInputState>();
     commands.remove_resource::<ProxySettingsInputState>();
     commands.remove_resource::<LogLevelInputState>();
+    commands.remove_resource::<AutoResumeDownloadsState>();
 }
 
 /// 下载路径输入框交互
@@ -1152,6 +1261,7 @@ pub fn save_settings_button_interaction(
     input_state: Res<DownloadPathInputState>,
     proxy_state: Res<ProxySettingsInputState>,
     log_state: Res<LogLevelInputState>,
+    auto_resume_state: Res<AutoResumeDownloadsState>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
@@ -1170,6 +1280,9 @@ pub fn save_settings_button_interaction(
 
                 // 保存日志等级
                 settings.log_level = log_state.level;
+
+                // 保存自动恢复下载设置
+                settings.auto_resume_downloads = auto_resume_state.enabled;
 
                 if let Err(e) = settings.save() {
                     tracing::error!("保存设置失败: {}", e);
@@ -1556,6 +1669,65 @@ pub fn log_level_button_interaction(
                 _ => {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                     *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+}
+
+// ==================== 自动恢复下载交互系统 ====================
+
+/// 自动恢复下载勾选框交互
+pub fn auto_resume_downloads_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<AutoResumeDownloadsCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut auto_resume_state: ResMut<AutoResumeDownloadsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                // 切换状态
+                auto_resume_state.enabled = !auto_resume_state.enabled;
+                let is_enabled = auto_resume_state.enabled;
+
+                tracing::info!("自动恢复下载: {}", if is_enabled { "启用" } else { "禁用" });
+
+                // 更新外观
+                if is_enabled {
+                    *bg_color = BackgroundColor(AppColors::PRIMARY);
+                    *border_color = BorderColor::all(AppColors::PRIMARY);
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+
+                // 更新勾选标记
+                for child in children.iter() {
+                    if let Ok(mut text) = text_query.get_mut(child) {
+                        **text = if is_enabled {
+                            "\u{F012C}".to_string()
+                        } else {
+                            String::new()
+                        };
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                if !auto_resume_state.enabled {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !auto_resume_state.enabled {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                 }
             }
         }

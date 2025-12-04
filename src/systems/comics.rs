@@ -8,17 +8,25 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
+        pagination::{
+            PaginationNextButton, PaginationPageText, PaginationPrevButton,
+            check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
+        },
         scrollbar::scrollbar_config::*,
         waterfall::ComicsCardCreationState,
     },
 };
 
+/// 漫画列表页面标记类型（用于分页组件的泛型参数）
+pub struct ComicsPage;
+
 /// 漫画卡片布局常量
 mod comic_layout {
     /// 卡片宽度
     pub const CARD_WIDTH: f32 = 180.0;
-    /// 卡片高度（封面 220px + 标题+作者约 50px + padding 16px）
-    pub const CARD_HEIGHT: f32 = 300.0;
+    /// 卡片高度（封面 220px + 标题+作者约 50px + 分类+tags约 60px + padding
+    /// 16px）
+    pub const CARD_HEIGHT: f32 = 360.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -30,7 +38,7 @@ mod comic_layout {
     /// 上内边距
     pub const PADDING_TOP: f32 = 20.0;
     /// 下内边距
-    pub const PADDING_BOTTOM: f32 = 20.0;
+    pub const PADDING_BOTTOM: f32 = 30.0;
 }
 
 /// 创建漫画列表界面（在 ContentArea 内部）
@@ -160,98 +168,13 @@ pub fn setup_comics_list_ui(
                 spawn_scrollbar_inline(wrapper, scroll_container_id);
             });
 
-            // 分页控件
-            root.spawn((
-                PaginationControl,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(50.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(20.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(AppColors::SURFACE),
-                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-            ))
-            .with_children(|pagination| {
-                // 上一页按钮
-                pagination
-                    .spawn((
-                        PrevPageButton,
-                        Button,
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if comics_state.page > 1 {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("上一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                // 页码显示
-                pagination.spawn((
-                    PageNumberText,
-                    Text::new(format!(
-                        "{} / {}",
-                        comics_state.page, comics_state.total_pages
-                    )),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 下一页按钮
-                pagination
-                    .spawn((
-                        NextPageButton,
-                        Button,
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if comics_state.page < comics_state.total_pages {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("下一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
+            // 分页控件（使用通用分页组件）
+            spawn_pagination_controls::<ComicsPage>(
+                root,
+                &font,
+                comics_state.page.max(0) as u32,
+                comics_state.total_pages.max(0) as u32,
+            );
         })
         .id();
 
@@ -562,34 +485,55 @@ pub fn comic_card_interaction(
 
 /// 分页按钮交互系统
 pub fn pagination_interaction(
-    prev_query: Query<&Interaction, (Changed<Interaction>, With<PrevPageButton>)>,
-    next_query: Query<&Interaction, (Changed<Interaction>, With<NextPageButton>)>,
+    mut commands: Commands,
+    prev_query: Query<&Interaction, (Changed<Interaction>, With<PaginationPrevButton<ComicsPage>>)>,
+    next_query: Query<&Interaction, (Changed<Interaction>, With<PaginationNextButton<ComicsPage>>)>,
+    card_query: Query<Entity, With<ComicCard>>,
     mut comics_state: ResMut<ComicsListState>,
     mut load_comics_messages: MessageWriter<LoadComicsRequest>,
+    mut creation_state: ResMut<ComicsCardCreationState>,
+    mut scroll_query: Query<&mut ScrollPosition, With<ComicsScrollContainer>>,
 ) {
-    // 上一页
-    for interaction in prev_query.iter() {
-        if *interaction == Interaction::Pressed && comics_state.page > 1 {
-            comics_state.page -= 1;
-            load_comics_messages.write(LoadComicsRequest {
-                category: comics_state.category.clone(),
-                page: comics_state.page,
-                sort: comics_state.sort.clone(),
-            });
-        }
+    // 使用通用分页交互检查函数
+    let Some(is_next) = check_pagination_interaction::<ComicsPage>(
+        &prev_query,
+        &next_query,
+        comics_state.page.max(0) as u32,
+        comics_state.total_pages.max(0) as u32,
+    ) else {
+        return;
+    };
+
+    // 更新页码
+    if is_next {
+        comics_state.page += 1;
+    } else {
+        comics_state.page -= 1;
     }
 
-    // 下一页
-    for interaction in next_query.iter() {
-        if *interaction == Interaction::Pressed && comics_state.page < comics_state.total_pages {
-            comics_state.page += 1;
-            load_comics_messages.write(LoadComicsRequest {
-                category: comics_state.category.clone(),
-                page: comics_state.page,
-                sort: comics_state.sort.clone(),
-            });
-        }
+    // 删除所有旧卡片
+    for entity in card_query.iter() {
+        commands.entity(entity).despawn();
     }
+
+    // 清除数据和状态
+    comics_state.comics.clear();
+    comics_state.is_loading = true;
+    creation_state.clear();
+
+    // 重置滚动位置
+    for mut scroll_pos in scroll_query.iter_mut() {
+        scroll_pos.y = 0.0;
+    }
+
+    // 发送加载请求
+    load_comics_messages.write(LoadComicsRequest {
+        category: comics_state.category.clone(),
+        page: comics_state.page,
+        sort: comics_state.sort.clone(),
+    });
+
+    tracing::debug!("切换到漫画列表第 {} 页", comics_state.page);
 }
 
 /// 漫画列表页面滚动处理系统
@@ -787,6 +731,39 @@ pub fn refresh_comics_list_ui(
     }
 
     // 数据为空且没有卡片，不做任何操作（保持加载中状态）
+}
+
+/// 刷新分页控件 UI（更新页码显示和按钮状态）
+pub fn refresh_comics_pagination_ui(
+    comics_state: Res<ComicsListState>,
+    mut page_text_query: Query<&mut Text, With<PaginationPageText<ComicsPage>>>,
+    mut prev_btn_query: Query<
+        &mut BackgroundColor,
+        (
+            With<PaginationPrevButton<ComicsPage>>,
+            Without<PaginationNextButton<ComicsPage>>,
+        ),
+    >,
+    mut next_btn_query: Query<
+        &mut BackgroundColor,
+        (
+            With<PaginationNextButton<ComicsPage>>,
+            Without<PaginationPrevButton<ComicsPage>>,
+        ),
+    >,
+) {
+    if !comics_state.is_changed() {
+        return;
+    }
+
+    // 使用通用分页显示更新函数
+    update_pagination_display::<ComicsPage>(
+        &mut page_text_query,
+        &mut prev_btn_query,
+        &mut next_btn_query,
+        comics_state.page.max(0) as u32,
+        comics_state.total_pages.max(0) as u32,
+    );
 }
 
 /// 瀑布式显示漫画卡片（预创建所有隐藏卡片，然后分批显示）

@@ -4,18 +4,13 @@
 
 use bevy::prelude::*;
 
-use crate::{
-    components::ContentArea,
-    systems::login::{AppColors, FONT_PATH},
-};
+use crate::{components::ContentArea, systems::login::AppColors};
 
-/// 首页根标记
-#[derive(Component)]
-pub struct HomeRoot;
-
+// 注意：HomeRoot、setup_home_ui、cleanup_home_ui 已移至 home.rs
 // 注意：FavoritesRoot 已移至 favorites.rs
 
-/// 创建通用占位页面
+/// 创建通用占位页面（保留供未来可能需要的页面使用）
+#[allow(dead_code)]
 fn spawn_placeholder_page(
     commands: &mut Commands,
     content_area: Entity,
@@ -104,42 +99,6 @@ fn spawn_placeholder_page(
                 });
             });
     });
+
+    let _ = content_area; // suppress unused warning
 }
-
-// ==================== 首页 ====================
-
-pub fn setup_home_ui(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    content_area_query: Query<Entity, With<ContentArea>>,
-) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
-
-    let content_area = match content_area_query.iter().next() {
-        Some(entity) => entity,
-        None => {
-            tracing::warn!("首页：找不到内容区域");
-            return;
-        }
-    };
-
-    spawn_placeholder_page(
-        &mut commands,
-        content_area,
-        font,
-        HomeRoot,
-        "首页",
-        "🏠",
-        "推荐漫画、最新更新、热门作品",
-    );
-
-    tracing::info!("首页 UI 已创建");
-}
-
-pub fn cleanup_home_ui(mut commands: Commands, query: Query<Entity, With<HomeRoot>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-}
-
-// 注意：收藏页面已移至 favorites.rs

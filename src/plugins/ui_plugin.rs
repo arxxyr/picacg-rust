@@ -35,6 +35,8 @@ impl Plugin for UiPlugin {
             .init_resource::<SearchCardCreationState>()
             .init_resource::<FavoritesState>()
             .init_resource::<FavoritesCardCreationState>()
+            .init_resource::<HomeState>()
+            .init_resource::<HomeCardCreationState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -126,6 +128,7 @@ impl Plugin for UiPlugin {
                     comic_card_interaction,
                     pagination_interaction,
                     refresh_comics_list_ui,
+                    refresh_comics_pagination_ui,
                     waterfall_create_comic_cards,
                     update_comics_images,
                     handle_comics_scroll,
@@ -201,6 +204,8 @@ impl Plugin for UiPlugin {
                     proxy_input_keyboard,
                     // 日志等级交互
                     log_level_button_interaction,
+                    // 自动恢复下载交互
+                    auto_resume_downloads_checkbox_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,
@@ -231,6 +236,7 @@ impl Plugin for UiPlugin {
                     resume_download_button_interaction,
                     retry_download_button_interaction,
                     delete_download_button_interaction,
+                    start_all_downloads_button_interaction,
                     // 已下载项按钮交互
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
@@ -249,12 +255,32 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::Downloads)),
             )
-            // 首页（占位）
+            // 首页
             .add_systems(
                 OnEnter(AppRoute::Home),
                 (ensure_main_layout, setup_home_ui).chain(),
             )
             .add_systems(OnExit(AppRoute::Home), cleanup_home_ui)
+            .add_systems(
+                Update,
+                (
+                    home_card_interaction,
+                    home_refresh_button_interaction,
+                    handle_home_scroll,
+                    waterfall_create_home_cards,
+                    update_home_content_size,
+                    update_home_images,
+                    handle_recommendations_loaded,
+                    handle_recommendations_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Home)),
+            )
             // 搜索页
             .add_systems(
                 OnEnter(AppRoute::Search),

@@ -4,10 +4,12 @@
 
 #![allow(dead_code)]
 
-use bevy::prelude::*;
+use bevy::{prelude::*, ui::FocusPolicy};
 
 use crate::{
-    components::{ContentArea, ContentSizeInfo, ScrollbarThumb, ScrollbarTrack},
+    components::{
+        ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
+    },
     config::settings::AppSettings,
     events::{DownloadCompletedEvent, RedownloadRequest, ResumeDownloadRequest},
     resources::{ComicDownloadStatus, DownloadManagerState},
@@ -19,7 +21,7 @@ use crate::{
 pub struct ScrollContainer;
 
 /// 获取下载保存路径
-fn get_download_base_path() -> std::path::PathBuf {
+pub fn get_download_base_path() -> std::path::PathBuf {
     let settings = AppSettings::global().read();
     if !settings.download_path.is_empty() {
         return std::path::PathBuf::from(&settings.download_path);
@@ -62,6 +64,10 @@ pub struct DownloadingSection;
 /// "下载中" 标题文本
 #[derive(Component)]
 pub struct DownloadingTitleText;
+
+/// "开始全部下载" 按钮标记
+#[derive(Component)]
+pub struct StartAllDownloadsButton;
 
 /// 已完成下载项目（历史记录）
 #[derive(Debug, Clone)]
@@ -315,7 +321,10 @@ pub fn setup_downloads_ui(
                     Node {
                         width: Val::Percent(100.0),
                         flex_grow: 1.0,
-                        flex_direction: FlexDirection::Row,
+                        flex_shrink: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_height: Val::Px(0.0),
+                        position_type: PositionType::Relative,
                         ..default()
                     },
                     Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
@@ -367,21 +376,63 @@ pub fn setup_downloads_ui(
                                     },
                                 ))
                                 .with_children(|section| {
-                                    // 进行中标题
-                                    section.spawn((
-                                        DownloadingTitleText,
-                                        Text::new(format!("📥 下载中 ({})", active_tasks.len())),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 16.0,
-                                            ..default()
-                                        },
-                                        TextColor(AppColors::TEXT),
-                                        Node {
+                                    // 标题行（标题 + 开始全部按钮）
+                                    section
+                                        .spawn(Node {
+                                            width: Val::Percent(100.0),
+                                            justify_content: JustifyContent::SpaceBetween,
+                                            align_items: AlignItems::Center,
                                             margin: UiRect::bottom(Val::Px(10.0)),
                                             ..default()
-                                        },
-                                    ));
+                                        })
+                                        .with_children(|header| {
+                                            // 进行中标题
+                                            header.spawn((
+                                                DownloadingTitleText,
+                                                Text::new(format!(
+                                                    "📥 下载中 ({})",
+                                                    active_tasks.len()
+                                                )),
+                                                TextFont {
+                                                    font: font.clone(),
+                                                    font_size: 16.0,
+                                                    ..default()
+                                                },
+                                                TextColor(AppColors::TEXT),
+                                            ));
+
+                                            // 开始全部下载按钮
+                                            header
+                                                .spawn((
+                                                    StartAllDownloadsButton,
+                                                    Button,
+                                                    Interaction::default(),
+                                                    Node {
+                                                        padding: UiRect::new(
+                                                            Val::Px(12.0),
+                                                            Val::Px(12.0),
+                                                            Val::Px(6.0),
+                                                            Val::Px(6.0),
+                                                        ),
+                                                        border: UiRect::all(Val::Px(1.0)),
+                                                        ..default()
+                                                    },
+                                                    BackgroundColor(Color::srgb(0.2, 0.5, 0.3)),
+                                                    BorderColor::all(Color::srgb(0.3, 0.7, 0.4)),
+                                                    BorderRadius::all(Val::Px(4.0)),
+                                                ))
+                                                .with_children(|btn| {
+                                                    btn.spawn((
+                                                        Text::new("\u{F040A} 全部开始"), // 󰐊 nf-md-play
+                                                        TextFont {
+                                                            font: font.clone(),
+                                                            font_size: 13.0,
+                                                            ..default()
+                                                        },
+                                                        TextColor(AppColors::TEXT),
+                                                    ));
+                                                });
+                                        });
 
                                     // 任务列表容器
                                     section
@@ -971,53 +1022,69 @@ fn spawn_completed_download_item(
 }
 
 /// 创建下载页面滚动条
+///
+/// 布局结构（与其他页面保持一致）：
+/// ScrollbarContainer (Absolute, right=0)
+///   ├── ScrollbarTrack (Absolute, fills 100%, ZIndex=0)
+///   └── ScrollbarThumb (Absolute, ZIndex=1)
+///
+/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
 fn spawn_downloads_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
+    const SCROLLBAR_WIDTH: f32 = 12.0;
+
     parent
         .spawn((
+            ScrollbarContainer { scroll_container },
             Node {
-                width: Val::Px(12.0),
+                width: Val::Px(SCROLLBAR_WIDTH),
                 height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
+                position_type: PositionType::Absolute,
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
                 ..default()
             },
             BackgroundColor(Color::NONE),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+            ZIndex(10),
+            Transform::default(),
         ))
         .with_children(|scrollbar| {
-            scrollbar
-                .spawn((
-                    ScrollbarTrack { scroll_container },
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::horizontal(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
-                    Transform::default(),
-                ))
-                .with_children(|track| {
-                    track.spawn((
-                        ScrollbarThumb { scroll_container },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(8.0),
-                            height: Val::Px(50.0),
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(0.0),
-                            left: Val::Px(2.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-                        BorderRadius::all(Val::Px(4.0)),
-                        Transform::default(),
-                    ));
-                });
+            // 滚动条轨道（与滑块同级，ZIndex 较低）
+            scrollbar.spawn((
+                ScrollbarTrack { scroll_container },
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
+                ZIndex(0),
+                Transform::default(),
+            ));
+
+            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
+            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
+            scrollbar.spawn((
+                ScrollbarThumb { scroll_container },
+                Button,
+                Interaction::default(),
+                FocusPolicy::Block,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(30.0),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
+                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
+                ZIndex(1),
+            ));
         });
 }
 
@@ -1939,6 +2006,54 @@ pub fn handle_download_completed_ui(
             tracing::info!("已添加到已下载列表: {}", comic_id);
         } else {
             tracing::warn!("未找到已下载列表容器，可能不在下载页面");
+        }
+    }
+}
+
+/// "开始全部下载" 按钮交互
+/// 恢复所有暂停状态的下载任务
+pub fn start_all_downloads_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<StartAllDownloadsButton>),
+    >,
+    download_state: Res<DownloadManagerState>,
+    mut resume_messages: MessageWriter<ResumeDownloadRequest>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        let btn_color = Color::srgb(0.2, 0.5, 0.3);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.1));
+
+                // 恢复所有暂停状态的任务
+                let mut resumed_count = 0;
+                for fsm in &download_state.fsm_tasks {
+                    let task = fsm.to_ui_task();
+                    if matches!(
+                        task.status,
+                        crate::resources::ComicDownloadStatus::Paused
+                            | crate::resources::ComicDownloadStatus::Waiting
+                    ) {
+                        resume_messages.write(ResumeDownloadRequest {
+                            comic_id: task.comic_id.clone(),
+                        });
+                        resumed_count += 1;
+                    }
+                }
+
+                if resumed_count > 0 {
+                    tracing::info!("开始全部下载: 恢复 {} 个任务", resumed_count);
+                } else {
+                    tracing::info!("没有需要恢复的下载任务");
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.05));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(btn_color);
+            }
         }
     }
 }

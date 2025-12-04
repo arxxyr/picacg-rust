@@ -1,6 +1,6 @@
 //! 排行榜页面系统
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{prelude::*, ui::FocusPolicy, window::PrimaryWindow};
 
 use crate::{
     api::endpoints::RankTimeType,
@@ -9,6 +9,7 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
+        scrollbar::scrollbar_config::*,
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
 };
@@ -62,11 +63,14 @@ pub struct RankingsLoadingIndicator;
 
 mod layout {
     pub const CARD_WIDTH: f32 = 160.0;
-    pub const CARD_HEIGHT: f32 = 300.0; // 增加高度以显示完整信息
+    pub const CARD_HEIGHT: f32 = 300.0;
     pub const COVER_HEIGHT: f32 = 200.0;
-    pub const GRID_GAP: f32 = 16.0;
-    pub const PADDING: f32 = 20.0;
-    pub const PADDING_BOTTOM: f32 = 40.0; // 底部额外 padding
+    pub const COLUMN_GAP: f32 = 16.0;
+    pub const ROW_GAP: f32 = 16.0;
+    pub const PADDING_LEFT: f32 = 20.0;
+    pub const PADDING_RIGHT: f32 = 20.0 + super::SCROLLBAR_WIDTH;
+    pub const PADDING_TOP: f32 = 20.0;
+    pub const PADDING_BOTTOM: f32 = 30.0;
 }
 
 // ==================== 设置/清理 ====================
@@ -104,49 +108,51 @@ pub fn setup_rankings_ui(
                 // Tab 栏
                 spawn_tab_bar(root, &font, &rankings_state);
 
-                // 内容区域（滚动容器 + 滚动条）
+                // 滚动区域包装器（与收藏/分类一致的结构）
                 root.spawn(Node {
                     width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
                     ..default()
                 })
-                .with_children(|content_wrapper| {
-                    // 滚动容器
-                    let scroll_container = content_wrapper
+                .with_children(|wrapper| {
+                    // 滚动容器（直接使用 Wrap，不嵌套 ContentContainer）
+                    let scroll_container_id = wrapper
                         .spawn((
                             RankingsScrollContainer,
                             ScrollContainer,
                             Node {
                                 width: Val::Percent(100.0),
                                 height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect::all(Val::Px(layout::PADDING)),
+                                flex_wrap: FlexWrap::Wrap,
+                                justify_content: JustifyContent::FlexStart,
+                                align_content: AlignContent::FlexStart,
+                                padding: UiRect {
+                                    left: Val::Px(layout::PADDING_LEFT),
+                                    right: Val::Px(layout::PADDING_RIGHT),
+                                    top: Val::Px(layout::PADDING_TOP),
+                                    bottom: Val::Px(layout::PADDING_BOTTOM),
+                                },
+                                column_gap: Val::Px(layout::COLUMN_GAP),
+                                row_gap: Val::Px(layout::ROW_GAP),
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
                             ScrollPosition::default(),
                             ContentSizeInfo::default(),
                         ))
-                        .with_children(|scroll| {
-                            // 内容容器
-                            scroll.spawn((
-                                RankingsContentContainer,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    flex_direction: FlexDirection::Row,
-                                    flex_wrap: FlexWrap::Wrap,
-                                    row_gap: Val::Px(layout::GRID_GAP),
-                                    column_gap: Val::Px(layout::GRID_GAP),
-                                    padding: UiRect::bottom(Val::Px(layout::PADDING_BOTTOM)),
-                                    ..default()
-                                },
-                            ));
+                        .with_children(|grid| {
+                            if rankings_state.is_loading {
+                                spawn_loading_indicator(grid, &font);
+                            }
                         })
                         .id();
 
                     // 滚动条
-                    spawn_scrollbar_inline(content_wrapper, scroll_container);
+                    spawn_scrollbar_inline(wrapper, scroll_container_id);
                 });
             });
     });
@@ -160,7 +166,7 @@ fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, state: 
         .spawn(Node {
             width: Val::Percent(100.0),
             height: Val::Px(50.0),
-            padding: UiRect::horizontal(Val::Px(layout::PADDING)),
+            padding: UiRect::horizontal(Val::Px(layout::PADDING_LEFT)),
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             column_gap: Val::Px(8.0),
@@ -230,58 +236,60 @@ fn spawn_tab_button(
         });
 }
 
-/// 创建滚动条
+/// 创建滚动条（与收藏/分类一致的实现）
 fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
     parent
         .spawn((
             ScrollbarContainer { scroll_container },
             Node {
+                width: Val::Px(SCROLLBAR_WIDTH),
+                height: Val::Percent(100.0),
                 position_type: PositionType::Absolute,
                 right: Val::Px(0.0),
                 top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                width: Val::Px(12.0),
-                flex_direction: FlexDirection::Column,
                 ..default()
             },
             BackgroundColor(Color::NONE),
+            ZIndex(10),
+            Transform::default(),
         ))
         .with_children(|scrollbar| {
-            // 轨道
-            scrollbar
-                .spawn((
-                    ScrollbarTrack { scroll_container },
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::horizontal(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
-                    Transform::default(),
-                ))
-                .with_children(|track| {
-                    // 滑块
-                    track.spawn((
-                        ScrollbarThumb { scroll_container },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(8.0),
-                            height: Val::Px(50.0),
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(0.0),
-                            left: Val::Px(2.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-                        Transform::default(),
-                    ));
-                });
+            // 滚动条轨道
+            scrollbar.spawn((
+                ScrollbarTrack { scroll_container },
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(TRACK_COLOR),
+                ZIndex(0),
+                Transform::default(),
+            ));
+
+            // 滚动条滑块
+            scrollbar.spawn((
+                ScrollbarThumb { scroll_container },
+                Button,
+                Interaction::default(),
+                FocusPolicy::Block,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(THUMB_MIN_HEIGHT),
+                    position_type: PositionType::Absolute,
+                    top: Val::Px(0.0),
+                    left: Val::Px(0.0),
+                    ..default()
+                },
+                BackgroundColor(THUMB_COLOR),
+                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
+                ZIndex(1),
+            ));
         });
 }
 
@@ -410,7 +418,7 @@ pub fn refresh_rankings_ui(
     mut commands: Commands,
     rankings_state: Res<RankingsState>,
     asset_server: Res<AssetServer>,
-    content_query: Query<(Entity, Option<&Children>), With<RankingsContentContainer>>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<RankingsScrollContainer>>,
     tab_query: Query<(Entity, &RankingsTabButton)>,
     card_query: Query<&RankingsComicCard>,
 ) {
@@ -446,7 +454,7 @@ pub fn refresh_rankings_ui(
     }
 
     // 更新内容区域（只在加载中或空状态时）
-    let Ok((content_entity, children)) = content_query.single() else {
+    let Ok((container_entity, children)) = scroll_container_query.single() else {
         return;
     };
 
@@ -461,12 +469,12 @@ pub fn refresh_rankings_ui(
 
     if rankings_state.is_loading {
         // 显示加载中
-        commands.entity(content_entity).with_children(|parent| {
+        commands.entity(container_entity).with_children(|parent| {
             spawn_loading_indicator(parent, &font);
         });
     } else {
         // 显示空状态
-        commands.entity(content_entity).with_children(|parent| {
+        commands.entity(container_entity).with_children(|parent| {
             spawn_empty_state(parent, &font, "点击上方标签加载排行榜");
         });
     }
@@ -479,7 +487,7 @@ pub fn waterfall_create_cards(
     mut commands: Commands,
     mut creation_state: ResMut<RankingsCardCreationState>,
     rankings_state: Res<RankingsState>,
-    content_query: Query<(Entity, Option<&Children>), With<RankingsContentContainer>>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<RankingsScrollContainer>>,
     card_query: Query<&RankingsComicCard>,
     loading_query: Query<Entity, With<RankingsLoadingIndicator>>,
     time: Res<Time>,
@@ -491,7 +499,7 @@ pub fn waterfall_create_cards(
         let comics = rankings_state.current_comics();
         if !comics.is_empty() {
             // 检查当前容器中是否有卡片
-            if let Ok((content_entity, children)) = content_query.single() {
+            if let Ok((container_entity, children)) = scroll_container_query.single() {
                 // 检查容器的子元素中是否有 RankingsComicCard
                 let has_cards = children
                     .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
@@ -542,7 +550,7 @@ pub fn waterfall_create_cards(
                         rankings_state.current_type
                     );
                 }
-                let _ = content_entity; // suppress warning
+                let _ = container_entity; // suppress warning
             }
         }
     }
@@ -562,7 +570,7 @@ pub fn waterfall_create_cards(
 
     // 检查是否需要预创建
     if creation_state.needs_precreate() {
-        let Ok((content_entity, _)) = content_query.single() else {
+        let Ok((container_entity, _)) = scroll_container_query.single() else {
             return;
         };
 
@@ -580,7 +588,7 @@ pub fn waterfall_create_cards(
 
         // 一次性创建所有隐藏卡片
         let mut entities = Vec::with_capacity(count);
-        commands.entity(content_entity).with_children(|parent| {
+        commands.entity(container_entity).with_children(|parent| {
             for i in 0..count {
                 if let Some(comic) = comics.get(i) {
                     let entity = spawn_comic_card(parent, &font, comic, i + 1, true);
@@ -955,30 +963,49 @@ pub fn handle_rankings_scroll(
     }
 }
 
-/// 更新排行榜内容尺寸
+/// 更新排行榜内容尺寸（与分类/收藏一致的计算方式）
 pub fn update_rankings_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<RankingsScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
+    mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<RankingsScrollContainer>>,
+    card_query: Query<Entity, With<RankingsComicCard>>,
     window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
+    use layout::*;
+
     let scale_factor = window_query
         .single()
         .ok()
         .map(|w| w.scale_factor() as f32)
         .unwrap_or(1.0);
 
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
+    for (scroll_computed, mut content_info) in scroll_query.iter_mut() {
+        let viewport_size = scroll_computed.size();
+        let viewport_width = viewport_size.x / scale_factor;
+        let viewport_height = viewport_size.y / scale_factor;
 
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
+        if viewport_height <= 0.0 || viewport_width <= 0.0 {
+            continue;
         }
+
+        let card_count = card_query.iter().count();
+        if card_count == 0 {
+            content_info.content_height = 0.0;
+            content_info.viewport_height = viewport_height;
+            continue;
+        }
+
+        // 计算列数
+        let available_width = viewport_width - PADDING_LEFT - PADDING_RIGHT;
+        let card_with_gap = CARD_WIDTH + COLUMN_GAP;
+        let columns = ((available_width + COLUMN_GAP) / card_with_gap)
+            .floor()
+            .max(1.0) as usize;
+        let rows = (card_count + columns - 1) / columns;
+
+        // 计算内容高度
+        let content_height = PADDING_TOP
+            + (rows as f32) * CARD_HEIGHT
+            + ((rows.saturating_sub(1)) as f32) * ROW_GAP
+            + PADDING_BOTTOM;
 
         content_info.viewport_height = viewport_height;
         content_info.content_height = content_height;

@@ -259,6 +259,17 @@ impl Default for FavoritesState {
     }
 }
 
+/// 首页状态
+#[derive(Resource, Default)]
+pub struct HomeState {
+    /// 推荐漫画列表
+    pub recommendations: Vec<Comic>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
 /// 漫画详情状态
 #[derive(Resource, Default)]
 pub struct ComicDetailState {

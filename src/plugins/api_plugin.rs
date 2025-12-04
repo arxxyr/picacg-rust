@@ -25,9 +25,14 @@ impl Plugin for ApiPlugin {
             .insert_resource(ApiClientResource::new())
             // 注册下载管理状态
             .init_resource::<DownloadManagerState>()
+            // 启动时加载未完成的下载任务
+            .add_systems(Startup, setup_download_manager)
+            // 启动后自动恢复下载（Update 阶段，只执行一次）
+            .add_systems(Update, auto_resume_downloads_on_startup)
             // 注册消息 (Bevy 0.17 使用 add_message)
             .add_message::<LoginRequestEvent>()
             .add_message::<LoginResponseEvent>()
+            .add_message::<UserLoggedInEvent>()
             .add_message::<LoadCategoriesRequest>()
             .add_message::<CategoriesLoadedEvent>()
             .add_message::<CategoriesLoadFailedEvent>()
@@ -72,6 +77,10 @@ impl Plugin for ApiPlugin {
             .add_message::<LoadFavoritesRequest>()
             .add_message::<FavoritesLoadedEvent>()
             .add_message::<FavoritesLoadFailedEvent>()
+            // 首页相关消息
+            .add_message::<LoadRecommendationsRequest>()
+            .add_message::<RecommendationsLoadedEvent>()
+            .add_message::<RecommendationsLoadFailedEvent>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -123,6 +132,11 @@ impl Plugin for ApiPlugin {
             .add_systems(Update, (handle_load_rankings, handle_rankings_response))
             // 注册系统 - 收藏列表
             .add_systems(Update, (handle_load_favorites, handle_favorites_response))
+            // 注册系统 - 首页推荐
+            .add_systems(
+                Update,
+                (handle_load_recommendations, handle_recommendations_response),
+            )
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -191,6 +205,7 @@ fn handle_login_response(
     mut next_route: ResMut<NextState<AppRoute>>,
     api_client: Res<ApiClientResource>,
     mut punch_in_messages: MessageWriter<PunchInRequestEvent>,
+    mut user_logged_in_messages: MessageWriter<UserLoggedInEvent>,
 ) {
     for event in messages.read() {
         login_form.is_loading = false;
@@ -210,6 +225,10 @@ fn handle_login_response(
                     punch_in_messages.write(PunchInRequestEvent);
                     tracing::info!("已触发自动打卡");
                 }
+
+                // 发送用户登录成功事件（通知需要等待登录的系统）
+                user_logged_in_messages.write(UserLoggedInEvent);
+                tracing::info!("用户登录成功，已发送 UserLoggedInEvent");
 
                 // 登录成功后直接进入分类页面
                 next_route.set(AppRoute::Categories);
@@ -982,6 +1001,80 @@ fn handle_favorites_response(
         favorites_state.is_loading = false;
         favorites_state.error = Some(event.error.clone());
         tracing::warn!("收藏列表加载失败: {}", event.error);
+    }
+}
+
+// ==================== 首页推荐处理 ====================
+
+/// 处理加载推荐漫画请求
+fn handle_load_recommendations(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadRecommendationsRequest>,
+    api_client: Res<ApiClientResource>,
+    mut home_state: ResMut<HomeState>,
+) {
+    for _request in messages.read() {
+        if home_state.is_loading {
+            continue;
+        }
+
+        home_state.is_loading = true;
+        home_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use crate::api::endpoints::GetRecommendationsRequest;
+
+            let request = GetRecommendationsRequest;
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(RecommendationsLoadedEvent {
+                            comics: response.comics,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error: String = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(RecommendationsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理推荐漫画响应
+fn handle_recommendations_response(
+    mut loaded_messages: MessageReader<RecommendationsLoadedEvent>,
+    mut failed_messages: MessageReader<RecommendationsLoadFailedEvent>,
+    mut home_state: ResMut<HomeState>,
+    mut image_messages: MessageWriter<LoadImageRequest>,
+) {
+    for event in loaded_messages.read() {
+        home_state.recommendations = event.comics.clone();
+        home_state.is_loading = false;
+        home_state.error = None;
+        tracing::info!("推荐漫画加载完成: {} 个", home_state.recommendations.len());
+
+        // 触发加载封面图片
+        for comic in &event.comics {
+            image_messages.write(LoadImageRequest {
+                url: comic.thumb.url(),
+            });
+        }
+    }
+
+    for event in failed_messages.read() {
+        home_state.is_loading = false;
+        home_state.error = Some(event.error.clone());
+        tracing::warn!("推荐漫画加载失败: {}", event.error);
     }
 }
 
@@ -2172,5 +2265,74 @@ fn handle_rankings_response(
     for event in failed_messages.read() {
         rankings_state.is_loading = false;
         rankings_state.error = Some(event.error.clone());
+    }
+}
+
+// ==================== 启动时自动恢复下载 ====================
+
+/// 加载未完成的下载任务（Startup 阶段）
+fn setup_download_manager(mut download_state: ResMut<DownloadManagerState>) {
+    let download_path = crate::systems::get_download_base_path();
+    download_state.load_incomplete_tasks(&download_path);
+    tracing::info!(
+        "加载未完成的下载任务: {} 个",
+        download_state.fsm_tasks.len()
+    );
+}
+
+/// 登录成功后自动恢复下载
+///
+/// 监听 `UserLoggedInEvent`，在用户成功登录后自动恢复未完成的下载任务。
+/// 只执行一次（即使用户重新登录也不会再次触发）。
+fn auto_resume_downloads_on_startup(
+    mut has_run: Local<bool>,
+    mut user_logged_in_events: MessageReader<UserLoggedInEvent>,
+    download_state: Res<DownloadManagerState>,
+    mut resume_messages: MessageWriter<ResumeDownloadRequest>,
+) {
+    // 只执行一次
+    if *has_run {
+        // 消费掉事件，避免累积
+        for _ in user_logged_in_events.read() {}
+        return;
+    }
+
+    // 等待登录成功事件
+    let mut logged_in = false;
+    for _ in user_logged_in_events.read() {
+        logged_in = true;
+    }
+    if !logged_in {
+        return;
+    }
+
+    *has_run = true;
+    tracing::debug!("收到 UserLoggedInEvent，检查自动恢复下载设置");
+
+    // 检查设置
+    let settings = crate::config::settings::AppSettings::global().read();
+    if !settings.auto_resume_downloads {
+        tracing::debug!("自动恢复下载未启用");
+        return;
+    }
+
+    // 恢复所有暂停/等待状态的任务
+    let mut resumed_count = 0;
+    for fsm in &download_state.fsm_tasks {
+        let task = fsm.to_ui_task();
+        if matches!(
+            task.status,
+            crate::resources::ComicDownloadStatus::Paused
+                | crate::resources::ComicDownloadStatus::Waiting
+        ) {
+            resume_messages.write(ResumeDownloadRequest {
+                comic_id: task.comic_id.clone(),
+            });
+            resumed_count += 1;
+        }
+    }
+
+    if resumed_count > 0 {
+        tracing::info!("登录后自动恢复下载: {} 个任务", resumed_count);
     }
 }

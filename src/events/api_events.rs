@@ -24,6 +24,12 @@ pub struct LoginResponseEvent {
     pub result: Result<String, String>,
 }
 
+/// 用户登录成功事件
+///
+/// 当用户成功登录后发送，用于通知需要等待登录的系统（如自动恢复下载）
+#[derive(Message)]
+pub struct UserLoggedInEvent;
+
 // ==================== 打卡消息 ====================
 
 /// 打卡请求消息
@@ -211,6 +217,24 @@ pub struct FavoritesLoadedEvent {
 /// 收藏列表加载失败
 #[derive(Message)]
 pub struct FavoritesLoadFailedEvent {
+    pub error: String,
+}
+
+// ==================== 首页消息 ====================
+
+/// 加载推荐漫画请求
+#[derive(Message)]
+pub struct LoadRecommendationsRequest;
+
+/// 推荐漫画加载完成
+#[derive(Message)]
+pub struct RecommendationsLoadedEvent {
+    pub comics: Vec<Comic>,
+}
+
+/// 推荐漫画加载失败
+#[derive(Message)]
+pub struct RecommendationsLoadFailedEvent {
     pub error: String,
 }
 

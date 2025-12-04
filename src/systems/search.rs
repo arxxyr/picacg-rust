@@ -36,7 +36,7 @@ mod search_layout {
     /// 上内边距
     pub const PADDING_TOP: f32 = 20.0;
     /// 下内边距
-    pub const PADDING_BOTTOM: f32 = 20.0;
+    pub const PADDING_BOTTOM: f32 = 40.0;
 }
 
 // ==================== 组件标记 ====================
@@ -91,6 +91,10 @@ pub struct SearchPrevPageButton;
 /// 搜索下一页按钮
 #[derive(Component)]
 pub struct SearchNextPageButton;
+
+/// 搜索分页容器
+#[derive(Component)]
+pub struct SearchPaginationContainer;
 
 /// 搜索加载提示标记
 #[derive(Component)]
@@ -226,17 +230,19 @@ pub fn setup_search_ui(
                     });
             });
 
-            // 搜索结果区域
+            // 滚动区域包装器（用于放置滚动条）
             root.spawn(Node {
                 width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 position_type: PositionType::Relative,
                 ..default()
             })
-            .with_children(|content| {
+            .with_children(|wrapper| {
                 // 滚动容器
-                let scroll_container = content
+                let scroll_container = wrapper
                     .spawn((
                         SearchScrollContainer,
                         ScrollContainer,
@@ -363,104 +369,108 @@ pub fn setup_search_ui(
                                     ..default()
                                 },
                             ));
-
-                            // 分页控件
-                            if search_state.total_pages > 1 {
-                                scroll
-                                    .spawn(Node {
-                                        width: Val::Percent(100.0),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        padding: UiRect::vertical(Val::Px(20.0)),
-                                        column_gap: Val::Px(15.0),
-                                        ..default()
-                                    })
-                                    .with_children(|pagination| {
-                                        // 上一页按钮
-                                        pagination
-                                            .spawn((
-                                                SearchPrevPageButton,
-                                                Button,
-                                                Node {
-                                                    width: Val::Px(80.0),
-                                                    height: Val::Px(36.0),
-                                                    justify_content: JustifyContent::Center,
-                                                    align_items: AlignItems::Center,
-                                                    ..default()
-                                                },
-                                                BackgroundColor(if search_state.page > 1 {
-                                                    AppColors::PRIMARY
-                                                } else {
-                                                    AppColors::SECONDARY
-                                                }),
-                                            ))
-                                            .with_children(|btn| {
-                                                btn.spawn((
-                                                    Text::new("上一页"),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-
-                                        // 页码
-                                        pagination.spawn((
-                                            SearchPageNumberText,
-                                            Text::new(format!(
-                                                "{} / {}",
-                                                search_state.page, search_state.total_pages
-                                            )),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 14.0,
-                                                ..default()
-                                            },
-                                            TextColor(AppColors::TEXT),
-                                        ));
-
-                                        // 下一页按钮
-                                        pagination
-                                            .spawn((
-                                                SearchNextPageButton,
-                                                Button,
-                                                Node {
-                                                    width: Val::Px(80.0),
-                                                    height: Val::Px(36.0),
-                                                    justify_content: JustifyContent::Center,
-                                                    align_items: AlignItems::Center,
-                                                    ..default()
-                                                },
-                                                BackgroundColor(
-                                                    if search_state.page < search_state.total_pages
-                                                    {
-                                                        AppColors::PRIMARY
-                                                    } else {
-                                                        AppColors::SECONDARY
-                                                    },
-                                                ),
-                                            ))
-                                            .with_children(|btn| {
-                                                btn.spawn((
-                                                    Text::new("下一页"),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-                                    });
-                            }
                         }
                     })
                     .id();
 
                 // 滚动条
-                spawn_scrollbar_inline(content, scroll_container);
+                spawn_scrollbar_inline(wrapper, scroll_container);
+            });
+
+            // 分页控件（固定在底部）
+            root.spawn((
+                SearchPaginationContainer,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(50.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    border: UiRect::top(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                BackgroundColor(AppColors::SURFACE),
+                Transform::default(),
+            ))
+            .with_children(|pagination| {
+                // 上一页按钮
+                pagination
+                    .spawn((
+                        SearchPrevPageButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(80.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(if search_state.page > 1 {
+                            AppColors::PRIMARY
+                        } else {
+                            AppColors::SECONDARY
+                        }),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("上一页"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
+
+                // 页码
+                pagination.spawn((
+                    SearchPageNumberText,
+                    Text::new(format!(
+                        "{} / {}",
+                        search_state.page,
+                        search_state.total_pages.max(1)
+                    )),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+
+                // 下一页按钮
+                pagination
+                    .spawn((
+                        SearchNextPageButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(80.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(if search_state.page < search_state.total_pages {
+                            AppColors::PRIMARY
+                        } else {
+                            AppColors::SECONDARY
+                        }),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("下一页"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
             });
         })
         .id();
@@ -1318,17 +1328,19 @@ pub fn refresh_search_ui(
                     });
             });
 
-            // 搜索结果区域
+            // 滚动区域包装器（用于放置滚动条）
             root.spawn(Node {
                 width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
                 position_type: PositionType::Relative,
                 ..default()
             })
-            .with_children(|content| {
+            .with_children(|wrapper| {
                 // 滚动容器
-                let scroll_container = content
+                let scroll_container = wrapper
                     .spawn((
                         SearchScrollContainer,
                         ScrollContainer,
@@ -1455,104 +1467,108 @@ pub fn refresh_search_ui(
                                     ..default()
                                 },
                             ));
-
-                            // 分页控件
-                            if search_state.total_pages > 1 {
-                                scroll
-                                    .spawn(Node {
-                                        width: Val::Percent(100.0),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        padding: UiRect::vertical(Val::Px(20.0)),
-                                        column_gap: Val::Px(15.0),
-                                        ..default()
-                                    })
-                                    .with_children(|pagination| {
-                                        // 上一页按钮
-                                        pagination
-                                            .spawn((
-                                                SearchPrevPageButton,
-                                                Button,
-                                                Node {
-                                                    width: Val::Px(80.0),
-                                                    height: Val::Px(36.0),
-                                                    justify_content: JustifyContent::Center,
-                                                    align_items: AlignItems::Center,
-                                                    ..default()
-                                                },
-                                                BackgroundColor(if search_state.page > 1 {
-                                                    AppColors::PRIMARY
-                                                } else {
-                                                    AppColors::SECONDARY
-                                                }),
-                                            ))
-                                            .with_children(|btn| {
-                                                btn.spawn((
-                                                    Text::new("上一页"),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-
-                                        // 页码
-                                        pagination.spawn((
-                                            SearchPageNumberText,
-                                            Text::new(format!(
-                                                "{} / {}",
-                                                search_state.page, search_state.total_pages
-                                            )),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 14.0,
-                                                ..default()
-                                            },
-                                            TextColor(AppColors::TEXT),
-                                        ));
-
-                                        // 下一页按钮
-                                        pagination
-                                            .spawn((
-                                                SearchNextPageButton,
-                                                Button,
-                                                Node {
-                                                    width: Val::Px(80.0),
-                                                    height: Val::Px(36.0),
-                                                    justify_content: JustifyContent::Center,
-                                                    align_items: AlignItems::Center,
-                                                    ..default()
-                                                },
-                                                BackgroundColor(
-                                                    if search_state.page < search_state.total_pages
-                                                    {
-                                                        AppColors::PRIMARY
-                                                    } else {
-                                                        AppColors::SECONDARY
-                                                    },
-                                                ),
-                                            ))
-                                            .with_children(|btn| {
-                                                btn.spawn((
-                                                    Text::new("下一页"),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-                                    });
-                            }
                         }
                     })
                     .id();
 
                 // 滚动条
-                spawn_scrollbar_inline(content, scroll_container);
+                spawn_scrollbar_inline(wrapper, scroll_container);
+            });
+
+            // 分页控件（固定在底部）
+            root.spawn((
+                SearchPaginationContainer,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(50.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    border: UiRect::top(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                BackgroundColor(AppColors::SURFACE),
+                Transform::default(),
+            ))
+            .with_children(|pagination| {
+                // 上一页按钮
+                pagination
+                    .spawn((
+                        SearchPrevPageButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(80.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(if search_state.page > 1 {
+                            AppColors::PRIMARY
+                        } else {
+                            AppColors::SECONDARY
+                        }),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("上一页"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
+
+                // 页码
+                pagination.spawn((
+                    SearchPageNumberText,
+                    Text::new(format!(
+                        "{} / {}",
+                        search_state.page,
+                        search_state.total_pages.max(1)
+                    )),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+
+                // 下一页按钮
+                pagination
+                    .spawn((
+                        SearchNextPageButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(80.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(if search_state.page < search_state.total_pages {
+                            AppColors::PRIMARY
+                        } else {
+                            AppColors::SECONDARY
+                        }),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("下一页"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
             });
         })
         .id();
