@@ -13,10 +13,6 @@ use crate::{
 #[derive(Component)]
 pub struct HomeRoot;
 
-/// 排行榜页根标记
-#[derive(Component)]
-pub struct RankingsRoot;
-
 /// 收藏页根标记
 #[derive(Component)]
 pub struct FavoritesRoot;
@@ -143,42 +139,6 @@ pub fn setup_home_ui(
 }
 
 pub fn cleanup_home_ui(mut commands: Commands, query: Query<Entity, With<HomeRoot>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-}
-
-// ==================== 排行榜 ====================
-
-pub fn setup_rankings_ui(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    content_area_query: Query<Entity, With<ContentArea>>,
-) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
-
-    let content_area = match content_area_query.iter().next() {
-        Some(entity) => entity,
-        None => {
-            tracing::warn!("排行榜页：找不到内容区域");
-            return;
-        }
-    };
-
-    spawn_placeholder_page(
-        &mut commands,
-        content_area,
-        font,
-        RankingsRoot,
-        "排行榜",
-        "🏆",
-        "日榜、周榜、月榜",
-    );
-
-    tracing::info!("排行榜 UI 已创建");
-}
-
-pub fn cleanup_rankings_ui(mut commands: Commands, query: Query<Entity, With<RankingsRoot>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }

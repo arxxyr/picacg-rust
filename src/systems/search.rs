@@ -15,6 +15,7 @@ use crate::{
         downloads::ScrollContainer,
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::*,
+        waterfall::SearchCardCreationState,
     },
 };
 
@@ -110,11 +111,14 @@ pub fn setup_search_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     search_state: Res<SearchState>,
-    image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
+    mut creation_state: ResMut<SearchCardCreationState>,
 ) {
     let font: Handle<Font> = asset_server.load(FONT_PATH);
     let content_area = content_area_query.single().ok();
+
+    // 清空之前的创建状态
+    creation_state.clear();
 
     let search_root = commands
         .spawn((
@@ -342,29 +346,23 @@ pub fn setup_search_ui(
                                 },
                             ));
 
-                            // 结果网格
-                            scroll
-                                .spawn((
-                                    SearchResultsGrid,
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        flex_wrap: FlexWrap::Wrap,
-                                        padding: UiRect {
-                                            left: Val::Px(search_layout::PADDING_LEFT),
-                                            right: Val::Px(search_layout::PADDING_RIGHT),
-                                            top: Val::Px(0.0),
-                                            bottom: Val::Px(search_layout::PADDING_BOTTOM),
-                                        },
-                                        column_gap: Val::Px(search_layout::COLUMN_GAP),
-                                        row_gap: Val::Px(search_layout::ROW_GAP),
-                                        ..default()
+                            // 结果网格（卡片通过瀑布式创建系统添加）
+                            scroll.spawn((
+                                SearchResultsGrid,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    flex_wrap: FlexWrap::Wrap,
+                                    padding: UiRect {
+                                        left: Val::Px(search_layout::PADDING_LEFT),
+                                        right: Val::Px(search_layout::PADDING_RIGHT),
+                                        top: Val::Px(0.0),
+                                        bottom: Val::Px(search_layout::PADDING_BOTTOM),
                                     },
-                                ))
-                                .with_children(|grid| {
-                                    for comic in &search_state.results {
-                                        spawn_search_result_card(grid, comic, &font, &image_cache);
-                                    }
-                                });
+                                    column_gap: Val::Px(search_layout::COLUMN_GAP),
+                                    row_gap: Val::Px(search_layout::ROW_GAP),
+                                    ..default()
+                                },
+                            ));
 
                             // 分页控件
                             if search_state.total_pages > 1 {
@@ -470,6 +468,12 @@ pub fn setup_search_ui(
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(search_root);
     }
+
+    // 启动预创建模式
+    if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
+    {
+        creation_state.start_precreate(search_state.results.len(), font);
+    }
 }
 
 /// 创建滚动条
@@ -533,7 +537,8 @@ fn spawn_search_result_card(
     comic: &crate::api::models::Comic,
     font: &Handle<Font>,
     image_cache: &ImageCache,
-) {
+    hidden: bool,
+) -> Entity {
     parent
         .spawn((
             SearchResultCard {
@@ -550,6 +555,11 @@ fn spawn_search_result_card(
             BorderColor::all(AppColors::BORDER),
             BackgroundColor(AppColors::CARD_BG),
             BorderRadius::all(Val::Px(4.0)),
+            if hidden {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            },
         ))
         .with_children(|card| {
             // 封面图片容器
@@ -711,11 +721,19 @@ fn spawn_search_result_card(
                     }
                 });
             }
-        });
+        })
+        .id()
 }
 
 /// 清理搜索界面
-pub fn cleanup_search_ui(mut commands: Commands, query: Query<Entity, With<SearchRoot>>) {
+pub fn cleanup_search_ui(
+    mut commands: Commands,
+    query: Query<Entity, With<SearchRoot>>,
+    mut creation_state: ResMut<SearchCardCreationState>,
+) {
+    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    creation_state.clear();
+
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
@@ -1141,9 +1159,8 @@ pub fn update_search_images(
     image_query: Query<(Entity, &SearchResultImage), Without<ImageNode>>,
     image_cache: Res<ImageCache>,
 ) {
-    if !image_cache.is_changed() {
-        return;
-    }
+    // 注意：不使用 is_changed() 检查，因为系统执行顺序可能导致检测失败
+    // Query 使用 Without<ImageNode> 过滤已设置图片的实体，性能影响不大
 
     for (entity, img) in image_query.iter() {
         if let Some(handle) = image_cache.get(&img.url) {
@@ -1160,9 +1177,9 @@ pub fn refresh_search_ui(
     search_state: Res<SearchState>,
     search_root_query: Query<Entity, With<SearchRoot>>,
     asset_server: Res<AssetServer>,
-    image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
     input_query: Query<&SearchInputField>,
+    mut creation_state: ResMut<SearchCardCreationState>,
 ) {
     if !search_state.is_changed() {
         return;
@@ -1175,6 +1192,9 @@ pub fn refresh_search_ui(
     for entity in search_root_query.iter() {
         commands.entity(entity).despawn();
     }
+
+    // 清空之前的创建状态
+    creation_state.clear();
 
     // 重新创建 UI
     let font: Handle<Font> = asset_server.load(FONT_PATH);
@@ -1418,29 +1438,23 @@ pub fn refresh_search_ui(
                                 },
                             ));
 
-                            // 结果网格
-                            scroll
-                                .spawn((
-                                    SearchResultsGrid,
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        flex_wrap: FlexWrap::Wrap,
-                                        padding: UiRect {
-                                            left: Val::Px(search_layout::PADDING_LEFT),
-                                            right: Val::Px(search_layout::PADDING_RIGHT),
-                                            top: Val::Px(0.0),
-                                            bottom: Val::Px(search_layout::PADDING_BOTTOM),
-                                        },
-                                        column_gap: Val::Px(search_layout::COLUMN_GAP),
-                                        row_gap: Val::Px(search_layout::ROW_GAP),
-                                        ..default()
+                            // 结果网格（卡片通过瀑布式创建系统添加）
+                            scroll.spawn((
+                                SearchResultsGrid,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    flex_wrap: FlexWrap::Wrap,
+                                    padding: UiRect {
+                                        left: Val::Px(search_layout::PADDING_LEFT),
+                                        right: Val::Px(search_layout::PADDING_RIGHT),
+                                        top: Val::Px(0.0),
+                                        bottom: Val::Px(search_layout::PADDING_BOTTOM),
                                     },
-                                ))
-                                .with_children(|grid| {
-                                    for comic in &search_state.results {
-                                        spawn_search_result_card(grid, comic, &font, &image_cache);
-                                    }
-                                });
+                                    column_gap: Val::Px(search_layout::COLUMN_GAP),
+                                    row_gap: Val::Px(search_layout::ROW_GAP),
+                                    ..default()
+                                },
+                            ));
 
                             // 分页控件
                             if search_state.total_pages > 1 {
@@ -1544,6 +1558,85 @@ pub fn refresh_search_ui(
         .id();
 
     commands.entity(content_entity).add_child(search_root);
+
+    // 启动预创建模式
+    if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
+    {
+        creation_state.start_precreate(search_state.results.len(), font);
+    }
+}
+
+/// 瀑布式显示搜索结果卡片（预创建所有隐藏卡片，然后分批显示）
+pub fn waterfall_create_search_cards(
+    mut commands: Commands,
+    mut creation_state: ResMut<SearchCardCreationState>,
+    search_state: Res<SearchState>,
+    image_cache: Res<ImageCache>,
+    results_grid_query: Query<Entity, With<SearchResultsGrid>>,
+    time: Res<Time>,
+) {
+    // 检查是否需要预创建
+    if creation_state.needs_precreate() {
+        let Ok(grid_entity) = results_grid_query.single() else {
+            return;
+        };
+
+        let Some(font) = creation_state.font_handle.clone() else {
+            return;
+        };
+
+        let results = &search_state.results;
+        let count = creation_state.get_precreate_count();
+
+        if results.is_empty() || count == 0 {
+            creation_state.clear();
+            return;
+        }
+
+        // 一次性创建所有隐藏卡片
+        let mut entities = Vec::with_capacity(count);
+        commands.entity(grid_entity).with_children(|parent| {
+            for i in 0..count {
+                if let Some(comic) = results.get(i) {
+                    let entity = spawn_search_result_card(parent, comic, &font, &image_cache, true);
+                    entities.push(entity);
+                }
+            }
+        });
+
+        // 设置预创建完成后的实体列表
+        creation_state.set_precreated_entities(entities);
+        tracing::debug!("搜索结果卡片预创建完成: {} 个", count);
+        return;
+    }
+
+    // 检查是否应该显示下一批
+    if !creation_state.should_show_batch(time.delta()) {
+        return;
+    }
+
+    // 获取这一批要显示的实体
+    let batch = creation_state.take_batch();
+    if batch.is_empty() {
+        return;
+    }
+
+    // 显示这一批卡片（设置 Visibility::Inherited）
+    for entity in batch {
+        // 安全检查：实体可能在清理时已被销毁
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert(Visibility::Inherited);
+        }
+    }
+
+    // 日志（仅在显示完成时输出）
+    if !creation_state.has_pending() {
+        creation_state.finish();
+        tracing::debug!(
+            "搜索结果卡片瀑布式显示完成: {} 个",
+            search_state.results.len()
+        );
+    }
 }
 
 /// 点击其他区域取消输入框焦点

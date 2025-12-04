@@ -9,6 +9,7 @@ use crate::{
     systems::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::*,
+        waterfall::CategoriesCardCreationState,
     },
 };
 
@@ -37,10 +38,13 @@ pub fn setup_categories_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
-    image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
+    mut creation_state: ResMut<CategoriesCardCreationState>,
 ) {
     let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+    // 清空之前的创建状态
+    creation_state.clear();
 
     // 尝试找到 ContentArea
     let content_area = content_area_query.single().ok();
@@ -138,12 +142,8 @@ pub fn setup_categories_ui(
                                 },
                                 TextColor(AppColors::TEXT),
                             ));
-                        } else {
-                            // 分类卡片
-                            for category in &categories_state.categories {
-                                spawn_category_card(grid, category, &font, &image_cache);
-                            }
                         }
+                        // 卡片通过瀑布式创建系统添加
                     })
                     .id();
 
@@ -157,6 +157,9 @@ pub fn setup_categories_ui(
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(categories_root);
     }
+
+    // 注意：预创建由 waterfall_create_category_cards 的自动检测来启动
+    // 不在这里启动，避免与延迟执行的 commands 冲突
 }
 
 /// 内联创建滚动条（用于 ChildSpawnerCommands）
@@ -225,13 +228,14 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
         });
 }
 
-/// 创建分类卡片
+/// 创建分类卡片（返回 Entity，可选隐藏）
 fn spawn_category_card(
     parent: &mut ChildSpawnerCommands,
     category: &crate::api::models::Category,
     font: &Handle<Font>,
     image_cache: &ImageCache,
-) {
+    hidden: bool,
+) -> Entity {
     parent
         .spawn((
             CategoryCard {
@@ -249,6 +253,11 @@ fn spawn_category_card(
             },
             BorderColor::all(AppColors::BORDER),
             BackgroundColor(AppColors::SURFACE),
+            if hidden {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            },
         ))
         .with_children(|card| {
             // 图片区域
@@ -290,157 +299,188 @@ fn spawn_category_card(
                     ..default()
                 },
             ));
-        });
+        })
+        .id()
 }
 
 /// 清理分类界面
-pub fn cleanup_categories_ui(mut commands: Commands, query: Query<Entity, With<CategoriesRoot>>) {
+pub fn cleanup_categories_ui(
+    mut commands: Commands,
+    query: Query<Entity, With<CategoriesRoot>>,
+    mut creation_state: ResMut<CategoriesCardCreationState>,
+) {
+    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    creation_state.clear();
+
     for entity in query.iter() {
         // Bevy 0.17: despawn() 自动递归删除子实体
         commands.entity(entity).despawn();
     }
 }
 
-/// 刷新分类界面（监听 CategoriesState 变化）
+/// 刷新分类界面（只处理错误状态，卡片由瀑布式系统创建）
+///
+/// 注意：这个函数**不应该**在数据加载完成后重建整个
+/// UI，否则会覆盖瀑布式系统创建的卡片。 它只在出现错误时重建 UI 显示错误信息。
 pub fn refresh_categories_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
-    image_cache: Res<ImageCache>,
-    root_query: Query<Entity, With<CategoriesRoot>>,
-    content_area_query: Query<Entity, With<ContentArea>>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<CategoriesScrollContainer>>,
+    card_query: Query<&CategoryCard>,
+    error_query: Query<Entity, With<ErrorMessage>>,
 ) {
-    // 只在状态变化时刷新
+    // 只在状态变化时检查
     if !categories_state.is_changed() {
         return;
     }
 
-    // 如果还在加载中，不刷新（等待加载完成）
-    if categories_state.is_loading && categories_state.categories.is_empty() {
+    // 如果有错误，显示错误信息
+    if let Some(ref error) = categories_state.error {
+        // 如果还没有错误信息 UI，添加它
+        if error_query.is_empty() {
+            if let Ok((container_entity, _)) = scroll_container_query.single() {
+                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let error_entity = commands
+                    .spawn((
+                        ErrorMessage,
+                        Text::new(error.clone()),
+                        TextFont {
+                            font,
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::ERROR),
+                    ))
+                    .id();
+                commands.entity(container_entity).add_child(error_entity);
+            }
+        }
         return;
     }
 
-    // 删除旧的 UI
-    for entity in root_query.iter() {
-        commands.entity(entity).despawn();
+    // 如果数据存在或已有卡片，让瀑布式系统处理，不干涉
+    if !categories_state.categories.is_empty() {
+        return;
     }
 
-    // 尝试找到 ContentArea
-    let content_area = content_area_query.single().ok();
+    // 检查是否已有卡片
+    if let Ok((_, children)) = scroll_container_query.single() {
+        let has_cards = children
+            .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+            .unwrap_or(false);
+        if has_cards {
+            return;
+        }
+    }
 
-    // 重新创建 UI
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    // 数据为空且没有卡片，不做任何操作（保持加载中状态）
+}
 
-    let categories_root = commands
-        .spawn((
-            CategoriesRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 页面标题栏
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
-            .with_children(|header| {
-                header.spawn((
-                    Text::new("分类浏览"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
+/// 瀑布式显示分类卡片（预创建所有隐藏卡片，然后分批显示）
+pub fn waterfall_create_category_cards(
+    mut commands: Commands,
+    mut creation_state: ResMut<CategoriesCardCreationState>,
+    categories_state: Res<CategoriesState>,
+    image_cache: Res<ImageCache>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<CategoriesScrollContainer>>,
+    card_query: Query<&CategoryCard>,
+    loading_query: Query<Entity, With<LoadingIndicator>>,
+    time: Res<Time>,
+    asset_server: Res<AssetServer>,
+) {
+    // 如果数据已加载但 creation_state 未启动，主动启动预创建
+    // （解决系统执行顺序导致 is_changed() 检测失败的问题）
+    if !creation_state.is_creating
+        && !categories_state.categories.is_empty()
+        && categories_state.error.is_none()
+    {
+        // 检查当前容器中是否有卡片
+        if let Ok((container_entity, children)) = scroll_container_query.single() {
+            // 检查容器的子元素中是否有 CategoryCard
+            let has_cards = children
+                .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+                .unwrap_or(false);
 
-            // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
-            .with_children(|wrapper| {
-                // 分类网格容器（可滚动）
-                let scroll_container_id = wrapper
-                    .spawn((
-                        CategoriesScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::FlexStart,
-                            align_content: AlignContent::FlexStart,
-                            padding: UiRect {
-                                left: Val::Px(category_layout::PADDING_LEFT),
-                                right: Val::Px(category_layout::PADDING_RIGHT),
-                                top: Val::Px(category_layout::PADDING_TOP),
-                                bottom: Val::Px(category_layout::PADDING_BOTTOM),
-                            },
-                            column_gap: Val::Px(category_layout::COLUMN_GAP),
-                            row_gap: Val::Px(category_layout::ROW_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|grid| {
-                        if let Some(ref error) = categories_state.error {
-                            // 错误信息
-                            grid.spawn((
-                                ErrorMessage,
-                                Text::new(error.clone()),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::ERROR),
-                            ));
-                        } else if categories_state.categories.is_empty() {
-                            // 仍在加载
-                            grid.spawn((
-                                LoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        } else {
-                            // 分类卡片
-                            for category in &categories_state.categories {
-                                spawn_category_card(grid, category, &font, &image_cache);
-                            }
-                        }
-                    })
-                    .id();
+            if !has_cards {
+                // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
+                for entity in loading_query.iter() {
+                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                        entity_commands.despawn();
+                    }
+                }
+                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                creation_state.start_precreate(categories_state.categories.len(), font);
+                tracing::debug!(
+                    "自动启动分类卡片预创建: {} 个",
+                    categories_state.categories.len()
+                );
+            }
+            let _ = container_entity; // suppress warning
+        }
+    }
 
-                // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
-            });
-        })
-        .id();
+    // 检查是否需要预创建
+    if creation_state.needs_precreate() {
+        let Ok((container_entity, _)) = scroll_container_query.single() else {
+            return;
+        };
 
-    // 如果有 ContentArea，将分类内容作为其子实体
-    if let Some(content_entity) = content_area {
-        commands.entity(content_entity).add_child(categories_root);
+        let Some(font) = creation_state.font_handle.clone() else {
+            return;
+        };
+
+        let categories = &categories_state.categories;
+        let count = creation_state.get_precreate_count();
+
+        if categories.is_empty() || count == 0 {
+            creation_state.clear();
+            return;
+        }
+
+        // 一次性创建所有隐藏卡片
+        let mut entities = Vec::with_capacity(count);
+        commands.entity(container_entity).with_children(|parent| {
+            for i in 0..count {
+                if let Some(category) = categories.get(i) {
+                    let entity = spawn_category_card(parent, category, &font, &image_cache, true);
+                    entities.push(entity);
+                }
+            }
+        });
+
+        // 设置预创建完成后的实体列表
+        creation_state.set_precreated_entities(entities);
+        tracing::debug!("分类卡片预创建完成: {} 个", count);
+        return;
+    }
+
+    // 检查是否应该显示下一批
+    if !creation_state.should_show_batch(time.delta()) {
+        return;
+    }
+
+    // 获取这一批要显示的实体
+    let batch = creation_state.take_batch();
+    if batch.is_empty() {
+        return;
+    }
+
+    // 显示这一批卡片（设置 Visibility::Inherited）
+    for entity in batch {
+        // 安全检查：实体可能在清理时已被销毁
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert(Visibility::Inherited);
+        }
+    }
+
+    // 标记显示完成
+    if !creation_state.has_pending() {
+        creation_state.finish();
+        tracing::debug!(
+            "分类卡片瀑布式显示完成: {} 个",
+            categories_state.categories.len()
+        );
     }
 }
 
@@ -629,10 +669,8 @@ pub fn update_categories_images(
     placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
     card_query: Query<&CategoryCard>,
 ) {
-    // 如果图片缓存没有变化，跳过
-    if !image_cache.is_changed() {
-        return;
-    }
+    // 注意：不使用 is_changed() 检查，因为系统执行顺序可能导致检测失败
+    // 一旦占位符被替换就不在 query 中了，性能影响不大
 
     for (placeholder_entity, child_of) in placeholder_query.iter() {
         // 找到父卡片

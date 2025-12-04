@@ -64,6 +64,10 @@ impl Plugin for ApiPlugin {
             .add_message::<SearchComicsRequestEvent>()
             .add_message::<SearchResultsLoadedEvent>()
             .add_message::<SearchFailedEvent>()
+            // 排行榜相关消息
+            .add_message::<LoadRankingsRequest>()
+            .add_message::<RankingsLoadedEvent>()
+            .add_message::<RankingsLoadFailedEvent>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -88,7 +92,9 @@ impl Plugin for ApiPlugin {
                     handle_like_response,
                     handle_favorite_comic,
                     handle_favorite_response,
-                    handle_load_image,
+                    // 图片加载：先入队，再按节流处理
+                    enqueue_image_requests,
+                    process_image_queue,
                     handle_image_response,
                 ),
             )
@@ -109,6 +115,8 @@ impl Plugin for ApiPlugin {
             )
             // 注册系统 - 搜索
             .add_systems(Update, (handle_search_request, handle_search_response))
+            // 注册系统 - 排行榜
+            .add_systems(Update, (handle_load_rankings, handle_rankings_response))
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -381,20 +389,25 @@ fn url_to_cache_path(url: &str) -> std::path::PathBuf {
     get_image_cache_path().join(format!("{:016x}.{}", hash, ext))
 }
 
-/// 处理图片加载请求
-fn handle_load_image(
-    runtime: ResMut<TokioTasksRuntime>,
+/// 将图片加载请求加入队列（不立即加载，节流处理）
+fn enqueue_image_requests(
     mut messages: MessageReader<LoadImageRequest>,
     mut image_cache: ResMut<ImageCache>,
 ) {
     for event in messages.read() {
-        let url = event.url.clone();
+        image_cache.enqueue(event.url.clone());
+    }
+}
 
-        // 跳过已加载或正在加载的图片
-        if image_cache.is_loaded(&url) || image_cache.is_loading(&url) {
-            continue;
-        }
+/// 处理图片加载队列（每帧处理有限数量）
+fn process_image_queue(runtime: ResMut<TokioTasksRuntime>, mut image_cache: ResMut<ImageCache>) {
+    // 获取可以开始加载的批次
+    let batch = image_cache.take_pending_batch();
+    if batch.is_empty() {
+        return;
+    }
 
+    for url in batch {
         image_cache.mark_loading(url.clone());
 
         runtime.spawn_background_task(move |mut ctx| async move {
@@ -426,34 +439,34 @@ fn handle_load_image(
                 data
             };
 
+            // 在后台线程解码图片（CPU 密集型操作）
+            let decoded_result = match result {
+                Ok(image_data) => match image::load_from_memory(&image_data) {
+                    Ok(img) => {
+                        let rgba = img.to_rgba8();
+                        let (width, height) = rgba.dimensions();
+                        Ok((width, height, rgba.into_raw()))
+                    }
+                    Err(e) => Err(e.to_string()),
+                },
+                Err(e) => Err(e),
+            };
+
+            // 只在主线程创建 Bevy 资源（轻量操作）
             ctx.run_on_main_thread(move |ctx| {
-                match result {
-                    Ok(image_data) => {
-                        // 在主线程创建 Image 资源
-                        let image = match image::load_from_memory(&image_data) {
-                            Ok(img) => {
-                                let rgba = img.to_rgba8();
-                                let (width, height) = rgba.dimensions();
-                                Image::new(
-                                    bevy::render::render_resource::Extent3d {
-                                        width,
-                                        height,
-                                        depth_or_array_layers: 1,
-                                    },
-                                    bevy::render::render_resource::TextureDimension::D2,
-                                    rgba.into_raw(),
-                                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                                    RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
-                                )
-                            }
-                            Err(e) => {
-                                ctx.world.write_message(ImageLoadFailedEvent {
-                                    url: url.clone(),
-                                    error: e.to_string(),
-                                });
-                                return;
-                            }
-                        };
+                match decoded_result {
+                    Ok((width, height, rgba_data)) => {
+                        let image = Image::new(
+                            bevy::render::render_resource::Extent3d {
+                                width,
+                                height,
+                                depth_or_array_layers: 1,
+                            },
+                            bevy::render::render_resource::TextureDimension::D2,
+                            rgba_data,
+                            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                            RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+                        );
 
                         // 添加到 Assets<Image>
                         let mut images = ctx.world.resource_mut::<Assets<Image>>();
@@ -1991,5 +2004,82 @@ fn handle_search_response(
         search_state.is_loading = false;
         search_state.has_searched = true;
         search_state.error = Some(event.error.clone());
+    }
+}
+
+// ==================== 排行榜处理 ====================
+
+/// 处理加载排行榜请求
+fn handle_load_rankings(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadRankingsRequest>,
+    api_client: Res<ApiClientResource>,
+    mut rankings_state: ResMut<RankingsState>,
+) {
+    for event in messages.read() {
+        rankings_state.is_loading = true;
+        rankings_state.error = None;
+
+        let client = api_client.0.clone();
+        let time_type = event.time_type;
+
+        tracing::info!("加载 {} 榜数据", time_type.display_name());
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::rank::GetRankingsRequest;
+
+            let request = GetRankingsRequest { time_type };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let count = response.comics.len();
+                    tracing::info!(
+                        "{} 榜加载成功，共 {} 部漫画",
+                        time_type.display_name(),
+                        count
+                    );
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(RankingsLoadedEvent {
+                            time_type,
+                            comics: response.comics,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    tracing::error!("{} 榜加载失败: {}", time_type.display_name(), error);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(RankingsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理排行榜加载响应
+fn handle_rankings_response(
+    mut loaded_messages: MessageReader<RankingsLoadedEvent>,
+    mut failed_messages: MessageReader<RankingsLoadFailedEvent>,
+    mut rankings_state: ResMut<RankingsState>,
+    mut image_messages: MessageWriter<LoadImageRequest>,
+) {
+    for event in loaded_messages.read() {
+        rankings_state.is_loading = false;
+        rankings_state.set_comics(event.time_type, event.comics.clone());
+
+        // 触发加载封面图片
+        for comic in &event.comics {
+            image_messages.write(LoadImageRequest {
+                url: comic.thumb.url(),
+            });
+        }
+    }
+
+    for event in failed_messages.read() {
+        rankings_state.is_loading = false;
+        rankings_state.error = Some(event.error.clone());
     }
 }

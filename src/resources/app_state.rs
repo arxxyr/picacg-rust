@@ -5,7 +5,10 @@
 use bevy::prelude::*;
 
 use crate::{
-    api::models::{Category, Comic, Episode, Picture},
+    api::{
+        endpoints::RankTimeType,
+        models::{Category, Comic, Episode, Picture},
+    },
     config::settings::{AppSettings, ProxyType},
 };
 
@@ -163,6 +166,65 @@ impl Default for SearchState {
             is_loading: false,
             has_searched: false,
             error: None,
+        }
+    }
+}
+
+/// 排行榜状态
+#[derive(Resource)]
+pub struct RankingsState {
+    /// 当前选中的时间类型
+    pub current_type: RankTimeType,
+    /// 日榜数据
+    pub h24_comics: Vec<Comic>,
+    /// 周榜数据
+    pub d7_comics: Vec<Comic>,
+    /// 月榜数据
+    pub d30_comics: Vec<Comic>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+impl Default for RankingsState {
+    fn default() -> Self {
+        Self {
+            current_type: RankTimeType::H24,
+            h24_comics: Vec::new(),
+            d7_comics: Vec::new(),
+            d30_comics: Vec::new(),
+            is_loading: false,
+            error: None,
+        }
+    }
+}
+
+impl RankingsState {
+    /// 获取当前类型的漫画列表
+    pub fn current_comics(&self) -> &[Comic] {
+        match self.current_type {
+            RankTimeType::H24 => &self.h24_comics,
+            RankTimeType::D7 => &self.d7_comics,
+            RankTimeType::D30 => &self.d30_comics,
+        }
+    }
+
+    /// 设置指定类型的漫画列表
+    pub fn set_comics(&mut self, time_type: RankTimeType, comics: Vec<Comic>) {
+        match time_type {
+            RankTimeType::H24 => self.h24_comics = comics,
+            RankTimeType::D7 => self.d7_comics = comics,
+            RankTimeType::D30 => self.d30_comics = comics,
+        }
+    }
+
+    /// 检查指定类型是否已加载
+    pub fn is_loaded(&self, time_type: RankTimeType) -> bool {
+        match time_type {
+            RankTimeType::H24 => !self.h24_comics.is_empty(),
+            RankTimeType::D7 => !self.d7_comics.is_empty(),
+            RankTimeType::D30 => !self.d30_comics.is_empty(),
         }
     }
 }

@@ -4,7 +4,10 @@
 
 use bevy::prelude::*;
 
-use crate::api::models::{Category, Comic, Episode, Picture};
+use crate::api::{
+    endpoints::RankTimeType,
+    models::{Category, Comic, Episode, Picture},
+};
 
 // ==================== 登录消息 ====================
 
@@ -271,4 +274,25 @@ pub struct ResumeDownloadRequest {
 #[derive(Message)]
 pub struct RedownloadRequest {
     pub comic_id: String,
+}
+
+// ==================== 排行榜消息 ====================
+
+/// 加载排行榜请求
+#[derive(Message)]
+pub struct LoadRankingsRequest {
+    pub time_type: RankTimeType,
+}
+
+/// 排行榜加载完成
+#[derive(Message)]
+pub struct RankingsLoadedEvent {
+    pub time_type: RankTimeType,
+    pub comics: Vec<Comic>,
+}
+
+/// 排行榜加载失败
+#[derive(Message)]
+pub struct RankingsLoadFailedEvent {
+    pub error: String,
 }

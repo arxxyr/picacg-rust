@@ -9,6 +9,7 @@ use crate::{
     systems::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::*,
+        waterfall::ComicsCardCreationState,
     },
 };
 
@@ -37,10 +38,13 @@ pub fn setup_comics_list_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     comics_state: Res<ComicsListState>,
-    image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
+    mut creation_state: ResMut<ComicsCardCreationState>,
 ) {
     let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+    // 清空之前的创建状态
+    creation_state.clear();
 
     // 尝试找到 ContentArea
     let content_area = content_area_query.single().ok();
@@ -147,11 +151,8 @@ pub fn setup_comics_list_ui(
                                 },
                                 TextColor(AppColors::TEXT),
                             ));
-                        } else {
-                            for comic in &comics_state.comics {
-                                spawn_comic_card(grid, comic, &font, &image_cache);
-                            }
                         }
+                        // 漫画卡片通过瀑布式创建系统添加
                     })
                     .id();
 
@@ -258,6 +259,11 @@ pub fn setup_comics_list_ui(
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(comics_root);
     }
+
+    // 启动预创建模式（在瀑布系统中一次性创建所有隐藏卡片，然后瀑布式显示）
+    if !comics_state.comics.is_empty() && !comics_state.is_loading {
+        creation_state.start_precreate(comics_state.comics.len(), font);
+    }
 }
 
 /// 内联创建滚动条（用于 ChildSpawnerCommands）
@@ -326,13 +332,14 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
         });
 }
 
-/// 创建漫画卡片
+/// 创建漫画卡片（返回 Entity，可选隐藏）
 fn spawn_comic_card(
     parent: &mut ChildSpawnerCommands,
     comic: &crate::api::models::Comic,
     font: &Handle<Font>,
     image_cache: &ImageCache,
-) {
+    hidden: bool,
+) -> Entity {
     parent
         .spawn((
             ComicCard {
@@ -348,6 +355,11 @@ fn spawn_comic_card(
             },
             BorderColor::all(AppColors::BORDER),
             BackgroundColor(AppColors::SURFACE),
+            if hidden {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            },
         ))
         .with_children(|card| {
             // 封面图片
@@ -492,11 +504,19 @@ fn spawn_comic_card(
                     }
                 });
             }
-        });
+        })
+        .id()
 }
 
 /// 清理漫画列表界面
-pub fn cleanup_comics_list_ui(mut commands: Commands, query: Query<Entity, With<ComicsListRoot>>) {
+pub fn cleanup_comics_list_ui(
+    mut commands: Commands,
+    query: Query<Entity, With<ComicsListRoot>>,
+    mut creation_state: ResMut<ComicsCardCreationState>,
+) {
+    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    creation_state.clear();
+
     for entity in query.iter() {
         // Bevy 0.17: despawn() 自动递归删除子实体
         commands.entity(entity).despawn();
@@ -710,277 +730,164 @@ pub fn update_comics_content_size(
     }
 }
 
-/// 刷新漫画列表 UI（当 ComicsListState 变化时）
+/// 刷新漫画列表界面（只处理错误状态，卡片由瀑布式系统创建）
 ///
-/// 类似于 refresh_categories_ui，在数据异步加载完成后重新创建 UI。
+/// 注意：这个函数**不应该**在数据加载完成后重建整个
+/// UI，否则会覆盖瀑布式系统创建的卡片。 它只在出现错误时处理错误显示。
 pub fn refresh_comics_list_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     comics_state: Res<ComicsListState>,
-    image_cache: Res<ImageCache>,
-    root_query: Query<Entity, With<ComicsListRoot>>,
-    content_area_query: Query<Entity, With<ContentArea>>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
+    card_query: Query<&ComicCard>,
+    error_query: Query<Entity, With<ErrorMessage>>,
 ) {
-    // 只在状态变化时刷新
+    // 只在状态变化时检查
     if !comics_state.is_changed() {
         return;
     }
 
-    // 如果还在加载中且没有数据，不刷新（等待加载完成）
-    if comics_state.is_loading && comics_state.comics.is_empty() {
+    // 如果有错误，显示错误信息
+    if let Some(ref error) = comics_state.error {
+        // 如果还没有错误信息 UI，添加它
+        if error_query.is_empty() {
+            if let Ok((container_entity, _)) = scroll_container_query.single() {
+                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let error_entity = commands
+                    .spawn((
+                        ErrorMessage,
+                        Text::new(format!("加载失败: {}", error)),
+                        TextFont {
+                            font,
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(Color::srgb(1.0, 0.4, 0.4)),
+                    ))
+                    .id();
+                commands.entity(container_entity).add_child(error_entity);
+            }
+        }
         return;
     }
 
-    // 删除旧的 UI
-    for entity in root_query.iter() {
-        commands.entity(entity).despawn();
+    // 如果数据存在或已有卡片，让瀑布式系统处理，不干涉
+    if !comics_state.comics.is_empty() {
+        return;
     }
 
-    // 尝试找到 ContentArea
-    let content_area = content_area_query.single().ok();
+    // 检查是否已有卡片
+    if let Ok((_, children)) = scroll_container_query.single() {
+        let has_cards = children
+            .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+            .unwrap_or(false);
+        if has_cards {
+            return;
+        }
+    }
 
-    // 重新创建 UI
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    // 数据为空且没有卡片，不做任何操作（保持加载中状态）
+}
 
-    let comics_root = commands
-        .spawn((
-            ComicsListRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏（包含面包屑导航）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
-            .with_children(|header| {
-                // 面包屑: 分类 > 当前分类名
-                header.spawn((
-                    Text::new("分类"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
+/// 瀑布式显示漫画卡片（预创建所有隐藏卡片，然后分批显示）
+pub fn waterfall_create_comic_cards(
+    mut commands: Commands,
+    mut creation_state: ResMut<ComicsCardCreationState>,
+    comics_state: Res<ComicsListState>,
+    image_cache: Res<ImageCache>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
+    card_query: Query<&ComicCard>,
+    loading_query: Query<Entity, With<LoadingIndicator>>,
+    time: Res<Time>,
+    asset_server: Res<AssetServer>,
+) {
+    // 如果数据已加载但 creation_state 未启动，主动启动预创建
+    // （解决系统执行顺序导致 is_changed() 检测失败的问题）
+    if !creation_state.is_creating
+        && !comics_state.comics.is_empty()
+        && comics_state.error.is_none()
+    {
+        // 检查当前容器中是否有卡片
+        if let Ok((container_entity, children)) = scroll_container_query.single() {
+            // 检查容器的子元素中是否有 ComicCard
+            let has_cards = children
+                .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+                .unwrap_or(false);
 
-                header.spawn((
-                    Text::new(">"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                header.spawn((
-                    Text::new(&comics_state.category),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 加载状态提示
-                if comics_state.is_loading {
-                    header.spawn((
-                        Text::new("(加载中...)"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
+            if !has_cards {
+                // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
+                for entity in loading_query.iter() {
+                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                        entity_commands.despawn();
+                    }
                 }
-            });
-
-            // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
-            .with_children(|wrapper| {
-                // 漫画网格（可滚动）
-                let scroll_container_id = wrapper
-                    .spawn((
-                        ComicsScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::FlexStart,
-                            align_content: AlignContent::FlexStart,
-                            padding: UiRect {
-                                left: Val::Px(comic_layout::PADDING_LEFT),
-                                right: Val::Px(comic_layout::PADDING_RIGHT),
-                                top: Val::Px(comic_layout::PADDING_TOP),
-                                bottom: Val::Px(comic_layout::PADDING_BOTTOM),
-                            },
-                            column_gap: Val::Px(comic_layout::COLUMN_GAP),
-                            row_gap: Val::Px(comic_layout::ROW_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|grid| {
-                        if let Some(ref error) = comics_state.error {
-                            // 错误信息
-                            grid.spawn((
-                                Text::new(format!("加载失败: {}", error)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                            ));
-                        } else if comics_state.comics.is_empty() && !comics_state.is_loading {
-                            // 空列表
-                            grid.spawn((
-                                Text::new("该分类下暂无漫画"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        } else {
-                            // 漫画卡片
-                            for comic in &comics_state.comics {
-                                spawn_comic_card(grid, comic, &font, &image_cache);
-                            }
-                        }
-                    })
-                    .id();
-
-                // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
-            });
-
-            // 分页控件（只在有数据时显示）
-            if comics_state.total_pages > 0 {
-                root.spawn((
-                    PaginationControl,
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(50.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(20.0),
-                        border: UiRect::top(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BorderColor::all(AppColors::BORDER),
-                    BackgroundColor(AppColors::SURFACE),
-                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-                ))
-                .with_children(|pagination| {
-                    // 上一页按钮
-                    pagination
-                        .spawn((
-                            PrevPageButton,
-                            Button,
-                            Node {
-                                width: Val::Px(80.0),
-                                height: Val::Px(36.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BackgroundColor(if comics_state.page > 1 {
-                                AppColors::PRIMARY
-                            } else {
-                                AppColors::SECONDARY
-                            }),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("上一页"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-
-                    // 页码显示
-                    pagination.spawn((
-                        PageNumberText,
-                        Text::new(format!(
-                            "{} / {}",
-                            comics_state.page, comics_state.total_pages
-                        )),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-
-                    // 下一页按钮
-                    pagination
-                        .spawn((
-                            NextPageButton,
-                            Button,
-                            Node {
-                                width: Val::Px(80.0),
-                                height: Val::Px(36.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BackgroundColor(if comics_state.page < comics_state.total_pages {
-                                AppColors::PRIMARY
-                            } else {
-                                AppColors::SECONDARY
-                            }),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("下一页"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                });
+                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                creation_state.start_precreate(comics_state.comics.len(), font);
+                tracing::debug!("自动启动漫画卡片预创建: {} 个", comics_state.comics.len());
             }
-        })
-        .id();
+            let _ = container_entity; // suppress warning
+        }
+    }
 
-    // 如果有 ContentArea，将漫画列表作为其子实体
-    if let Some(content_entity) = content_area {
-        commands.entity(content_entity).add_child(comics_root);
+    // 检查是否需要预创建
+    if creation_state.needs_precreate() {
+        let Ok((container_entity, _)) = scroll_container_query.single() else {
+            return;
+        };
+
+        let Some(font) = creation_state.font_handle.clone() else {
+            return;
+        };
+
+        let comics = &comics_state.comics;
+        let count = creation_state.get_precreate_count();
+
+        if comics.is_empty() || count == 0 {
+            creation_state.clear();
+            return;
+        }
+
+        // 一次性创建所有隐藏卡片
+        let mut entities = Vec::with_capacity(count);
+        commands.entity(container_entity).with_children(|parent| {
+            for i in 0..count {
+                if let Some(comic) = comics.get(i) {
+                    let entity = spawn_comic_card(parent, comic, &font, &image_cache, true);
+                    entities.push(entity);
+                }
+            }
+        });
+
+        // 设置预创建完成后的实体列表
+        let entity_count = entities.len();
+        creation_state.set_precreated_entities(entities);
+        tracing::debug!("漫画卡片预创建完成: {} 个", entity_count);
+        return;
+    }
+
+    // 检查是否应该显示下一批
+    if !creation_state.should_show_batch(time.delta()) {
+        return;
+    }
+
+    // 获取这一批要显示的实体
+    let batch = creation_state.take_batch();
+    if batch.is_empty() {
+        return;
+    }
+
+    // 显示这一批卡片（设置 Visibility::Inherited）
+    for entity in batch {
+        // 安全检查：实体可能在清理时已被销毁
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert(Visibility::Inherited);
+        }
+    }
+
+    // 标记显示完成
+    if !creation_state.has_pending() {
+        creation_state.finish();
+        tracing::debug!("漫画卡片瀑布式显示完成: {} 个", comics_state.comics.len());
     }
 }
 

@@ -10,9 +10,11 @@ pub mod category;
 pub mod comic;
 pub mod comment;
 pub mod game;
+pub mod rank;
 
 pub use auth::*;
 pub use category::*;
 pub use comic::*;
 pub use comment::*;
 pub use game::*;
+pub use rank::*;

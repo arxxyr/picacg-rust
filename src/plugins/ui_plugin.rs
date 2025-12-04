@@ -28,6 +28,11 @@ impl Plugin for UiPlugin {
             .init_resource::<AppFont>()
             .init_resource::<ScrollbarDragState>()
             .init_resource::<SearchState>()
+            .init_resource::<RankingsState>()
+            .init_resource::<RankingsCardCreationState>()
+            .init_resource::<CategoriesCardCreationState>()
+            .init_resource::<ComicsCardCreationState>()
+            .init_resource::<SearchCardCreationState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -89,6 +94,7 @@ impl Plugin for UiPlugin {
                 (
                     category_card_interaction,
                     refresh_categories_ui,
+                    waterfall_create_category_cards,
                     update_categories_images,
                     handle_categories_scroll,
                     clamp_categories_scroll,
@@ -118,6 +124,7 @@ impl Plugin for UiPlugin {
                     comic_card_interaction,
                     pagination_interaction,
                     refresh_comics_list_ui,
+                    waterfall_create_comic_cards,
                     update_comics_images,
                     handle_comics_scroll,
                     clamp_comics_scroll,
@@ -264,6 +271,7 @@ impl Plugin for UiPlugin {
                     update_search_content_size,
                     update_search_images,
                     refresh_search_ui,
+                    waterfall_create_search_cards,
                     unfocus_search_input,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
@@ -274,12 +282,31 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::Search)),
             )
-            // 排行榜页（占位）
+            // 排行榜页
             .add_systems(
                 OnEnter(AppRoute::Rankings),
-                (ensure_main_layout, setup_rankings_ui).chain(),
+                (ensure_main_layout, setup_rankings_ui, trigger_load_rankings).chain(),
             )
             .add_systems(OnExit(AppRoute::Rankings), cleanup_rankings_ui)
+            .add_systems(
+                Update,
+                (
+                    rankings_tab_interaction,
+                    rankings_card_interaction,
+                    refresh_rankings_ui,
+                    waterfall_create_cards,
+                    update_rankings_images,
+                    handle_rankings_scroll,
+                    update_rankings_content_size,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Rankings)),
+            )
             // 收藏页（占位）
             .add_systems(
                 OnEnter(AppRoute::Favorites),
@@ -325,7 +352,8 @@ fn trigger_load_categories(
     categories_state: Res<CategoriesState>,
     mut load_messages: MessageWriter<LoadCategoriesRequest>,
 ) {
-    // 如果分类列表为空，触发加载
+    // 如果数据还没有加载，发送加载请求
+    // 预创建由 waterfall_create_category_cards 的自动检测来处理
     if categories_state.categories.is_empty() && !categories_state.is_loading {
         load_messages.write(LoadCategoriesRequest);
     }

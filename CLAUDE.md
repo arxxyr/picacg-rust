@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2025-12-03
+> 最后更新: 2025-12-04
 
 ## 其他
  - git commit 带emoji
@@ -449,6 +449,139 @@ scrollbar.spawn((
 
 ---
 
+### 瀑布式系统与 refresh 函数冲突
+
+**问题场景：** 页面第一次进入时不显示卡片，切换页面后返回才显示。
+
+**典型案例：refresh_xxx_ui 重建整个 UI**
+
+```rust
+// ❌ 错误：refresh 函数在数据变化时重建整个 UI
+pub fn refresh_comics_list_ui(
+    comics_state: Res<ComicsListState>,
+    ...
+) {
+    if !comics_state.is_changed() { return; }
+
+    // 删除旧 UI（包括瀑布式系统刚创建的卡片！）
+    for entity in root_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // 重建 UI，但没有卡片（卡片由瀑布式系统创建）
+    // ...
+}
+```
+
+**时序问题：**
+1. `setup_xxx_ui` 创建基本 UI 结构（含"加载中..."指示器）
+2. API 请求发出
+3. 瀑布式系统检测到没有数据，不启动预创建
+4. API 数据返回，`xxx_state` 变化
+5. `refresh_xxx_ui` 检测到 `is_changed()`，**删除整个 UI 并重建**
+6. 重建的 UI 只有基本结构，没有卡片
+7. 瀑布式系统检测到数据存在，启动预创建
+8. 但 `refresh_xxx_ui` 可能再次检测到变化，**又删除刚创建的卡片**
+
+**正确架构：**
+
+```rust
+// ✅ 正确：refresh 函数只处理错误状态，不重建整个 UI
+pub fn refresh_comics_list_ui(
+    comics_state: Res<ComicsListState>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
+    card_query: Query<&ComicCard>,
+    ...
+) {
+    if !comics_state.is_changed() { return; }
+
+    // 如果有错误，显示错误信息
+    if let Some(ref error) = comics_state.error {
+        // 添加错误信息 UI...
+        return;
+    }
+
+    // 如果数据存在或已有卡片，让瀑布式系统处理，不干涉！
+    if !comics_state.comics.is_empty() {
+        return;
+    }
+
+    // 检查是否已有卡片
+    if let Ok((_, children)) = scroll_container_query.single() {
+        let has_cards = children
+            .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+            .unwrap_or(false);
+        if has_cards {
+            return;
+        }
+    }
+}
+```
+
+**瀑布式系统自动启动预创建：**
+
+```rust
+// ✅ 正确：瀑布式系统自动检测并启动预创建
+pub fn waterfall_create_comic_cards(
+    mut creation_state: ResMut<ComicsCardCreationState>,
+    comics_state: Res<ComicsListState>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
+    card_query: Query<&ComicCard>,
+    ...
+) {
+    // 自动检测：数据存在但没有卡片，启动预创建
+    if !creation_state.is_creating
+        && !comics_state.comics.is_empty()
+        && comics_state.error.is_none()
+    {
+        if let Ok((_, children)) = scroll_container_query.single() {
+            let has_cards = children
+                .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
+                .unwrap_or(false);
+
+            if !has_cards {
+                // 删除加载指示器，启动预创建
+                creation_state.start_precreate(comics_state.comics.len(), font);
+            }
+        }
+    }
+    // ...
+}
+```
+
+**职责分离原则：**
+| 函数 | 职责 |
+|------|------|
+| `setup_xxx_ui` | 创建基本 UI 结构（标题栏、滚动容器、加载指示器） |
+| `refresh_xxx_ui` | 只处理错误状态，不重建整个 UI |
+| `waterfall_create_xxx_cards` | 自动检测数据并创建卡片，瀑布式显示 |
+
+**排行榜标签切换特殊处理：**
+
+```rust
+// 检查类型是否匹配（处理标签切换）
+let type_matches = creation_state.context.current_type
+    .map(|t| t == rankings_state.current_type)
+    .unwrap_or(false);
+
+// 如果有卡片但类型不匹配，清除旧卡片
+if has_cards && !type_matches {
+    // 清除所有子元素
+    for child in children.iter() {
+        commands.get_entity(child).map(|e| e.despawn());
+    }
+    creation_state.clear();
+    return;  // 下一帧会检测到没有卡片，启动预创建
+}
+```
+
+**影响文件：**
+- `src/systems/categories.rs` - `refresh_categories_ui`, `waterfall_create_category_cards`
+- `src/systems/comics.rs` - `refresh_comics_list_ui`, `waterfall_create_comic_cards`
+- `src/systems/rankings.rs` - `refresh_rankings_ui`, `waterfall_create_cards`
+
+---
+
 ### UI 重建导致输入框焦点丢失
 
 **问题场景：** 输入框输入一个字符后焦点丢失，需要重新点击才能继续输入。
@@ -534,10 +667,12 @@ pub fn refresh_search_ui(
 - [ ] 清理编译警告（未使用的导入和变量）
 - [ ] 完善漫画详情页面
 - [ ] 实现基础阅读器
-- [ ] 实现搜索功能
+- [x] 实现搜索功能
 - [ ] 实现收藏/历史管理
-- [ ] 下载管理 UI
-- [ ] 优化图片加载性能
+- [x] 下载管理 UI
+- [x] 优化图片加载性能（MAX_CONCURRENT_LOADS 从 5 提升到 15）
+- [x] 修复瀑布式系统与 refresh 函数冲突问题（分类、漫画列表、排行榜）
+- [x] 修复排行榜标签切换不刷新问题
 
 ---
 
