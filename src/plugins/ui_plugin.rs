@@ -37,6 +37,7 @@ impl Plugin for UiPlugin {
             .init_resource::<FavoritesCardCreationState>()
             .init_resource::<HomeState>()
             .init_resource::<HomeCardCreationState>()
+            .init_resource::<DownloadSectionCollapseState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -202,10 +203,19 @@ impl Plugin for UiPlugin {
                     proxy_host_input_interaction,
                     proxy_port_input_interaction,
                     proxy_input_keyboard,
+                )
+                    .run_if(in_state(AppRoute::Settings)),
+            )
+            .add_systems(
+                Update,
+                (
                     // 日志等级交互
                     log_level_button_interaction,
                     // 自动恢复下载交互
                     auto_resume_downloads_checkbox_interaction,
+                    // 最大并发下载数交互
+                    max_concurrent_downloads_decrease_interaction,
+                    max_concurrent_downloads_increase_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,
@@ -231,6 +241,8 @@ impl Plugin for UiPlugin {
                 (
                     open_download_folder_interaction,
                     completed_download_item_interaction,
+                    // 区域折叠交互
+                    section_header_collapse_interaction,
                     // 下载控制按钮交互
                     pause_download_button_interaction,
                     resume_download_button_interaction,
@@ -243,9 +255,20 @@ impl Plugin for UiPlugin {
                     refresh_downloads_ui,
                     add_new_task_ui,
                     handle_download_completed_ui,
+                )
+                    .run_if(in_state(AppRoute::Downloads)),
+            )
+            .add_systems(
+                Update,
+                (
+                    move_task_between_sections,
                     update_download_titles,
+                    update_download_task_tags,
                     handle_downloads_scroll,
                     update_downloads_content_size,
+                    // 浮动标题系统
+                    update_floating_header,
+                    floating_header_click_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,

@@ -27,6 +27,7 @@ impl AppColors {
     pub const SECONDARY_HOVER: Color = Color::srgb(0.35, 0.35, 0.45);
     pub const TEXT: Color = Color::WHITE;
     pub const TEXT_SECONDARY: Color = Color::srgb(0.6, 0.6, 0.7);
+    pub const TEXT_MUTED: Color = Color::srgb(0.5, 0.5, 0.6);
     pub const ERROR: Color = Color::srgb(1.0, 0.3, 0.3);
     pub const BORDER: Color = Color::srgb(0.3, 0.3, 0.4);
 }
@@ -74,6 +75,7 @@ pub fn setup_login_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|parent| {
             // 标题

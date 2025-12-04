@@ -27,8 +27,6 @@ impl Plugin for ApiPlugin {
             .init_resource::<DownloadManagerState>()
             // 启动时加载未完成的下载任务
             .add_systems(Startup, setup_download_manager)
-            // 启动后自动恢复下载（Update 阶段，只执行一次）
-            .add_systems(Update, auto_resume_downloads_on_startup)
             // 注册消息 (Bevy 0.17 使用 add_message)
             .add_message::<LoginRequestEvent>()
             .add_message::<LoginResponseEvent>()
@@ -124,6 +122,7 @@ impl Plugin for ApiPlugin {
                     handle_download_paused,
                     handle_resume_download,
                     handle_redownload,
+                    download_queue_manager,
                 ),
             )
             // 注册系统 - 搜索
@@ -1113,6 +1112,28 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+/// 获取本地文件夹中的所有文件名（用于比对）
+async fn get_local_filenames(folder: &std::path::Path) -> std::collections::HashSet<String> {
+    let mut filenames = std::collections::HashSet::new();
+    if let Ok(mut entries) = tokio::fs::read_dir(folder).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if let Some(name) = entry.file_name().to_str() {
+                // 只收集图片文件
+                let name_lower = name.to_lowercase();
+                if name_lower.ends_with(".jpg")
+                    || name_lower.ends_with(".jpeg")
+                    || name_lower.ends_with(".png")
+                    || name_lower.ends_with(".gif")
+                    || name_lower.ends_with(".webp")
+                {
+                    filenames.insert(name.to_string());
+                }
+            }
+        }
+    }
+    filenames
+}
+
 /// 处理下载漫画请求（FSM 架构）
 fn handle_download_comic(
     runtime: ResMut<TokioTasksRuntime>,
@@ -1151,12 +1172,21 @@ fn handle_download_comic(
             .to_string_lossy()
             .to_string();
 
+        // 从漫画详情获取分类和标签
+        let (categories, tags) = detail_state
+            .comic
+            .as_ref()
+            .map(|c| (c.categories.clone(), c.tags.clone()))
+            .unwrap_or_default();
+
         // 创建 FSM 任务元数据
         let meta = DownloadTaskMeta::new(
             comic_id.clone(),
             comic_title.clone(),
             episodes_to_download.clone(),
             save_path.clone(),
+            categories,
+            tags,
         );
 
         // 保存元数据到文件
@@ -1164,15 +1194,33 @@ fn handle_download_comic(
             tracing::error!("保存下载元数据失败: {}", e);
         }
 
-        // 添加到下载状态
-        download_state.downloading_ids.insert(comic_id.clone());
-        let fsm = download_state.add_task(meta);
-        let control = fsm.get_control();
+        // 检查是否已达到最大并发数
+        let max_concurrent = AppSettings::global().read().max_concurrent_downloads;
+        let should_start = download_state.downloading_ids.len() < max_concurrent;
 
-        // 启动下载
-        if let Err(e) = fsm.start() {
-            tracing::error!("启动下载失败: {}", e);
+        // 添加到下载状态
+        download_state.add_task(meta);
+
+        if !should_start {
+            tracing::info!(
+                "已达到最大并发下载数 ({})，任务 {} 排队等待",
+                max_concurrent,
+                comic_title
+            );
+            continue; // 任务保持 Queued 状态，等待其他任务完成后自动启动
         }
+
+        // 添加到正在下载列表并获取控制器
+        download_state.downloading_ids.insert(comic_id.clone());
+        let control = if let Some(fsm) = download_state.find_task_mut(&comic_id) {
+            // 启动下载
+            if let Err(e) = fsm.start() {
+                tracing::error!("启动下载失败: {}", e);
+            }
+            fsm.get_control()
+        } else {
+            std::sync::Arc::new(SharedTaskControl::new())
+        };
 
         let total_episodes = episodes_to_download.len() as i32;
         tracing::info!(
@@ -1331,6 +1379,71 @@ async fn execute_download_task(
         let total_pages = all_pictures.len() as i32;
         tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
 
+        // 收集 API 返回的所有 original_name
+        let required_files: std::collections::HashSet<String> = all_pictures
+            .iter()
+            .enumerate()
+            .map(|(idx, pic)| {
+                if pic.media.original_name.is_empty() {
+                    // 如果 original_name 为空，使用序号作为文件名
+                    format!("{:04}.jpg", idx + 1)
+                } else {
+                    pic.media.original_name.clone()
+                }
+            })
+            .collect();
+
+        // 获取本地文件夹中的所有文件名
+        let local_files = get_local_filenames(&ep_folder).await;
+
+        // 检查是否所有需要的文件都已存在
+        let missing_files: Vec<_> = required_files
+            .iter()
+            .filter(|f| !local_files.contains(*f))
+            .collect();
+
+        if missing_files.is_empty() {
+            tracing::info!(
+                "第 {} 章本地已完整（{} 张），跳过下载",
+                episode_order,
+                total_pages
+            );
+
+            // 在数据库中标记章节完成
+            let comic_id_for_complete = comic_id.clone();
+            use crate::db::database::{Database, run_db_operation};
+            run_db_operation(async move {
+                let db = Database::global().read();
+                if let Err(e) = db
+                    .add_completed_episode(&comic_id_for_complete, episode_order)
+                    .await
+                {
+                    tracing::warn!("更新章节完成状态到数据库失败: {}", e);
+                }
+            });
+
+            // 发送进度更新（显示为已跳过）
+            let comic_id_clone = comic_id.clone();
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(DownloadProgressEvent {
+                    comic_id: comic_id_clone,
+                    current_episode: ep_idx as i32 + 1,
+                    total_episodes,
+                    current_page: total_pages,
+                    total_pages,
+                    status: format!("第{}章 本地已完整，跳过", episode_order),
+                });
+            })
+            .await;
+            continue; // 跳过该章节，继续下一章
+        } else {
+            tracing::info!(
+                "第 {} 章缺少 {} 张图片，开始下载",
+                episode_order,
+                missing_files.len()
+            );
+        }
+
         // 并发下载配置（类似 Python 的 DownloadThreadNum）
         let download_workers = AppSettings::global().read().download_workers;
         let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(download_workers));
@@ -1341,26 +1454,33 @@ async fn execute_download_task(
 
         for (pic_idx, picture) in all_pictures.iter().enumerate() {
             let url = picture.media.url();
+            let original_name = &picture.media.original_name;
 
-            // 确定文件扩展名
-            let ext = url
-                .rsplit('.')
-                .next()
-                .and_then(|e| {
-                    let e = e.to_lowercase();
-                    if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
-                        Some(e)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_else(|| "jpg".to_string());
+            // 使用 original_name 作为文件名，如果为空则使用序号
+            let file_name = if original_name.is_empty() {
+                // 从 URL 提取扩展名
+                let ext = url
+                    .rsplit('.')
+                    .next()
+                    .and_then(|e| {
+                        let e = e.to_lowercase();
+                        if ["jpg", "jpeg", "png", "gif", "webp"].contains(&e.as_str()) {
+                            Some(e)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "jpg".to_string());
+                format!("{:04}.{}", pic_idx + 1, ext)
+            } else {
+                original_name.clone()
+            };
 
-            let file_path = ep_folder.join(format!("{:04}.{}", pic_idx + 1, ext));
+            let file_path = ep_folder.join(&file_name);
 
             // 如果文件已存在，跳过（支持断点续传）
             if file_path.exists() {
-                tracing::trace!("文件已存在，跳过: {:?}", file_path.file_name());
+                tracing::trace!("文件已存在，跳过: {}", file_name);
                 skip_count += 1;
                 continue;
             }
@@ -1643,6 +1763,23 @@ async fn execute_download_task(
             skip_count,
             final_fail_count
         );
+
+        // 如果没有失败的图片，在数据库中标记章节完成
+        if final_fail_count == 0 {
+            let comic_id_for_complete = comic_id.clone();
+            use crate::db::database::{Database, run_db_operation};
+            run_db_operation(async move {
+                let db = Database::global().read();
+                if let Err(e) = db
+                    .add_completed_episode(&comic_id_for_complete, episode_order)
+                    .await
+                {
+                    tracing::warn!("更新章节完成状态到数据库失败: {}", e);
+                } else {
+                    tracing::debug!("章节 {} 已标记为完成（数据库）", episode_order);
+                }
+            });
+        }
     }
 
     // 下载完成
@@ -1867,6 +2004,23 @@ fn handle_resume_download(
             continue;
         }
 
+        // 检查是否已达到最大并发数
+        let max_concurrent = AppSettings::global().read().max_concurrent_downloads;
+        if download_state.downloading_ids.len() >= max_concurrent {
+            tracing::info!(
+                "已达到最大并发下载数 ({})，任务 {} 排队等待",
+                max_concurrent,
+                comic_title
+            );
+            // 将任务状态更新为 Waiting（排队等待）
+            if let Some(fsm) = download_state.find_task_mut(&comic_id) {
+                if let Err(e) = fsm.queue() {
+                    tracing::warn!("更新任务状态为等待中失败: {}", e);
+                }
+            }
+            continue; // 等待其他任务完成后自动启动
+        }
+
         // 重置控制器并获取新的控制器
         if let Some(fsm) = download_state.find_task_mut(&comic_id) {
             fsm.control.reset();
@@ -1919,58 +2073,60 @@ fn handle_redownload(
             continue;
         }
 
-        // 尝试加载元数据获取保存路径
-        let download_base_path = crate::config::settings::AppSettings::global()
-            .read()
-            .download_path
-            .clone();
-        let download_base_path = if download_base_path.is_empty() {
-            std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("Downloads")
-        } else {
-            std::path::PathBuf::from(&download_base_path)
-        };
-
-        // 查找对应的保存路径（遍历下载目录）
-        let mut save_path = None;
-        let mut comic_title = String::new();
-
-        if download_base_path.exists() {
-            if let Ok(entries) = std::fs::read_dir(&download_base_path) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        if let Ok(meta) = DownloadTaskMeta::load(path.to_str().unwrap_or_default())
-                        {
-                            if meta.comic_id == comic_id {
-                                save_path = Some(path.to_string_lossy().to_string());
-                                comic_title = meta.comic_title.clone();
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let Some(save_path) = save_path else {
-            tracing::warn!("找不到漫画 {} 的下载目录", comic_id);
+        // 从数据库查找下载任务元数据
+        let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&comic_id) else {
+            tracing::warn!("找不到漫画 {} 的下载记录", comic_id);
             continue;
         };
 
-        tracing::info!("开始重新下载/检查更新: {} -> {}", comic_title, save_path);
+        let save_path = old_meta.save_path.clone();
+        let comic_title = old_meta.comic_title.clone();
+        let old_categories = old_meta.categories.clone();
+        let old_tags = old_meta.tags.clone();
+
+        // 检查是否已达到最大并发数
+        let max_concurrent = AppSettings::global().read().max_concurrent_downloads;
+        let should_start = download_state.downloading_ids.len() < max_concurrent;
 
         // 先移除已完成的任务（如果存在）
         download_state.remove_task(&comic_id);
 
-        // 立即添加一个"准备中"状态的临时任务，避免任务从列表消失
+        // 创建任务元数据，保留原有的分类和标签
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
+
+        if !should_start {
+            // 达到最大并发数，创建排队等待的任务
+            tracing::info!(
+                "已达到最大并发下载数 ({})，重新下载任务 {} 排队等待",
+                max_concurrent,
+                comic_title
+            );
+            let queued_meta = DownloadTaskMeta {
+                comic_id: comic_id.clone(),
+                comic_title: comic_title.clone(),
+                save_path: save_path.clone(),
+                episode_orders: old_meta.episode_orders.clone(),
+                total_episodes: old_meta.total_episodes,
+                state: DownloadState::Queued,
+                created_at: now,
+                updated_at: now,
+                categories: old_categories,
+                tags: old_tags,
+            };
+            // 保存到数据库（更新状态从 Completed 变为 Queued）
+            if let Err(e) = queued_meta.save() {
+                tracing::error!("保存排队任务到数据库失败: {}", e);
+            }
+            download_state.add_task(queued_meta);
+            continue; // 等待其他任务完成后自动启动
+        }
+
+        tracing::info!("开始重新下载/检查更新: {} -> {}", comic_title, save_path);
+
+        // 立即添加一个"准备中"状态的临时任务，避免任务从列表消失
         let temp_meta = DownloadTaskMeta {
             comic_id: comic_id.clone(),
             comic_title: comic_title.clone(),
@@ -1983,6 +2139,8 @@ fn handle_redownload(
             },
             created_at: now,
             updated_at: now,
+            categories: old_categories,
+            tags: old_tags,
         };
         download_state.add_task(temp_meta);
         download_state.downloading_ids.insert(comic_id.clone());
@@ -2057,6 +2215,8 @@ fn handle_redownload(
                 },
                 created_at: now,
                 updated_at: now,
+                categories: comic.categories.clone(),
+                tags: comic.tags.clone(),
             };
 
             if let Err(e) = meta.save() {
@@ -2272,67 +2432,99 @@ fn handle_rankings_response(
 
 /// 加载未完成的下载任务（Startup 阶段）
 fn setup_download_manager(mut download_state: ResMut<DownloadManagerState>) {
-    let download_path = crate::systems::get_download_base_path();
-    download_state.load_incomplete_tasks(&download_path);
+    download_state.load_incomplete_tasks();
     tracing::info!(
         "加载未完成的下载任务: {} 个",
         download_state.fsm_tasks.len()
     );
 }
 
-/// 登录成功后自动恢复下载
+/// 下载队列管理系统
 ///
-/// 监听 `UserLoggedInEvent`，在用户成功登录后自动恢复未完成的下载任务。
-/// 只执行一次（即使用户重新登录也不会再次触发）。
-fn auto_resume_downloads_on_startup(
-    mut has_run: Local<bool>,
+/// 功能：
+/// 1. 监听 `UserLoggedInEvent`，登录后激活下载管理
+/// 2. 首次登录时：如果启用了 `auto_resume_downloads`，恢复所有暂停的任务
+/// 3. 持续运行：管理并发下载数量，有空位时自动启动 Waiting 状态的任务
+fn download_queue_manager(
+    mut is_logged_in: Local<bool>,
+    mut has_auto_resumed: Local<bool>,
     mut user_logged_in_events: MessageReader<UserLoggedInEvent>,
     download_state: Res<DownloadManagerState>,
     mut resume_messages: MessageWriter<ResumeDownloadRequest>,
 ) {
-    // 只执行一次
-    if *has_run {
-        // 消费掉事件，避免累积
-        for _ in user_logged_in_events.read() {}
-        return;
-    }
-
-    // 等待登录成功事件
-    let mut logged_in = false;
+    // 监听登录事件
     for _ in user_logged_in_events.read() {
-        logged_in = true;
+        *is_logged_in = true;
+        tracing::debug!("收到 UserLoggedInEvent，下载队列管理已激活");
     }
-    if !logged_in {
+
+    // 未登录时不处理
+    if !*is_logged_in {
         return;
     }
 
-    *has_run = true;
-    tracing::debug!("收到 UserLoggedInEvent，检查自动恢复下载设置");
+    let settings = AppSettings::global().read();
+    let max_concurrent = settings.max_concurrent_downloads;
 
-    // 检查设置
-    let settings = crate::config::settings::AppSettings::global().read();
-    if !settings.auto_resume_downloads {
-        tracing::debug!("自动恢复下载未启用");
-        return;
-    }
+    // 首次登录后的自动恢复（只执行一次）
+    if !*has_auto_resumed {
+        *has_auto_resumed = true;
 
-    // 恢复所有暂停/等待状态的任务
-    let mut resumed_count = 0;
-    for fsm in &download_state.fsm_tasks {
-        let task = fsm.to_ui_task();
-        if matches!(
-            task.status,
-            crate::resources::ComicDownloadStatus::Paused
-                | crate::resources::ComicDownloadStatus::Waiting
-        ) {
-            resume_messages.write(ResumeDownloadRequest {
-                comic_id: task.comic_id.clone(),
-            });
-            resumed_count += 1;
+        if settings.auto_resume_downloads {
+            // 启用了自动恢复：恢复所有 Paused/Waiting 任务
+            let mut resumed_count = 0;
+            for fsm in &download_state.fsm_tasks {
+                let task = fsm.to_ui_task();
+                if matches!(
+                    task.status,
+                    crate::resources::ComicDownloadStatus::Paused
+                        | crate::resources::ComicDownloadStatus::Waiting
+                ) {
+                    resume_messages.write(ResumeDownloadRequest {
+                        comic_id: task.comic_id.clone(),
+                    });
+                    resumed_count += 1;
+                }
+            }
+            if resumed_count > 0 {
+                tracing::info!("登录后自动恢复下载: {} 个任务", resumed_count);
+            }
         }
+        return; // 首次恢复后返回，让任务状态先更新
     }
 
-    if resumed_count > 0 {
-        tracing::info!("登录后自动恢复下载: {} 个任务", resumed_count);
+    // 并发下载管理：当有空闲槽位时，自动启动排队中的任务
+    let current_downloading = download_state.downloading_ids.len();
+    if current_downloading >= max_concurrent {
+        return;
+    }
+
+    let available_slots = max_concurrent - current_downloading;
+    let mut started = 0;
+
+    for fsm in &download_state.fsm_tasks {
+        if started >= available_slots {
+            break;
+        }
+
+        // 跳过已经在下载的
+        if download_state.downloading_ids.contains(&fsm.meta.comic_id) {
+            continue;
+        }
+
+        let task = fsm.to_ui_task();
+        // 只自动启动 Waiting 状态的任务（用户手动暂停的不自动恢复）
+        if matches!(task.status, crate::resources::ComicDownloadStatus::Waiting) {
+            resume_messages.write(ResumeDownloadRequest {
+                comic_id: fsm.meta.comic_id.clone(),
+            });
+            started += 1;
+            tracing::info!(
+                "自动启动排队任务: {} (槽位 {}/{})",
+                fsm.meta.comic_title,
+                current_downloading + started,
+                max_concurrent
+            );
+        }
     }
 }

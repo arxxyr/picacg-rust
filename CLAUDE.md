@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2025-12-04
+> 最后更新: 2025-12-05
 
 ## 其他
  - git commit 带emoji
@@ -730,6 +730,80 @@ row.spawn((
     BackgroundColor(AppColors::PRIMARY),
 ));
 ```
+
+---
+
+### Query 遍历顺序不确定导致位置计算错误
+
+**问题场景：** 需要按 UI 布局顺序计算多个区域的累加位置，但 Query 返回顺序是不确定的。
+
+**典型案例：浮动标题点击跳转**
+
+```rust
+// ❌ 错误：Query 遍历顺序不确定，current_y 累加顺序错误
+pub fn floating_header_click_interaction(
+    section_query: Query<(
+        &ComputedNode,
+        Option<&DownloadingSection>,
+        Option<&WaitingSection>,
+        Option<&StoppedSection>,
+        Option<&CompletedSection>,
+    )>,
+) {
+    let mut current_y: f32 = 0.0;
+    for (computed, is_downloading, is_waiting, is_stopped, is_completed) in section_query.iter() {
+        // Query 遍历顺序是 Bevy 内部顺序，不是 UI 布局顺序！
+        if section_type == Some(target_section) {
+            target_y = Some(current_y);  // current_y 可能是错的！
+            break;
+        }
+        current_y += height + 10.0;  // 累加顺序错误
+    }
+}
+```
+
+**症状：**
+- 点击跳转到错误位置（如跳到最下面而不是目标区域）
+- 每次跳转位置不一致（取决于实体创建顺序）
+
+**根本原因：**
+- Bevy ECS Query 的 `iter()` 返回顺序是**实体创建顺序或内部存储顺序**
+- 这个顺序**不等于** UI 布局的视觉顺序
+
+**修复方法：** 分别查询每个区域，按固定顺序计算位置
+
+```rust
+// ✅ 正确：分别查询每个区域，按布局顺序计算
+pub fn floating_header_click_interaction(
+    downloading_query: Query<&ComputedNode, With<DownloadingSection>>,
+    waiting_query: Query<&ComputedNode, With<WaitingSection>>,
+    stopped_query: Query<&ComputedNode, With<StoppedSection>>,
+) {
+    // 按固定顺序获取每个区域的高度
+    let downloading_height = downloading_query.single().ok()
+        .map(|n| n.size().y / scale_factor).unwrap_or(0.0);
+    let waiting_height = waiting_query.single().ok()
+        .map(|n| n.size().y / scale_factor).unwrap_or(0.0);
+    let stopped_height = stopped_query.single().ok()
+        .map(|n| n.size().y / scale_factor).unwrap_or(0.0);
+
+    // 按布局顺序计算目标位置
+    let target_y = match target_section {
+        SectionType::Downloading => 0.0,
+        SectionType::Waiting => downloading_height + GAP,
+        SectionType::Stopped => downloading_height + GAP + waiting_height + GAP,
+        SectionType::Completed => downloading_height + GAP + waiting_height + GAP + stopped_height + GAP,
+    };
+}
+```
+
+**关键原则：**
+- 当需要**按顺序**处理多个实体时，不要依赖 Query 的遍历顺序
+- 使用**独立 Query** 分别查询每种类型的实体
+- 按**业务逻辑顺序**（如布局顺序）显式计算
+
+**影响文件：**
+- `src/systems/downloads.rs` - `floating_header_click_interaction`
 
 ---
 

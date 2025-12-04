@@ -115,6 +115,27 @@ impl Database {
         .execute(&pool)
         .await?;
 
+        // 运行下载任务字段迁移（添加 categories, tags, completed_episodes 列）
+        // 使用单独的语句，忽略 "duplicate column" 错误（列已存在的情况）
+        for sql in [
+            "ALTER TABLE download_task ADD COLUMN categories TEXT",
+            "ALTER TABLE download_task ADD COLUMN tags TEXT",
+            "ALTER TABLE download_task ADD COLUMN completed_episodes TEXT",
+        ] {
+            match sqlx::query(sql).execute(&pool).await {
+                Ok(_) => debug!("迁移成功: {}", sql),
+                Err(e) => {
+                    let err_str = e.to_string();
+                    // SQLite 错误：duplicate column name
+                    if err_str.contains("duplicate column") {
+                        debug!("列已存在，跳过: {}", sql);
+                    } else {
+                        return Err(e.into());
+                    }
+                }
+            }
+        }
+
         info!("数据库初始化完成");
 
         Ok(Self { pool })
@@ -404,8 +425,9 @@ impl Database {
             r#"
             INSERT INTO download_task (
                 comic_id, comic_title, total_episodes, episode_orders,
-                save_path, state, state_data, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                save_path, state, state_data, created_at, updated_at,
+                categories, tags, completed_episodes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(comic_id) DO UPDATE SET
                 comic_title = excluded.comic_title,
                 total_episodes = excluded.total_episodes,
@@ -413,7 +435,10 @@ impl Database {
                 save_path = excluded.save_path,
                 state = excluded.state,
                 state_data = excluded.state_data,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                categories = excluded.categories,
+                tags = excluded.tags,
+                completed_episodes = excluded.completed_episodes
             "#,
         )
         .bind(&task.comic_id)
@@ -425,6 +450,9 @@ impl Database {
         .bind(&task.state_data)
         .bind(task.created_at)
         .bind(task.updated_at)
+        .bind(&task.categories)
+        .bind(&task.tags)
+        .bind(&task.completed_episodes)
         .execute(&self.pool)
         .await?;
 
@@ -452,6 +480,44 @@ impl Database {
         .await?;
 
         Ok(())
+    }
+
+    /// 添加已完成的章节
+    pub async fn add_completed_episode(&self, comic_id: &str, episode: i32) -> Result<()> {
+        // 先获取当前的已完成章节列表
+        let task = self.get_download_task(comic_id).await?;
+        let mut completed = task
+            .as_ref()
+            .map(|t| t.get_completed_episodes())
+            .unwrap_or_default();
+
+        // 添加新章节（如果不存在）
+        if !completed.contains(&episode) {
+            completed.push(episode);
+            completed.sort();
+        }
+
+        let completed_json = serde_json::to_string(&completed).ok();
+        let now = chrono::Utc::now().timestamp();
+
+        sqlx::query(
+            "UPDATE download_task SET completed_episodes = ?, updated_at = ? WHERE comic_id = ?",
+        )
+        .bind(&completed_json)
+        .bind(now)
+        .bind(comic_id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// 检查章节是否已完成
+    pub async fn is_episode_completed(&self, comic_id: &str, episode: i32) -> Result<bool> {
+        let task = self.get_download_task(comic_id).await?;
+        Ok(task
+            .map(|t| t.get_completed_episodes().contains(&episode))
+            .unwrap_or(false))
     }
 
     /// 获取下载任务

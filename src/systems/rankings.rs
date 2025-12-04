@@ -103,6 +103,7 @@ pub fn setup_rankings_ui(
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
+                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ))
             .with_children(|root| {
                 // Tab 栏
@@ -853,9 +854,73 @@ fn spawn_comic_card(
                     },
                     TextColor(AppColors::TEXT_SECONDARY),
                 ));
+
+                // 分类和标签容器
+                if !comic.categories.is_empty() || !comic.tags.is_empty() {
+                    info.spawn(Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(3.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(layout::CARD_WIDTH - 16.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    })
+                    .with_children(|tags_container| {
+                        // 分类（蓝色）
+                        for category in comic.categories.iter().take(2) {
+                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
+                        }
+                        // 标签（绿色）
+                        for tag in comic.tags.iter().take(2) {
+                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
+                        }
+                    });
+                }
             });
         })
         .id()
+}
+
+/// 标签颜色类型
+enum TagColor {
+    /// 分类（蓝色）
+    Category,
+    /// 标签（绿色）
+    Tag,
+}
+
+/// 创建标签徽章
+fn spawn_tag_badge(
+    parent: &mut ChildSpawnerCommands,
+    text: &str,
+    font: &Handle<Font>,
+    color_type: TagColor,
+) {
+    let (bg_color, text_color) = match color_type {
+        TagColor::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
+        TagColor::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
+    };
+
+    parent
+        .spawn((
+            Node {
+                padding: UiRect::new(Val::Px(3.0), Val::Px(3.0), Val::Px(1.0), Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(bg_color),
+            BorderRadius::all(Val::Px(2.0)),
+        ))
+        .with_children(|badge| {
+            badge.spawn((
+                Text::new(truncate_text(text, 6)),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 9.0,
+                    ..default()
+                },
+                TextColor(text_color),
+            ));
+        });
 }
 
 /// 截断文本

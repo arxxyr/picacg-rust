@@ -202,6 +202,13 @@ pub struct AppSettings {
     /// 启动后自动开始未完成的下载
     #[serde(default)]
     pub auto_resume_downloads: bool,
+    /// 最大同时下载漫画数量（默认 3）
+    #[serde(default = "default_max_concurrent_downloads")]
+    pub max_concurrent_downloads: usize,
+}
+
+fn default_max_concurrent_downloads() -> usize {
+    3
 }
 
 impl Default for AppSettings {
@@ -216,6 +223,7 @@ impl Default for AppSettings {
             download_path: String::new(), // 空字符串表示使用默认路径
             database_path: String::new(), // 空字符串表示使用默认路径
             auto_resume_downloads: false, // 默认不自动恢复下载
+            max_concurrent_downloads: 3,  // 默认最多同时下载 3 本漫画
         }
     }
 }

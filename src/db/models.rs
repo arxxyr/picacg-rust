@@ -154,6 +154,12 @@ pub struct DbDownloadTask {
     pub state_data: Option<String>, // JSON: { current_episode, current_page, error }
     pub created_at: i64,
     pub updated_at: i64,
+    #[sqlx(default)]
+    pub categories: Option<String>, // JSON 数组
+    #[sqlx(default)]
+    pub tags: Option<String>, // JSON 数组
+    #[sqlx(default)]
+    pub completed_episodes: Option<String>, // JSON 数组：已完成下载的章节号
 }
 
 /// 下载状态附加数据（序列化为 JSON 存储）
@@ -196,7 +202,65 @@ impl DbDownloadTask {
             state_data: None,
             created_at: now,
             updated_at: now,
+            categories: None,
+            tags: None,
+            completed_episodes: None,
         }
+    }
+
+    /// 获取分类列表
+    pub fn get_categories(&self) -> Vec<String> {
+        self.categories
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default()
+    }
+
+    /// 设置分类列表
+    pub fn set_categories(&mut self, categories: &[String]) {
+        self.categories = serde_json::to_string(categories).ok();
+    }
+
+    /// 获取标签列表
+    pub fn get_tags(&self) -> Vec<String> {
+        self.tags
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default()
+    }
+
+    /// 设置标签列表
+    pub fn set_tags(&mut self, tags: &[String]) {
+        self.tags = serde_json::to_string(tags).ok();
+    }
+
+    /// 获取已完成的章节列表
+    pub fn get_completed_episodes(&self) -> Vec<i32> {
+        self.completed_episodes
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default()
+    }
+
+    /// 设置已完成的章节列表
+    pub fn set_completed_episodes(&mut self, episodes: &[i32]) {
+        self.completed_episodes = serde_json::to_string(episodes).ok();
+        self.updated_at = Utc::now().timestamp();
+    }
+
+    /// 添加已完成的章节
+    pub fn add_completed_episode(&mut self, episode: i32) {
+        let mut completed = self.get_completed_episodes();
+        if !completed.contains(&episode) {
+            completed.push(episode);
+            completed.sort();
+            self.set_completed_episodes(&completed);
+        }
+    }
+
+    /// 检查章节是否已完成
+    pub fn is_episode_completed(&self, episode: i32) -> bool {
+        self.get_completed_episodes().contains(&episode)
     }
 
     /// 获取章节顺序列表

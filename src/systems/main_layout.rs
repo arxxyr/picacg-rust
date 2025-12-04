@@ -97,6 +97,7 @@ pub fn setup_main_layout(mut commands: Commands, asset_server: Res<AssetServer>)
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|parent| {
             // 侧边栏
@@ -112,6 +113,7 @@ pub fn setup_main_layout(mut commands: Commands, asset_server: Res<AssetServer>)
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
+                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ));
         });
 }
@@ -133,6 +135,7 @@ fn spawn_sidebar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             },
             BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
             BorderColor::all(AppColors::BORDER),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|sidebar| {
             // 用户信息区

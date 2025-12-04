@@ -73,6 +73,7 @@ pub fn setup_detail_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏

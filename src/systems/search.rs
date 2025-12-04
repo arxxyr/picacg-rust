@@ -134,6 +134,7 @@ pub fn setup_search_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）
@@ -1225,6 +1226,7 @@ pub fn refresh_search_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）

@@ -136,6 +136,26 @@ pub struct AutoResumeDownloadsState {
     pub enabled: bool,
 }
 
+// ==================== 最大并发下载数设置组件 ====================
+
+/// 最大并发下载数减少按钮
+#[derive(Component)]
+pub struct MaxConcurrentDownloadsDecreaseButton;
+
+/// 最大并发下载数增加按钮
+#[derive(Component)]
+pub struct MaxConcurrentDownloadsIncreaseButton;
+
+/// 最大并发下载数显示文本
+#[derive(Component)]
+pub struct MaxConcurrentDownloadsText;
+
+/// 最大并发下载数设置状态
+#[derive(Resource)]
+pub struct MaxConcurrentDownloadsState {
+    pub value: usize,
+}
+
 /// 创建设置页面 UI
 pub fn setup_settings_ui(
     mut commands: Commands,
@@ -180,6 +200,11 @@ pub fn setup_settings_ui(
         enabled: settings.auto_resume_downloads,
     });
 
+    // 初始化最大并发下载数状态
+    commands.insert_resource(MaxConcurrentDownloadsState {
+        value: settings.max_concurrent_downloads,
+    });
+
     // 在内容区域下创建设置页面
     commands.entity(content_area).with_children(|parent| {
         parent
@@ -192,6 +217,7 @@ pub fn setup_settings_ui(
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
+                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ))
             .with_children(|root| {
                 // 标题栏
@@ -242,6 +268,11 @@ pub fn setup_settings_ui(
                                     section,
                                     &font,
                                     &settings.download_path,
+                                );
+                                spawn_max_concurrent_downloads_setting(
+                                    section,
+                                    &font,
+                                    settings.max_concurrent_downloads,
                                 );
                                 spawn_auto_resume_downloads_setting(
                                     section,
@@ -430,6 +461,140 @@ fn spawn_download_path_setting(
                     }),
                 ));
             });
+        });
+}
+
+/// 创建最大并发下载数设置
+fn spawn_max_concurrent_downloads_setting(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    current_value: usize,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(16.0)),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 左侧标签和说明
+            row.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|left| {
+                    left.spawn((
+                        Text::new("最大同时下载数"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+                    left.spawn((
+                        Text::new("同时下载的漫画数量上限"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+
+            // 右侧数值调整器
+            row.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            },))
+                .with_children(|controls| {
+                    // 减少按钮
+                    controls
+                        .spawn((
+                            MaxConcurrentDownloadsDecreaseButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                width: Val::Px(28.0),
+                                height: Val::Px(28.0),
+                                border: UiRect::all(Val::Px(1.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BorderColor::all(AppColors::BORDER),
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderRadius::all(Val::Px(4.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("-"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                    // 数值显示
+                    controls.spawn((
+                        MaxConcurrentDownloadsText,
+                        Text::new(format!("{}", current_value)),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                        Node {
+                            width: Val::Px(30.0),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                    ));
+
+                    // 增加按钮
+                    controls
+                        .spawn((
+                            MaxConcurrentDownloadsIncreaseButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                width: Val::Px(28.0),
+                                height: Val::Px(28.0),
+                                border: UiRect::all(Val::Px(1.0)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            BorderColor::all(AppColors::BORDER),
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderRadius::all(Val::Px(4.0)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("+"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                });
         });
 }
 
@@ -1112,6 +1277,7 @@ pub fn cleanup_settings_ui(mut commands: Commands, query: Query<Entity, With<Set
     commands.remove_resource::<ProxySettingsInputState>();
     commands.remove_resource::<LogLevelInputState>();
     commands.remove_resource::<AutoResumeDownloadsState>();
+    commands.remove_resource::<MaxConcurrentDownloadsState>();
 }
 
 /// 下载路径输入框交互
@@ -1262,6 +1428,7 @@ pub fn save_settings_button_interaction(
     proxy_state: Res<ProxySettingsInputState>,
     log_state: Res<LogLevelInputState>,
     auto_resume_state: Res<AutoResumeDownloadsState>,
+    max_concurrent_state: Res<MaxConcurrentDownloadsState>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
@@ -1283,6 +1450,9 @@ pub fn save_settings_button_interaction(
 
                 // 保存自动恢复下载设置
                 settings.auto_resume_downloads = auto_resume_state.enabled;
+
+                // 保存最大并发下载数
+                settings.max_concurrent_downloads = max_concurrent_state.value;
 
                 if let Err(e) = settings.save() {
                     tracing::error!("保存设置失败: {}", e);
@@ -1729,6 +1899,80 @@ pub fn auto_resume_downloads_checkbox_interaction(
                 if !auto_resume_state.enabled {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                 }
+            }
+        }
+    }
+}
+
+// ==================== 最大并发下载数交互系统 ====================
+
+/// 最大并发下载数减少按钮交互
+pub fn max_concurrent_downloads_decrease_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<MaxConcurrentDownloadsDecreaseButton>,
+        ),
+    >,
+    mut state: ResMut<MaxConcurrentDownloadsState>,
+    mut text_query: Query<&mut Text, With<MaxConcurrentDownloadsText>>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
+                // 最小值为 1
+                if state.value > 1 {
+                    state.value -= 1;
+                    tracing::info!("最大并发下载数: {}", state.value);
+                    // 更新显示文本
+                    for mut text in text_query.iter_mut() {
+                        **text = format!("{}", state.value);
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+/// 最大并发下载数增加按钮交互
+pub fn max_concurrent_downloads_increase_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (
+            Changed<Interaction>,
+            With<MaxConcurrentDownloadsIncreaseButton>,
+        ),
+    >,
+    mut state: ResMut<MaxConcurrentDownloadsState>,
+    mut text_query: Query<&mut Text, With<MaxConcurrentDownloadsText>>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
+                // 最大值为 10
+                if state.value < 10 {
+                    state.value += 1;
+                    tracing::info!("最大并发下载数: {}", state.value);
+                    // 更新显示文本
+                    for mut text in text_query.iter_mut() {
+                        **text = format!("{}", state.value);
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
             }
         }
     }

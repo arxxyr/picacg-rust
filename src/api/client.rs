@@ -214,10 +214,9 @@ impl ApiClient {
             PicacgError::NetworkError(format!("读取响应体失败: {}", e))
         })?;
 
-        tracing::debug!(
-            "响应体(前 500 字符): {}",
-            &response_text[..response_text.len().min(500)]
-        );
+        // 安全地截取前 500 个字符（处理多字节 UTF-8）
+        let preview: String = response_text.chars().take(500).collect();
+        tracing::debug!("响应体(前 500 字符): {}", preview);
 
         // 解析响应
         let api_response: ApiResponse<R::Response> =
