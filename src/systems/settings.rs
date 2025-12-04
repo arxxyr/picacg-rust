@@ -188,6 +188,7 @@ pub fn setup_settings_ui(
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
                     position_type: PositionType::Relative,
+                    overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
                     ..default()
                 })
                 .with_children(|content_wrapper| {
@@ -237,15 +238,11 @@ pub fn setup_settings_ui(
                                 spawn_about_section(section, &font);
                             });
 
-                            // 底部保存按钮
-                            spawn_save_button(scroll, &font);
-
                             // 底部间距（确保最后的内容可以完全滚动到可见区域）
-                            // 需要足够的高度来容纳滚动，特别是在高 DPI 屏幕上
                             scroll.spawn(Node {
                                 width: Val::Percent(100.0),
-                                height: Val::Px(100.0),
-                                min_height: Val::Px(100.0),
+                                height: Val::Px(120.0),
+                                min_height: Val::Px(120.0),
                                 ..default()
                             });
                         })
@@ -254,6 +251,9 @@ pub fn setup_settings_ui(
                     // 滚动条
                     spawn_settings_scrollbar(content_wrapper, scroll_container);
                 });
+
+                // 底部保存按钮栏（固定在页面底部，不随滚动）
+                spawn_save_button_bar(root, &font);
             });
     });
 
@@ -841,6 +841,7 @@ fn spawn_log_level_setting(
                         .spawn((
                             LogLevelButton { level },
                             Button,
+                            Interaction::default(),
                             Node {
                                 padding: UiRect::new(
                                     Val::Px(12.0),
@@ -879,22 +880,27 @@ fn spawn_log_level_setting(
         });
 }
 
-/// 创建保存按钮
-fn spawn_save_button(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+/// 创建底部保存按钮栏（固定在页面底部）
+fn spawn_save_button_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
         .spawn((
             Node {
                 width: Val::Percent(100.0),
+                height: Val::Px(60.0),
+                padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(10.0), Val::Px(10.0)),
                 justify_content: JustifyContent::FlexEnd,
-                margin: UiRect::top(Val::Px(20.0)),
+                align_items: AlignItems::Center,
+                border: UiRect::top(Val::Px(1.0)),
                 ..default()
             },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+            BorderColor::all(AppColors::BORDER),
         ))
         .with_children(|row| {
             row.spawn((
                 SaveSettingsButton,
                 Button,
+                Interaction::default(), // 必须添加，否则按钮无法响应点击
                 Node {
                     padding: UiRect::new(
                         Val::Px(24.0),
@@ -1169,6 +1175,8 @@ pub fn save_settings_button_interaction(
                     tracing::error!("保存设置失败: {}", e);
                 } else {
                     tracing::info!("设置已保存");
+                    // 动态更新日志等级
+                    crate::config::settings::update_log_level(log_state.level);
                 }
             }
             Interaction::Hovered => {
@@ -1509,46 +1517,45 @@ pub fn proxy_input_keyboard(
 
 /// 日志等级按钮交互
 pub fn log_level_button_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &LogLevelButton,
-            &mut BackgroundColor,
-            &mut BorderColor,
-        ),
-        Changed<Interaction>,
-    >,
+    mut buttons_query: Query<(
+        &Interaction,
+        &LogLevelButton,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
     mut log_state: ResMut<LogLevelInputState>,
-    mut all_buttons_query: Query<
-        (&LogLevelButton, &mut BackgroundColor, &mut BorderColor),
-        Without<Interaction>,
-    >,
 ) {
-    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                log_state.level = btn.level;
+    // 先检查是否有按钮被按下，收集新选择的等级
+    let mut new_level: Option<LogLevel> = None;
+    for (interaction, btn, _, _) in buttons_query.iter() {
+        if *interaction == Interaction::Pressed && log_state.level != btn.level {
+            new_level = Some(btn.level);
+            break;
+        }
+    }
 
-                // 更新当前按钮
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
+    // 如果有新选择，更新状态
+    if let Some(level) = new_level {
+        tracing::info!("日志等级已选择: {:?}", level);
+        log_state.level = level;
+    }
 
-                // 更新其他按钮
-                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
-                    if other_btn.level != btn.level {
-                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                        *other_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if log_state.level != btn.level {
+    // 更新所有按钮的外观
+    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
+        let is_selected = log_state.level == btn.level;
+
+        if is_selected {
+            *bg_color = BackgroundColor(AppColors::PRIMARY);
+            *border_color = BorderColor::all(AppColors::PRIMARY);
+        } else {
+            match *interaction {
+                Interaction::Hovered => {
                     *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                    *border_color = BorderColor::all(AppColors::BORDER);
                 }
-            }
-            Interaction::None => {
-                if log_state.level != btn.level {
+                _ => {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
                 }
             }
         }

@@ -1183,6 +1183,7 @@ async fn execute_download_task(
 
             // 如果文件已存在，跳过（支持断点续传）
             if file_path.exists() {
+                tracing::trace!("文件已存在，跳过: {:?}", file_path.file_name());
                 skip_count += 1;
                 continue;
             }
@@ -1487,6 +1488,11 @@ async fn download_image_to_file(
     timeout_secs: u64,
 ) -> Result<(), String> {
     use std::time::{SystemTime, UNIX_EPOCH};
+    let file_name = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    tracing::trace!("开始下载: {}", file_name);
 
     use hmac::{Hmac, Mac};
     use reqwest::Proxy;
@@ -1568,6 +1574,7 @@ async fn download_image_to_file(
         .await
         .map_err(|e| format!("保存文件失败: {}", e))?;
 
+    tracing::trace!("下载完成: {} ({} bytes)", file_name, bytes.len());
     Ok(())
 }
 

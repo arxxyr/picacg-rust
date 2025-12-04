@@ -676,6 +676,134 @@ pub fn refresh_search_ui(
 
 ---
 
+### 按钮缺少 Interaction 组件导致无法点击
+
+**问题场景：** 按钮添加了 `Button` 组件，但点击没有任何响应。
+
+**典型案例：保存按钮/日志等级按钮无响应**
+
+```rust
+// ❌ 错误：缺少 Interaction 组件
+row.spawn((
+    SaveSettingsButton,
+    Button,
+    Node { ... },
+    BackgroundColor(AppColors::PRIMARY),
+));
+```
+
+**症状：**
+- 按钮显示正常，但点击无响应
+- 交互系统的 `Changed<Interaction>` 查询永远不会匹配到该实体
+
+**根本原因：**
+- Bevy 的 `Button` 组件只是一个标记，不会自动添加 `Interaction` 组件
+- 必须显式添加 `Interaction::default()` 才能启用交互检测
+
+**修复方法：** 在按钮创建时添加 `Interaction::default()`
+
+```rust
+// ✅ 正确：显式添加 Interaction 组件
+row.spawn((
+    SaveSettingsButton,
+    Button,
+    Interaction::default(),  // 必须添加！
+    Node { ... },
+    BackgroundColor(AppColors::PRIMARY),
+));
+```
+
+---
+
+### 固定底部栏与滚动容器布局
+
+**问题场景：** 页面需要固定底部栏（如保存按钮），同时中间内容可滚动。
+
+**典型案例：设置页面底部保存按钮**
+
+**正确布局结构：**
+```
+PageRoot (Column, 100% height)
+├── Header (固定高度，如 50px)
+├── ContentWrapper (flex_grow: 1.0, overflow: clip)
+│   ├── ScrollContainer (100% height, overflow: scroll_y)
+│   │   ├── 内容1
+│   │   ├── 内容2
+│   │   └── 底部间距 (height: 120px)  ← 确保最后内容可滚动到可见区域
+│   └── Scrollbar (Absolute 定位)
+└── BottomBar (固定高度，如 60px)
+```
+
+**关键点：**
+
+1. **ContentWrapper 必须设置 `overflow: Overflow::clip()`**
+   - 防止滚动内容溢出到 BottomBar 区域
+
+2. **底部间距要足够大（推荐 100-120px）**
+   - 确保最后的内容可以完全滚动到可见区域
+   - 不被 BottomBar 遮挡
+
+3. **使用 Flexbox 自动分配空间**
+   ```rust
+   // ContentWrapper
+   Node {
+       flex_grow: 1.0,      // 占据剩余空间
+       flex_shrink: 1.0,    // 允许收缩
+       flex_basis: Val::Px(0.0),
+       min_height: Val::Px(0.0),
+       overflow: Overflow::clip(),  // 关键！
+       ..default()
+   }
+   ```
+
+**示例代码：**
+```rust
+root.spawn(Node {
+    width: Val::Percent(100.0),
+    height: Val::Percent(100.0),
+    flex_direction: FlexDirection::Column,
+    ..default()
+})
+.with_children(|root| {
+    // 标题栏
+    spawn_header(root);
+
+    // 内容区域（可滚动）
+    root.spawn(Node {
+        flex_grow: 1.0,
+        overflow: Overflow::clip(),  // 关键！
+        position_type: PositionType::Relative,
+        ..default()
+    })
+    .with_children(|wrapper| {
+        // 滚动容器
+        wrapper.spawn((
+            ScrollContainer,
+            Node {
+                height: Val::Percent(100.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            },
+        ))
+        .with_children(|scroll| {
+            // 内容...
+
+            // 底部间距
+            scroll.spawn(Node {
+                height: Val::Px(120.0),
+                min_height: Val::Px(120.0),
+                ..default()
+            });
+        });
+    });
+
+    // 固定底部栏
+    spawn_bottom_bar(root);
+});
+```
+
+---
+
 ## 调试技巧
 
 1. **使用完整堆栈追踪**

@@ -1,10 +1,39 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, sync::Arc};
 
 use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use tracing_subscriber::{EnvFilter, Registry, reload::Handle};
 
 use crate::error::Result;
+
+/// 日志等级 reload handle 类型
+pub type LogLevelHandle = Handle<EnvFilter, Registry>;
+
+/// 全局日志等级 reload handle
+static LOG_LEVEL_HANDLE: OnceCell<Arc<LogLevelHandle>> = OnceCell::new();
+
+/// 设置日志等级 reload handle（程序启动时调用一次）
+pub fn set_log_level_handle(handle: LogLevelHandle) {
+    let _ = LOG_LEVEL_HANDLE.set(Arc::new(handle));
+}
+
+/// 获取日志等级 reload handle
+pub fn get_log_level_handle() -> Option<Arc<LogLevelHandle>> {
+    LOG_LEVEL_HANDLE.get().cloned()
+}
+
+/// 动态更新日志等级
+pub fn update_log_level(level: LogLevel) {
+    if let Some(handle) = get_log_level_handle() {
+        let filter = EnvFilter::new(level.as_str());
+        if let Err(e) = handle.reload(filter) {
+            tracing::error!("更新日志等级失败: {}", e);
+        } else {
+            tracing::info!("日志等级已更新为: {}", level.as_str());
+        }
+    }
+}
 
 /// 代理类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,10 +141,23 @@ impl Default for LogLevel {
 
 impl LogLevel {
     /// 转换为 tracing 的 Level
+    pub fn to_tracing_level(&self) -> tracing::Level {
+        match self {
+            LogLevel::Trace => tracing::Level::TRACE,
+            LogLevel::Debug => tracing::Level::DEBUG,
+            LogLevel::Info => tracing::Level::INFO,
+            LogLevel::Warn => tracing::Level::WARN,
+            LogLevel::Error => tracing::Level::ERROR,
+        }
+    }
+
+    /// 转换为 EnvFilter 字符串
+    /// 对于 trace/debug 级别，只对 picacg crate 启用，第三方库保持 warn 级别
     pub fn as_str(&self) -> &'static str {
         match self {
-            LogLevel::Trace => "trace",
-            LogLevel::Debug => "debug",
+            // trace/debug 只对我们的代码生效，减少第三方库噪音
+            LogLevel::Trace => "warn,picacg=trace",
+            LogLevel::Debug => "warn,picacg=debug",
             LogLevel::Info => "info",
             LogLevel::Warn => "warn",
             LogLevel::Error => "error",

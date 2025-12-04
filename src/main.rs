@@ -16,18 +16,28 @@ mod systems;
 use bevy::{asset::AssetPlugin, prelude::*};
 use bevy_tokio_tasks::TokioTasksPlugin;
 use plugins::{ApiPlugin, UiPlugin};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt};
 
 fn main() {
-    // 初始化日志
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_target(false)
+    // 加载配置（在初始化日志前）
+    let settings = config::settings::AppSettings::global().read();
+    let log_level_str = settings.log_level.as_str();
+
+    // 创建可重载的日志过滤器
+    let filter = EnvFilter::new(log_level_str);
+    let (filter_layer, reload_handle) = reload::Layer::new(filter);
+
+    // 初始化日志（使用可重载的过滤器）
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt::layer().with_target(false))
         .init();
 
-    tracing::info!("PicACG Rust 客户端启动 (Bevy 版)");
+    // 保存 reload handle 供后续动态更新使用
+    config::settings::set_log_level_handle(reload_handle);
 
-    // 加载并打印配置
-    let settings = config::settings::AppSettings::global().read();
+    tracing::info!("PicACG Rust 客户端启动 (Bevy 版)");
+    tracing::info!("日志等级: {} (支持动态更新)", log_level_str);
     if settings.proxy.enabled {
         tracing::info!(
             "使用代理: {:?}://{}:{}",

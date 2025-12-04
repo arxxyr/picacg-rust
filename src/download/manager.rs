@@ -13,7 +13,7 @@ use tokio::{
     sync::mpsc,
     time::sleep,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     config::settings::AppSettings,
@@ -364,16 +364,26 @@ impl DownloadManager {
         config: DownloadConfig,
     ) -> Result<()> {
         let mut retries = 0;
+        let file_name = task
+            .save_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        trace!("开始下载文件: {} -> {}", task.url, file_name);
 
         loop {
             // 检查是否取消
             if handle.is_cancelled() {
+                trace!("下载已取消: {}", file_name);
                 return Err(PicacgError::Cancelled);
             }
 
             // 尝试下载
             match Self::download_with_resume(&client, &task, &handle, &tasks, &config).await {
-                Ok(_) => return Ok(()),
+                Ok(_) => {
+                    trace!("文件下载完成: {}", file_name);
+                    return Ok(());
+                }
                 Err(e) => {
                     retries += 1;
                     if retries >= config.max_retries {
