@@ -303,12 +303,16 @@ pub fn cleanup_rankings_ui(
 
 /// Tab 按钮交互
 pub fn rankings_tab_interaction(
+    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &RankingsTabButton),
         Changed<Interaction>,
     >,
     mut rankings_state: ResMut<RankingsState>,
     mut load_messages: MessageWriter<LoadRankingsRequest>,
+    mut creation_state: ResMut<RankingsCardCreationState>,
+    card_query: Query<Entity, With<RankingsComicCard>>,
+    mut scroll_query: Query<&mut ScrollPosition, With<RankingsScrollContainer>>,
 ) {
     for (interaction, mut bg_color, tab) in interaction_query.iter_mut() {
         let is_active = rankings_state.current_type == tab.time_type;
@@ -317,11 +321,27 @@ pub fn rankings_tab_interaction(
             Interaction::Pressed => {
                 if !is_active {
                     let start = std::time::Instant::now();
+
+                    // 立即清除旧卡片
+                    for entity in card_query.iter() {
+                        commands.entity(entity).despawn();
+                    }
+
+                    // 清除瀑布流状态
+                    creation_state.clear();
+
+                    // 重置滚动位置
+                    for mut scroll_pos in scroll_query.iter_mut() {
+                        scroll_pos.y = 0.0;
+                    }
+
+                    // 切换当前类型
                     rankings_state.current_type = tab.time_type;
                     *bg_color = BackgroundColor(AppColors::PRIMARY);
 
                     // 如果该类型还没有加载数据，发送加载请求
                     if !rankings_state.is_loaded(tab.time_type) {
+                        rankings_state.is_loading = true;
                         load_messages.write(LoadRankingsRequest {
                             time_type: tab.time_type,
                         });

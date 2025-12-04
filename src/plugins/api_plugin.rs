@@ -68,6 +68,10 @@ impl Plugin for ApiPlugin {
             .add_message::<LoadRankingsRequest>()
             .add_message::<RankingsLoadedEvent>()
             .add_message::<RankingsLoadFailedEvent>()
+            // 收藏列表相关消息
+            .add_message::<LoadFavoritesRequest>()
+            .add_message::<FavoritesLoadedEvent>()
+            .add_message::<FavoritesLoadFailedEvent>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -117,6 +121,8 @@ impl Plugin for ApiPlugin {
             .add_systems(Update, (handle_search_request, handle_search_response))
             // 注册系统 - 排行榜
             .add_systems(Update, (handle_load_rankings, handle_rankings_response))
+            // 注册系统 - 收藏列表
+            .add_systems(Update, (handle_load_favorites, handle_favorites_response))
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -898,6 +904,84 @@ fn handle_favorite_response(
     for event in messages.read() {
         detail_state.is_favorite = event.action == "favorite";
         tracing::info!("收藏操作: {}", event.action);
+    }
+}
+
+// ==================== 收藏列表处理 ====================
+
+/// 处理加载收藏列表请求
+fn handle_load_favorites(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadFavoritesRequest>,
+    api_client: Res<ApiClientResource>,
+    mut favorites_state: ResMut<FavoritesState>,
+) {
+    for event in messages.read() {
+        let page = event.page;
+        let sort = event.sort.clone();
+
+        favorites_state.is_loading = true;
+        favorites_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::category::GetFavoritesRequest;
+
+            let request = GetFavoritesRequest { page, sort };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(FavoritesLoadedEvent {
+                            comics: response.comics.docs,
+                            total_pages: response.comics.pages,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(FavoritesLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理收藏列表响应
+fn handle_favorites_response(
+    mut loaded_messages: MessageReader<FavoritesLoadedEvent>,
+    mut failed_messages: MessageReader<FavoritesLoadFailedEvent>,
+    mut favorites_state: ResMut<FavoritesState>,
+    mut image_messages: MessageWriter<LoadImageRequest>,
+) {
+    for event in loaded_messages.read() {
+        favorites_state.comics = event.comics.clone();
+        favorites_state.total_pages = event.total_pages;
+        favorites_state.is_loading = false;
+        favorites_state.error = None;
+        tracing::info!(
+            "收藏列表加载完成: {} 个, 共 {} 页",
+            favorites_state.comics.len(),
+            favorites_state.total_pages
+        );
+
+        // 触发加载封面图片
+        for comic in &event.comics {
+            image_messages.write(LoadImageRequest {
+                url: comic.thumb.url(),
+            });
+        }
+    }
+
+    for event in failed_messages.read() {
+        favorites_state.is_loading = false;
+        favorites_state.error = Some(event.error.clone());
+        tracing::warn!("收藏列表加载失败: {}", event.error);
     }
 }
 

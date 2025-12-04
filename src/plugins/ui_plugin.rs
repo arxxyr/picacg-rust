@@ -33,6 +33,8 @@ impl Plugin for UiPlugin {
             .init_resource::<CategoriesCardCreationState>()
             .init_resource::<ComicsCardCreationState>()
             .init_resource::<SearchCardCreationState>()
+            .init_resource::<FavoritesState>()
+            .init_resource::<FavoritesCardCreationState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -308,12 +310,32 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::Rankings)),
             )
-            // 收藏页（占位）
+            // 收藏页
             .add_systems(
                 OnEnter(AppRoute::Favorites),
                 (ensure_main_layout, setup_favorites_ui).chain(),
             )
             .add_systems(OnExit(AppRoute::Favorites), cleanup_favorites_ui)
+            .add_systems(
+                Update,
+                (
+                    favorite_card_interaction,
+                    favorites_pagination_interaction,
+                    handle_favorites_scroll,
+                    waterfall_create_favorite_cards,
+                    update_favorites_content_size,
+                    update_favorites_images,
+                    refresh_favorites_ui,
+                    handle_favorites_loaded,
+                    handle_favorites_load_failed,
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Favorites)),
+            )
             // 侧边栏交互（在主布局存在时运行）
             .add_systems(
                 Update,

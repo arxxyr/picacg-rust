@@ -13,9 +13,7 @@ use crate::{
 #[derive(Component)]
 pub struct HomeRoot;
 
-/// 收藏页根标记
-#[derive(Component)]
-pub struct FavoritesRoot;
+// 注意：FavoritesRoot 已移至 favorites.rs
 
 /// 创建通用占位页面
 fn spawn_placeholder_page(
@@ -144,38 +142,4 @@ pub fn cleanup_home_ui(mut commands: Commands, query: Query<Entity, With<HomeRoo
     }
 }
 
-// ==================== 收藏 ====================
-
-pub fn setup_favorites_ui(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    content_area_query: Query<Entity, With<ContentArea>>,
-) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
-
-    let content_area = match content_area_query.iter().next() {
-        Some(entity) => entity,
-        None => {
-            tracing::warn!("收藏页：找不到内容区域");
-            return;
-        }
-    };
-
-    spawn_placeholder_page(
-        &mut commands,
-        content_area,
-        font,
-        FavoritesRoot,
-        "我的收藏",
-        "⭐",
-        "您收藏的漫画将在这里显示",
-    );
-
-    tracing::info!("收藏页 UI 已创建");
-}
-
-pub fn cleanup_favorites_ui(mut commands: Commands, query: Query<Entity, With<FavoritesRoot>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
-    }
-}
+// 注意：收藏页面已移至 favorites.rs

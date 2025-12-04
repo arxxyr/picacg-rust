@@ -192,6 +192,28 @@ pub struct FavoriteComicResponse {
     pub action: String,
 }
 
+// ==================== 收藏列表消息 ====================
+
+/// 加载收藏列表请求
+#[derive(Message)]
+pub struct LoadFavoritesRequest {
+    pub page: i32,
+    pub sort: String,
+}
+
+/// 收藏列表加载完成
+#[derive(Message)]
+pub struct FavoritesLoadedEvent {
+    pub comics: Vec<Comic>,
+    pub total_pages: i32,
+}
+
+/// 收藏列表加载失败
+#[derive(Message)]
+pub struct FavoritesLoadFailedEvent {
+    pub error: String,
+}
+
 // ==================== 图片加载消息 ====================
 
 /// 加载图片请求

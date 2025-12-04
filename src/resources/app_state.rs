@@ -229,6 +229,36 @@ impl RankingsState {
     }
 }
 
+/// 收藏列表状态
+#[derive(Resource)]
+pub struct FavoritesState {
+    /// 收藏的漫画列表
+    pub comics: Vec<Comic>,
+    /// 当前页码
+    pub page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 排序方式 (dd: 新到旧, da: 旧到新)
+    pub sort: String,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+impl Default for FavoritesState {
+    fn default() -> Self {
+        Self {
+            comics: Vec::new(),
+            page: 1,
+            total_pages: 1,
+            sort: "dd".to_string(),
+            is_loading: false,
+            error: None,
+        }
+    }
+}
+
 /// 漫画详情状态
 #[derive(Resource, Default)]
 pub struct ComicDetailState {
