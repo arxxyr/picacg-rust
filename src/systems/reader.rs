@@ -1236,11 +1236,26 @@ pub fn handle_read_mode_change(
     image_loading_query: Query<Entity, With<ReaderImageLoading>>,
     mut load_image_messages: MessageWriter<LoadImageRequest>,
     comic_detail_state: Res<ComicDetailState>,
+    mut previous_mode: Local<Option<ReadMode>>,
 ) {
-    // 只在模式变化时执行
-    if !reader_state.is_changed() || reader_state.pictures.is_empty() {
+    // 只在模式实际变化时执行（使用 Local 追踪上一次模式，避免与
+    // handle_pictures_loaded 冲突）
+    let current_mode = reader_state.read_mode;
+
+    // 检查模式是否真正变化
+    let mode_changed = previous_mode
+        .map(|prev| prev != current_mode)
+        .unwrap_or(false);
+
+    // 更新上一次模式
+    *previous_mode = Some(current_mode);
+
+    // 只在模式变化时执行，且图片不为空
+    if !mode_changed || reader_state.pictures.is_empty() {
         return;
     }
+
+    tracing::info!("阅读模式切换: {:?}", current_mode);
 
     let comic_title = comic_detail_state
         .comic
