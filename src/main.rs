@@ -13,7 +13,10 @@ mod plugins;
 mod resources;
 mod systems;
 
-use bevy::{asset::AssetPlugin, prelude::*};
+use bevy::{
+    asset::{AssetPlugin, UnapprovedPathMode},
+    prelude::*,
+};
 use bevy_tokio_tasks::TokioTasksPlugin;
 use plugins::{ApiPlugin, UiPlugin};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt};
@@ -73,6 +76,8 @@ fn main() {
             DefaultPlugins
                 .set(AssetPlugin {
                     file_path: assets_path.to_string_lossy().to_string(),
+                    // 允许加载 assets 目录之外的文件（如下载目录的图片）
+                    unapproved_path_mode: UnapprovedPathMode::Allow,
                     ..default()
                 })
                 .set(WindowPlugin {
