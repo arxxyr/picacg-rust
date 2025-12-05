@@ -11,9 +11,15 @@ use crate::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
     },
     config::settings::AppSettings,
-    events::{DownloadCompletedEvent, RedownloadRequest, ResumeDownloadRequest},
-    resources::{ComicDownloadStatus, DownloadManagerState},
-    systems::login::{AppColors, FONT_PATH},
+    events::{
+        DownloadCompletedEvent, NavigateToComicDetailEvent, NavigateToComicsListEvent,
+        RedownloadRequest, ResumeDownloadRequest, SearchComicsRequestEvent,
+    },
+    resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, SearchState},
+    systems::{
+        login::{AppColors, FONT_PATH},
+        navigation::NavigationHistory,
+    },
 };
 
 /// 下载滚动容器组件（本地定义）
@@ -280,7 +286,25 @@ enum TagColor {
     Tag,
 }
 
-/// 创建标签徽章
+/// 下载列表中可点击的标题（跳转到漫画详情）
+#[derive(Component)]
+pub struct DownloadTitleButton {
+    pub comic_id: String,
+}
+
+/// 下载列表中可点击的分类标签（跳转到分类列表）
+#[derive(Component)]
+pub struct DownloadCategoryTag {
+    pub category: String,
+}
+
+/// 下载列表中可点击的标签（跳转到搜索）
+#[derive(Component)]
+pub struct DownloadTagButton {
+    pub tag: String,
+}
+
+/// 创建标签徽章（可点击）
 fn spawn_tag_badge(
     parent: &mut ChildSpawnerCommands,
     text: &str,
@@ -299,26 +323,42 @@ fn spawn_tag_badge(
         text.to_string()
     };
 
-    parent
-        .spawn((
-            Node {
-                padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
+    let text_owned = text.to_string();
+
+    let mut entity_commands = parent.spawn((
+        Button,
+        Interaction::default(),
+        Node {
+            padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
+            ..default()
+        },
+        BackgroundColor(bg_color),
+        BorderRadius::all(Val::Px(3.0)),
+    ));
+
+    // 根据类型添加不同的组件
+    match color_type {
+        TagColor::Category => {
+            entity_commands.insert(DownloadCategoryTag {
+                category: text_owned,
+            });
+        }
+        TagColor::Tag => {
+            entity_commands.insert(DownloadTagButton { tag: text_owned });
+        }
+    }
+
+    entity_commands.with_children(|badge| {
+        badge.spawn((
+            Text::new(display_text),
+            TextFont {
+                font: font.clone(),
+                font_size: 10.0,
                 ..default()
             },
-            BackgroundColor(bg_color),
-            BorderRadius::all(Val::Px(3.0)),
-        ))
-        .with_children(|badge| {
-            badge.spawn((
-                Text::new(display_text),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 10.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
+            TextColor(text_color),
+        ));
+    });
 }
 
 /// 下载进度条标记
@@ -1180,16 +1220,27 @@ fn spawn_download_task_item(
                 ..default()
             },))
                 .with_children(|row| {
-                    // 漫画标题
+                    // 漫画标题（可点击跳转详情）
                     row.spawn((
-                        Text::new(task.comic_title.clone()),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
+                        DownloadTitleButton {
+                            comic_id: task.comic_id.clone(),
                         },
-                        TextColor(AppColors::TEXT),
-                    ));
+                        Button,
+                        Interaction::default(),
+                        Node::default(),
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(task.comic_title.clone()),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
 
                     // 状态标签
                     row.spawn((
@@ -1430,16 +1481,27 @@ fn spawn_completed_download_item(
                 ..default()
             },))
                 .with_children(|info| {
-                    // 漫画名称
+                    // 漫画名称（可点击跳转详情）
                     info.spawn((
-                        Text::new(download.folder_name.clone()),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
+                        DownloadTitleButton {
+                            comic_id: download.comic_id.clone(),
                         },
-                        TextColor(AppColors::TEXT),
-                    ));
+                        Button,
+                        Interaction::default(),
+                        Node::default(),
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(download.folder_name.clone()),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
 
                     // 章节数和路径
                     info.spawn((
@@ -1889,16 +1951,27 @@ pub fn add_new_task_ui(
                     ..default()
                 })
                 .with_children(|row| {
-                    // 标题
+                    // 标题（可点击跳转详情）
                     row.spawn((
-                        Text::new(&task.comic_title),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
+                        DownloadTitleButton {
+                            comic_id: task.comic_id.clone(),
                         },
-                        TextColor(AppColors::TEXT),
-                    ));
+                        Button,
+                        Interaction::default(),
+                        Node::default(),
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(&task.comic_title),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
 
                     // 按钮容器
                     row.spawn(Node {
@@ -3206,6 +3279,117 @@ pub fn update_download_task_tags(
                 task_categories.len(),
                 task_tags.len()
             );
+        }
+    }
+}
+
+/// 下载列表标题点击交互（跳转到漫画详情）
+pub fn download_title_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &DownloadTitleButton, &Children),
+        Changed<Interaction>,
+    >,
+    mut text_query: Query<&mut TextColor>,
+    mut navigate_messages: MessageWriter<NavigateToComicDetailEvent>,
+) {
+    for (interaction, title_btn, children) in interaction_query.iter_mut() {
+        // 更新子文本颜色
+        for child in children.iter() {
+            if let Ok(mut text_color) = text_query.get_mut(child) {
+                match *interaction {
+                    Interaction::Pressed => {
+                        *text_color = TextColor(Color::srgb(0.5, 0.7, 1.0));
+                        navigate_messages.write(NavigateToComicDetailEvent {
+                            comic_id: title_btn.comic_id.clone(),
+                        });
+                        tracing::info!("点击下载标题跳转详情: {}", title_btn.comic_id);
+                    }
+                    Interaction::Hovered => {
+                        *text_color = TextColor(Color::srgb(0.6, 0.8, 1.0));
+                    }
+                    Interaction::None => {
+                        *text_color = TextColor(AppColors::TEXT);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 下载列表分类标签点击交互（跳转到分类列表）
+pub fn download_category_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &DownloadCategoryTag),
+        Changed<Interaction>,
+    >,
+    mut navigate_messages: MessageWriter<NavigateToComicsListEvent>,
+) {
+    for (interaction, mut bg_color, tag) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgba(0.3, 0.5, 0.9, 0.5));
+                navigate_messages.write(NavigateToComicsListEvent {
+                    category: tag.category.clone(),
+                });
+                tracing::info!("点击下载分类标签: {}", tag.category);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgba(0.25, 0.45, 0.85, 0.4));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3));
+            }
+        }
+    }
+}
+
+/// 下载列表标签点击交互（跳转到搜索）
+pub fn download_tag_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &DownloadTagButton),
+        Changed<Interaction>,
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut next_route: ResMut<NextState<AppRoute>>,
+    mut history: ResMut<NavigationHistory>,
+    current_route: Res<State<AppRoute>>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    for (interaction, mut bg_color, tag_btn) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgba(0.3, 0.7, 0.5, 0.5));
+
+                // 设置搜索状态
+                search_state.keyword = tag_btn.tag.clone();
+                search_state.results.clear();
+                search_state.page = 1;
+                search_state.total_pages = 0;
+                search_state.is_loading = true;
+                search_state.has_searched = true;
+                search_state.error = None;
+
+                // 记录导航历史
+                history.push(current_route.get().clone());
+
+                // 跳转到搜索页面
+                next_route.set(AppRoute::Search);
+
+                // 发送搜索请求
+                search_messages.write(SearchComicsRequestEvent {
+                    keyword: tag_btn.tag.clone(),
+                    page: 1,
+                    sort: search_state.sort.clone(),
+                });
+
+                tracing::info!("点击下载标签搜索: {}", tag_btn.tag);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgba(0.25, 0.65, 0.45, 0.4));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgba(0.2, 0.6, 0.4, 0.3));
+            }
         }
     }
 }

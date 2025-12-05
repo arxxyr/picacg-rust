@@ -260,6 +260,10 @@ impl Plugin for UiPlugin {
                     // 已下载项按钮交互
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
+                    // 标题/分类/标签点击跳转
+                    download_title_interaction,
+                    download_category_interaction,
+                    download_tag_interaction,
                     refresh_downloads_ui,
                     add_new_task_ui,
                     handle_download_completed_ui,
