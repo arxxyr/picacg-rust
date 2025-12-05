@@ -13,6 +13,7 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
+        navigation::NavigationHistory,
         scrollbar::scrollbar_config::*,
     },
 };
@@ -60,6 +61,12 @@ pub struct DetailFavoriteText;
 #[derive(Component)]
 pub struct CategoryTag {
     pub category: String,
+}
+
+/// 标签按钮组件（可点击搜索）
+#[derive(Component)]
+pub struct TagButton {
+    pub tag: String,
 }
 
 /// 创建漫画详情界面
@@ -981,7 +988,7 @@ fn build_detail_content(
                             });
                     }
 
-                    // 标签（tags）
+                    // 标签（tags）- 可点击搜索
                     if !comic.tags.is_empty() {
                         details
                             .spawn(Node {
@@ -1004,6 +1011,9 @@ fn build_detail_content(
                                 ));
                                 for tag in &comic.tags {
                                     row.spawn((
+                                        TagButton { tag: tag.clone() },
+                                        Button,
+                                        Interaction::default(),
                                         Node {
                                             padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
                                             border: UiRect::all(Val::Px(1.0)),
@@ -1496,6 +1506,65 @@ pub fn category_tag_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgb(0.2, 0.3, 0.4));
+            }
+        }
+    }
+}
+
+/// 标签点击交互（跳转到搜索页面搜索该标签）
+pub fn tag_button_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &TagButton,
+        ),
+        Changed<Interaction>,
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut next_route: ResMut<NextState<AppRoute>>,
+    mut history: ResMut<NavigationHistory>,
+    current_route: Res<State<AppRoute>>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    for (interaction, mut bg_color, mut border_color, tag_btn) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.2, 0.35));
+                *border_color = BorderColor::all(Color::srgb(0.7, 0.5, 0.8));
+
+                // 设置搜索状态
+                search_state.keyword = tag_btn.tag.clone();
+                search_state.results.clear();
+                search_state.page = 1;
+                search_state.total_pages = 0;
+                search_state.is_loading = true;
+                search_state.has_searched = true;
+                search_state.error = None;
+
+                // 记录导航历史
+                history.push(current_route.get().clone());
+
+                // 跳转到搜索页面
+                next_route.set(AppRoute::Search);
+
+                // 发送搜索请求
+                search_messages.write(SearchComicsRequestEvent {
+                    keyword: tag_btn.tag.clone(),
+                    page: 1,
+                    sort: search_state.sort.clone(),
+                });
+
+                tracing::info!("点击标签搜索: {}", tag_btn.tag);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.17, 0.28));
+                *border_color = BorderColor::all(Color::srgb(0.6, 0.5, 0.7));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.12, 0.2));
+                *border_color = BorderColor::all(Color::srgb(0.5, 0.4, 0.6));
             }
         }
     }

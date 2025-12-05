@@ -120,7 +120,12 @@ impl Plugin for UiPlugin {
             // 漫画列表页面
             .add_systems(
                 OnEnter(AppRoute::ComicsList),
-                (ensure_main_layout, setup_comics_list_ui, trigger_load_comics).chain(),
+                (
+                    ensure_main_layout,
+                    setup_comics_list_ui,
+                    trigger_load_comics,
+                )
+                    .chain(),
             )
             .add_systems(OnExit(AppRoute::ComicsList), cleanup_comics_list_ui)
             .add_systems(
@@ -169,6 +174,7 @@ impl Plugin for UiPlugin {
                     favorite_button_interaction,
                     download_button_interaction,
                     category_tag_interaction,
+                    tag_button_interaction,
                     refresh_detail_ui,
                     update_cover_image,
                     handle_detail_scroll,
@@ -439,7 +445,9 @@ fn trigger_load_comics(
     mut load_messages: MessageWriter<LoadComicsRequest>,
 ) {
     // 如果有分类且没有数据，触发加载
-    if !comics_state.category.is_empty() && comics_state.comics.is_empty() && !comics_state.is_loading
+    if !comics_state.category.is_empty()
+        && comics_state.comics.is_empty()
+        && !comics_state.is_loading
     {
         tracing::info!(
             "触发加载漫画列表: category={}, page={}",
