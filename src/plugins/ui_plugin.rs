@@ -65,6 +65,7 @@ impl Plugin for UiPlugin {
                     login_input_interaction,
                     login_keyboard_input,
                     login_checkbox_interaction,
+                    register_button_interaction,
                 )
                     .run_if(in_state(AppRoute::Login)),
             )

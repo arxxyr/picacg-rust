@@ -54,6 +54,10 @@ pub struct LoginButton;
 #[derive(Component)]
 pub struct ProxySettingsButton;
 
+/// 注册按钮（登录页）
+#[derive(Component)]
+pub struct RegisterButton;
+
 /// 登录错误消息
 #[derive(Component)]
 pub struct LoginErrorText;

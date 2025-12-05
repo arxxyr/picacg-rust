@@ -68,6 +68,7 @@ moka = { version = "0.12", features = ["future"] }
 
 # === 图片处理 ===
 image = "0.25"
+open = "5.3.3"
 
 [dev-dependencies]
 tokio-test = "0.4"

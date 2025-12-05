@@ -239,6 +239,54 @@ pub fn setup_login_ui(
                             TextColor(AppColors::TEXT),
                         ));
                     });
+
+                    // 注册提示行
+                    form.spawn((
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(5.0),
+                            margin: UiRect::top(Val::Px(10.0)),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ))
+                    .with_children(|row| {
+                        // "还没有账号？" 文本
+                        row.spawn((
+                            Text::new("还没有账号？"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+
+                        // "立即注册" 链接按钮
+                        row.spawn((
+                            RegisterButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("立即注册"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::PRIMARY),
+                            ));
+                        });
+                    });
                 });
 
             // 提示信息
@@ -762,6 +810,45 @@ pub fn save_credentials_on_login(login_state: &LoginFormState) {
         settings.login.saved_password = login_state.password.clone();
         if let Err(e) = settings.save() {
             tracing::error!("保存登录凭据失败: {}", e);
+        }
+    }
+}
+
+/// 注册按钮交互系统
+pub fn register_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &Children),
+        (Changed<Interaction>, With<RegisterButton>),
+    >,
+    mut text_query: Query<&mut TextColor>,
+) {
+    for (interaction, children) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                // 打开浏览器到注册页面
+                let register_url = "https://manhuabika.com/signup";
+                if let Err(e) = open::that(register_url) {
+                    tracing::error!("无法打开注册页面: {}", e);
+                } else {
+                    tracing::info!("已打开注册页面: {}", register_url);
+                }
+            }
+            Interaction::Hovered => {
+                // 悬停时改变颜色
+                for child in children.iter() {
+                    if let Ok(mut color) = text_query.get_mut(child) {
+                        *color = TextColor(AppColors::PRIMARY_HOVER);
+                    }
+                }
+            }
+            Interaction::None => {
+                // 恢复原始颜色
+                for child in children.iter() {
+                    if let Ok(mut color) = text_query.get_mut(child) {
+                        *color = TextColor(AppColors::PRIMARY);
+                    }
+                }
+            }
         }
     }
 }
