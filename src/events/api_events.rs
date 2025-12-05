@@ -30,6 +30,30 @@ pub struct LoginResponseEvent {
 #[derive(Message)]
 pub struct UserLoggedInEvent;
 
+// ==================== 注册消息 ====================
+
+/// 注册请求消息
+#[derive(Message)]
+pub struct RegisterRequestEvent {
+    pub email: String,
+    pub password: String,
+    pub name: String,
+    pub birthday: String,
+    pub gender: String,
+    pub question1: String,
+    pub question2: String,
+    pub question3: String,
+    pub answer1: String,
+    pub answer2: String,
+    pub answer3: String,
+}
+
+/// 注册响应消息
+#[derive(Message)]
+pub struct RegisterResponseEvent {
+    pub result: Result<String, String>,
+}
+
 // ==================== 打卡消息 ====================
 
 /// 打卡请求消息

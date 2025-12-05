@@ -38,6 +38,7 @@ impl Plugin for UiPlugin {
             .init_resource::<HomeState>()
             .init_resource::<HomeCardCreationState>()
             .init_resource::<DownloadSectionCollapseState>()
+            .init_resource::<RegisterFormState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -83,6 +84,23 @@ impl Plugin for UiPlugin {
                     proxy_keyboard_input,
                 )
                     .run_if(in_state(AppRoute::ProxySettings)),
+            )
+            // 注册页面
+            .add_systems(OnEnter(AppRoute::Register), setup_register_ui)
+            .add_systems(OnExit(AppRoute::Register), cleanup_register_ui)
+            .add_systems(
+                Update,
+                (
+                    register_input_interaction,
+                    register_keyboard_input,
+                    register_ime_input,
+                    register_gender_interaction,
+                    back_to_login_interaction,
+                    register_submit_interaction,
+                    handle_register_response,
+                    unfocus_register_input,
+                )
+                    .run_if(in_state(AppRoute::Register)),
             )
             // 分类页面（进入时先确保主布局存在）
             .add_systems(

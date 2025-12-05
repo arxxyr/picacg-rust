@@ -39,9 +39,12 @@ pub fn get_sidebar_route(route: &AppRoute) -> Option<SidebarRoute> {
         AppRoute::Downloads => Some(SidebarRoute::Downloads),
         AppRoute::Settings => Some(SidebarRoute::Settings),
         // ComicDetail/ReadView 可从多个入口进入，不归属于任何分区
-        AppRoute::ComicDetail | AppRoute::ReadView | AppRoute::Login | AppRoute::ProxySettings => {
-            None
-        }
+        // Login/Register/ProxySettings 不属于主导航
+        AppRoute::ComicDetail
+        | AppRoute::ReadView
+        | AppRoute::Login
+        | AppRoute::Register
+        | AppRoute::ProxySettings => None,
     }
 }
 

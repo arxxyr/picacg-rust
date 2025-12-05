@@ -821,17 +821,13 @@ pub fn register_button_interaction(
         (Changed<Interaction>, With<RegisterButton>),
     >,
     mut text_query: Query<&mut TextColor>,
+    mut next_route: ResMut<NextState<AppRoute>>,
 ) {
     for (interaction, children) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
-                // 打开浏览器到注册页面
-                let register_url = "https://manhuabika.com/signup";
-                if let Err(e) = open::that(register_url) {
-                    tracing::error!("无法打开注册页面: {}", e);
-                } else {
-                    tracing::info!("已打开注册页面: {}", register_url);
-                }
+                // 导航到注册页面
+                next_route.set(AppRoute::Register);
             }
             Interaction::Hovered => {
                 // 悬停时改变颜色

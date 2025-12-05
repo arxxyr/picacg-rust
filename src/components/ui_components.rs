@@ -58,6 +58,61 @@ pub struct ProxySettingsButton;
 #[derive(Component)]
 pub struct RegisterButton;
 
+// ==================== 注册页面组件 ====================
+
+/// 注册页面根节点
+#[derive(Component)]
+pub struct RegisterRoot;
+
+/// 注册页面输入框类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterInputType {
+    Email,
+    Password,
+    ConfirmPassword,
+    Name,
+    Birthday,
+    Question1,
+    Question2,
+    Question3,
+    Answer1,
+    Answer2,
+    Answer3,
+}
+
+/// 注册页面输入框
+#[derive(Component)]
+pub struct RegisterInputField {
+    pub input_type: RegisterInputType,
+    pub focused: bool,
+}
+
+/// 注册页面性别按钮
+#[derive(Component)]
+pub struct RegisterGenderButton {
+    pub gender: crate::resources::Gender,
+}
+
+/// 注册提交按钮
+#[derive(Component)]
+pub struct RegisterSubmitButton;
+
+/// 返回登录按钮
+#[derive(Component)]
+pub struct BackToLoginButton;
+
+/// 注册错误消息
+#[derive(Component)]
+pub struct RegisterErrorText;
+
+/// 注册成功消息
+#[derive(Component)]
+pub struct RegisterSuccessText;
+
+/// 注册页面滚动容器
+#[derive(Component)]
+pub struct RegisterScrollContainer;
+
 /// 登录错误消息
 #[derive(Component)]
 pub struct LoginErrorText;

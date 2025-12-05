@@ -79,6 +79,9 @@ impl Plugin for ApiPlugin {
             .add_message::<LoadRecommendationsRequest>()
             .add_message::<RecommendationsLoadedEvent>()
             .add_message::<RecommendationsLoadFailedEvent>()
+            // 注册相关消息
+            .add_message::<RegisterRequestEvent>()
+            .add_message::<RegisterResponseEvent>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -137,6 +140,8 @@ impl Plugin for ApiPlugin {
                 Update,
                 (handle_load_recommendations, handle_recommendations_response),
             )
+            // 注册系统 - 用户注册
+            .add_systems(Update, handle_register_request)
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -2575,5 +2580,65 @@ fn download_queue_manager(
                 max_concurrent
             );
         }
+    }
+}
+
+// ==================== 注册处理 ====================
+
+/// 处理注册请求
+fn handle_register_request(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<RegisterRequestEvent>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let email = event.email.clone();
+        let password = event.password.clone();
+        let name = event.name.clone();
+        let birthday = event.birthday.clone();
+        let gender = event.gender.clone();
+        let question1 = event.question1.clone();
+        let question2 = event.question2.clone();
+        let question3 = event.question3.clone();
+        let answer1 = event.answer1.clone();
+        let answer2 = event.answer2.clone();
+        let answer3 = event.answer3.clone();
+        let client = api_client.0.clone();
+
+        tracing::info!("注册请求: email={}", email);
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use crate::api::endpoints::RegisterRequest;
+
+            let request = RegisterRequest {
+                email,
+                password,
+                name,
+                birthday,
+                gender,
+                question1,
+                question2,
+                question3,
+                answer1,
+                answer2,
+                answer3,
+            };
+
+            let result = match client.request(request).await {
+                Ok(response) => {
+                    tracing::info!("注册成功: {}", response.message);
+                    Ok(response.message)
+                }
+                Err(e) => {
+                    tracing::error!("注册失败: {}", e);
+                    Err(e.to_string())
+                }
+            };
+
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(RegisterResponseEvent { result });
+            })
+            .await;
+        });
     }
 }

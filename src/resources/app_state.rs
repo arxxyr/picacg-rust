@@ -18,6 +18,8 @@ pub enum AppRoute {
     /// 登录页面
     #[default]
     Login,
+    /// 注册页面
+    Register,
     /// 代理设置
     ProxySettings,
     /// 主页
@@ -88,6 +90,70 @@ impl Default for LoginFormState {
             auto_punch_in: settings.login.auto_punch_in,
         }
     }
+}
+
+/// 性别选项
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Gender {
+    #[default]
+    Male,
+    Female,
+    Bot,
+}
+
+impl Gender {
+    /// 转换为 API 需要的字符串
+    pub fn to_api_string(&self) -> &'static str {
+        match self {
+            Gender::Male => "m",
+            Gender::Female => "f",
+            Gender::Bot => "bot",
+        }
+    }
+
+    /// 显示名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Gender::Male => "男",
+            Gender::Female => "女",
+            Gender::Bot => "扶她",
+        }
+    }
+}
+
+/// 注册表单状态
+#[derive(Resource, Default)]
+pub struct RegisterFormState {
+    /// 邮箱/用户名
+    pub email: String,
+    /// 密码
+    pub password: String,
+    /// 确认密码
+    pub confirm_password: String,
+    /// 昵称
+    pub name: String,
+    /// 生日 (格式: yyyy-MM-dd)
+    pub birthday: String,
+    /// 性别
+    pub gender: Gender,
+    /// 安全问题1
+    pub question1: String,
+    /// 安全问题2
+    pub question2: String,
+    /// 安全问题3
+    pub question3: String,
+    /// 安全问题答案1
+    pub answer1: String,
+    /// 安全问题答案2
+    pub answer2: String,
+    /// 安全问题答案3
+    pub answer3: String,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 成功信息
+    pub success: Option<String>,
 }
 
 /// 分类列表状态
