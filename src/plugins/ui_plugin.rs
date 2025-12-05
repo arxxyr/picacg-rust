@@ -188,6 +188,24 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::ComicDetail)),
             )
+            // 阅读器页面
+            .add_systems(
+                OnEnter(AppRoute::ReadView),
+                (setup_reader_ui, trigger_load_pictures).chain(),
+            )
+            .add_systems(OnExit(AppRoute::ReadView), cleanup_reader_ui)
+            .add_systems(
+                Update,
+                (
+                    reader_back_button_interaction,
+                    reader_prev_button_interaction,
+                    reader_next_button_interaction,
+                    reader_keyboard_input,
+                    handle_pictures_loaded,
+                    handle_pictures_load_failed,
+                )
+                    .run_if(in_state(AppRoute::ReadView)),
+            )
             // 设置页面
             .add_systems(
                 OnEnter(AppRoute::Settings),

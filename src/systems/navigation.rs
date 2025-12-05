@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::{
     components::SidebarRoute,
     events::*,
-    resources::{AppRoute, ComicDetailState, ComicsListState},
+    resources::{AppRoute, ComicDetailState, ComicsListState, ReaderState},
 };
 
 /// 导航历史记录（支持前进后退）
@@ -119,6 +119,7 @@ pub fn handle_navigation_messages(
     mut history: ResMut<NavigationHistory>,
     mut comics_state: ResMut<ComicsListState>,
     mut detail_state: ResMut<ComicDetailState>,
+    mut reader_state: ResMut<ReaderState>,
     // 导航消息
     mut categories_events: MessageReader<NavigateToCategoriesEvent>,
     mut comics_events: MessageReader<NavigateToComicsListEvent>,
@@ -165,8 +166,14 @@ pub fn handle_navigation_messages(
     // 处理导航到阅读界面
     for event in reader_events.read() {
         history.push(current.clone());
-        // TODO: 设置阅读器状态
-        let _ = event;
+        // 设置阅读器状态
+        reader_state.comic_id = event.comic_id.clone();
+        reader_state.episode_order = event.episode_order;
+        reader_state.current_page = 1;
+        reader_state.total_pages = 0;
+        reader_state.pictures.clear();
+        reader_state.is_loading = false;
+        reader_state.error = None;
         next_route.set(AppRoute::ReadView);
     }
 

@@ -99,6 +99,7 @@ impl Plugin for ApiPlugin {
                 (
                     handle_load_episodes,
                     handle_episodes_response,
+                    handle_load_pictures,
                     handle_like_comic,
                     handle_like_response,
                     handle_favorite_comic,
@@ -832,6 +833,54 @@ fn handle_episodes_response(
         detail_state.is_loading_episodes = false;
         // 不覆盖漫画详情的错误
         tracing::warn!("章节加载失败: {}", event.error);
+    }
+}
+
+// ==================== 图片列表加载 ====================
+
+/// 处理图片列表加载请求
+fn handle_load_pictures(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadPicturesRequest>,
+    api_client: Res<ApiClientResource>,
+    mut reader_state: ResMut<ReaderState>,
+) {
+    for event in messages.read() {
+        reader_state.is_loading = true;
+
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+        let episode_order = event.episode_order;
+        let page = event.page;
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use crate::api::endpoints::comic::GetPicturesRequest;
+
+            let request = GetPicturesRequest {
+                comic_id,
+                episode_order,
+                page,
+            };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(PicturesLoadedEvent {
+                            pictures: response.pages.docs,
+                            total_pages: response.pages.pages,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(PicturesLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
     }
 }
 
