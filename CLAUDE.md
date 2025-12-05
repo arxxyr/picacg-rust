@@ -807,6 +807,80 @@ pub fn floating_header_click_interaction(
 
 ---
 
+### MessageReader 消费事件导致 Bevy 原生滚动失效
+
+**问题场景：** 使用 `MessageReader<MouseWheel>` 处理鼠标滚轮事件后，Bevy 的原生 `ScrollPosition` 滚动不再工作。
+
+**典型案例：阅读器条漫模式滚动失效**
+
+```rust
+// ❌ 错误：MessageReader 消费了所有事件，Bevy 原生滚动收不到
+pub fn reader_mouse_wheel_control(
+    mut mouse_wheel_events: MessageReader<MouseWheel>,
+    // ...
+) {
+    for event in mouse_wheel_events.read() {
+        // 事件已被消费！
+        match reader_state.read_mode {
+            ReadMode::SinglePage => { /* 处理翻页 */ }
+            ReadMode::Webtoon => {
+                // 期望 Bevy 原生 ScrollPosition 处理，但事件已被消费
+                // 滚动容器不会响应！
+            }
+        }
+    }
+}
+```
+
+**症状：**
+- 滚动容器设置了 `overflow: Overflow::scroll_y()` 和 `ScrollPosition::default()`
+- 其他页面的滚动正常工作
+- 但该页面的滚动完全不响应
+
+**根本原因：**
+- `MessageReader<T>::read()` 会**消费**消息队列中的事件
+- 一旦被读取，其他系统（包括 Bevy 内置的滚动系统）就收不到这些事件
+- Bevy 的原生滚动依赖于未被消费的 `MouseWheel` 事件
+
+**修复方法：** 在需要滚动的分支中手动更新 `ScrollPosition`
+
+```rust
+// ✅ 正确：手动更新 ScrollPosition
+pub fn reader_mouse_wheel_control(
+    mut mouse_wheel_events: MessageReader<MouseWheel>,
+    mut webtoon_scroll_query: Query<&mut ScrollPosition, With<WebtoonScrollContainer>>,
+    // ...
+) {
+    for event in mouse_wheel_events.read() {
+        let scroll_delta = match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => event.y / 40.0,
+        };
+
+        match reader_state.read_mode {
+            ReadMode::SinglePage => { /* 处理翻页 */ }
+            ReadMode::Webtoon => {
+                // 手动更新 ScrollPosition
+                for mut scroll_pos in webtoon_scroll_query.iter_mut() {
+                    let scroll_amount = -scroll_delta * SCROLL_SPEED;
+                    scroll_pos.y = (scroll_pos.y + scroll_amount).max(0.0);
+                }
+            }
+        }
+    }
+}
+```
+
+**关键原则：**
+- `MessageReader` 读取事件会消费它们，其他系统无法再收到
+- 如果需要同时处理事件和使用 Bevy 原生功能，必须手动实现原生功能的逻辑
+- 滚动方向：`scroll_delta > 0` 向上滚，`scroll_pos.y` 减小；反之增大
+
+**影响文件：**
+- `src/systems/reader.rs` - `reader_mouse_wheel_control`
+
+---
+
 ### 固定底部栏与滚动容器布局
 
 **问题场景：** 页面需要固定底部栏（如保存按钮），同时中间内容可滚动。
@@ -1055,6 +1129,13 @@ fn auto_resume_downloads_on_startup(
 ### 当前功能开发
 - [ ] 清理编译警告（未使用的导入和变量）
 - [x] 实现基础阅读器（单页模式、键盘翻页、顶部/底部工具栏）
+- [x] 阅读器增强功能
+  - [x] 条漫模式（Webtoon 垂直无限滚动）
+  - [x] 模式切换按钮（单页/条漫）
+  - [x] 鼠标滚轮翻页（单页）/滚动（条漫）
+  - [x] Ctrl+滚轮 缩放
+  - [x] 键盘 +/-/0 缩放控制
+  - [x] 缩放比例显示
 - [x] 实现搜索功能
 - [x] 实现收藏页面
 - [x] 下载管理 UI

@@ -298,13 +298,11 @@ pub struct ComicDetailState {
 /// 阅读模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ReadMode {
-    /// 单页模式
-    #[default]
+    /// 单页模式（翻页）
     SinglePage,
-    /// 双页模式
-    DoublePage,
-    /// 滚动模式
-    Scroll,
+    /// Webtoon 模式（条漫，垂直无限滚动）
+    #[default]
+    Webtoon,
 }
 
 /// 阅读器状态
@@ -314,13 +312,13 @@ pub struct ReaderState {
     pub comic_id: String,
     /// 章节顺序
     pub episode_order: i32,
-    /// 当前页码
+    /// 当前页码（单页模式）
     pub current_page: i32,
     /// 总页数
     pub total_pages: i32,
     /// 图片列表
     pub pictures: Vec<Picture>,
-    /// 缩放比例
+    /// 缩放比例 (1.0 = 100%)
     pub scale: f32,
     /// 阅读模式
     pub read_mode: ReadMode,
@@ -328,6 +326,13 @@ pub struct ReaderState {
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
+    // === Webtoon 模式专用 ===
+    /// 当前滚动位置（像素）
+    pub scroll_offset: f32,
+    /// 已加载图片的起始索引
+    pub loaded_start: usize,
+    /// 已加载图片的结束索引（不包含）
+    pub loaded_end: usize,
 }
 
 impl Default for ReaderState {
@@ -342,6 +347,9 @@ impl Default for ReaderState {
             read_mode: ReadMode::SinglePage,
             is_loading: false,
             error: None,
+            scroll_offset: 0.0,
+            loaded_start: 0,
+            loaded_end: 0,
         }
     }
 }

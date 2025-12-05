@@ -189,20 +189,25 @@ impl Plugin for UiPlugin {
                     .run_if(in_state(AppRoute::ComicDetail)),
             )
             // 阅读器页面
-            .add_systems(
-                OnEnter(AppRoute::ReadView),
-                (setup_reader_ui, trigger_load_pictures).chain(),
-            )
+            .add_systems(OnEnter(AppRoute::ReadView), setup_reader_ui)
             .add_systems(OnExit(AppRoute::ReadView), cleanup_reader_ui)
             .add_systems(
                 Update,
                 (
+                    trigger_load_pictures,
                     reader_back_button_interaction,
                     reader_prev_button_interaction,
                     reader_next_button_interaction,
                     reader_keyboard_input,
+                    reader_mouse_wheel_control,
+                    reader_zoom_keyboard_control,
+                    reader_mode_button_interaction,
                     handle_pictures_loaded,
                     handle_pictures_load_failed,
+                    update_reader_image_from_cache,
+                    handle_read_mode_change,
+                    update_webtoon_images_from_cache,
+                    update_webtoon_scale,
                 )
                     .run_if(in_state(AppRoute::ReadView)),
             )
