@@ -344,7 +344,7 @@ impl Default for ReaderState {
             total_pages: 0,
             pictures: Vec::new(),
             scale: 1.0,
-            read_mode: ReadMode::SinglePage,
+            read_mode: ReadMode::default(), // 使用 ReadMode 的默认值（Webtoon）
             is_loading: false,
             error: None,
             scroll_offset: 0.0,
