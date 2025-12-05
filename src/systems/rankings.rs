@@ -388,18 +388,16 @@ pub fn rankings_card_interaction(
         (&Interaction, &mut BackgroundColor, &RankingsComicCard),
         Changed<Interaction>,
     >,
-    mut detail_state: ResMut<ComicDetailState>,
-    mut next_state: ResMut<NextState<AppRoute>>,
+    mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
     for (interaction, mut bg_color, card) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(Color::srgba(0.3, 0.3, 0.35, 0.9));
-                // 设置漫画 ID 并跳转到详情页
-                detail_state.comic_id = card.comic_id.clone();
-                detail_state.comic = None;
-                detail_state.episodes.clear();
-                next_state.set(AppRoute::ComicDetail);
+                // 通过导航消息跳转到详情页（保留导航历史）
+                detail_messages.write(NavigateToComicDetailEvent {
+                    comic_id: card.comic_id.clone(),
+                });
                 tracing::info!("点击排行榜漫画: {}", card.comic_id);
             }
             Interaction::Hovered => {

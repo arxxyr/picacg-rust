@@ -453,24 +453,14 @@ pub fn comic_card_interaction(
         (&Interaction, &mut BackgroundColor, &ComicCard),
         Changed<Interaction>,
     >,
-    mut detail_state: ResMut<ComicDetailState>,
-    mut next_route: ResMut<NextState<AppRoute>>,
-    mut load_detail_messages: MessageWriter<LoadComicDetailRequest>,
+    mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
     for (interaction, mut bg_color, card) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-
-                // 设置当前漫画 ID
-                detail_state.comic_id = card.comic_id.clone();
-                detail_state.comic = None;
-                detail_state.episodes.clear();
-
-                next_route.set(AppRoute::ComicDetail);
-
-                // 触发加载漫画详情
-                load_detail_messages.write(LoadComicDetailRequest {
+                // 通过导航消息跳转到详情页（保留导航历史）
+                detail_messages.write(NavigateToComicDetailEvent {
                     comic_id: card.comic_id.clone(),
                 });
             }

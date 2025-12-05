@@ -26,19 +26,22 @@ pub struct NavigationHistory {
 }
 
 /// 获取 AppRoute 对应的 SidebarRoute
+///
+/// 注意：ComicDetail 和 ReadView 返回 None，因为它们可以从多个入口进入
+/// （搜索、收藏、排行榜、首页、分类等），不应该归属于任何固定的侧边栏分区
 pub fn get_sidebar_route(route: &AppRoute) -> Option<SidebarRoute> {
     match route {
         AppRoute::Home => Some(SidebarRoute::Home),
-        AppRoute::Categories
-        | AppRoute::ComicsList
-        | AppRoute::ComicDetail
-        | AppRoute::ReadView => Some(SidebarRoute::Categories),
+        AppRoute::Categories | AppRoute::ComicsList => Some(SidebarRoute::Categories),
         AppRoute::Search => Some(SidebarRoute::Search),
         AppRoute::Rankings => Some(SidebarRoute::Rankings),
         AppRoute::Favorites => Some(SidebarRoute::Favorites),
         AppRoute::Downloads => Some(SidebarRoute::Downloads),
         AppRoute::Settings => Some(SidebarRoute::Settings),
-        AppRoute::Login | AppRoute::ProxySettings => None,
+        // ComicDetail/ReadView 可从多个入口进入，不归属于任何分区
+        AppRoute::ComicDetail | AppRoute::ReadView | AppRoute::Login | AppRoute::ProxySettings => {
+            None
+        }
     }
 }
 

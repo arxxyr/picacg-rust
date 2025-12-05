@@ -402,12 +402,10 @@ pub fn sidebar_button_interaction(
 ) {
     for (interaction, mut bg_color, mut border_color, sidebar_btn) in &mut interaction_query {
         // 判断是否为当前激活的路由
+        // 注意：ComicDetail/ReadView 不高亮任何按钮，因为可从多个入口进入
         let is_active = match (sidebar_btn.route, current_route.get()) {
             (SidebarRoute::Home, AppRoute::Home) => true,
-            (SidebarRoute::Categories, AppRoute::Categories) => true,
-            (SidebarRoute::Categories, AppRoute::ComicsList) => true,
-            (SidebarRoute::Categories, AppRoute::ComicDetail) => true,
-            (SidebarRoute::Categories, AppRoute::ReadView) => true,
+            (SidebarRoute::Categories, AppRoute::Categories | AppRoute::ComicsList) => true,
             (SidebarRoute::Search, AppRoute::Search) => true,
             (SidebarRoute::Rankings, AppRoute::Rankings) => true,
             (SidebarRoute::Favorites, AppRoute::Favorites) => true,
@@ -458,12 +456,10 @@ pub fn update_sidebar_active_state(
     }
 
     for (sidebar_btn, mut bg_color, mut border_color) in &mut button_query {
+        // 注意：ComicDetail/ReadView 不高亮任何按钮，因为可从多个入口进入
         let is_active = match (sidebar_btn.route, current_route.get()) {
             (SidebarRoute::Home, AppRoute::Home) => true,
-            (SidebarRoute::Categories, AppRoute::Categories) => true,
-            (SidebarRoute::Categories, AppRoute::ComicsList) => true,
-            (SidebarRoute::Categories, AppRoute::ComicDetail) => true,
-            (SidebarRoute::Categories, AppRoute::ReadView) => true,
+            (SidebarRoute::Categories, AppRoute::Categories | AppRoute::ComicsList) => true,
             (SidebarRoute::Search, AppRoute::Search) => true,
             (SidebarRoute::Rankings, AppRoute::Rankings) => true,
             (SidebarRoute::Favorites, AppRoute::Favorites) => true,

@@ -481,22 +481,14 @@ pub fn favorite_card_interaction(
         (&Interaction, &mut BackgroundColor, &FavoriteCard),
         Changed<Interaction>,
     >,
-    mut detail_state: ResMut<ComicDetailState>,
-    mut next_route: ResMut<NextState<AppRoute>>,
-    mut load_detail_messages: MessageWriter<LoadComicDetailRequest>,
+    mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
     for (interaction, mut bg_color, card) in &mut interaction_query {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-
-                detail_state.comic_id = card.comic_id.clone();
-                detail_state.comic = None;
-                detail_state.episodes.clear();
-
-                next_route.set(AppRoute::ComicDetail);
-
-                load_detail_messages.write(LoadComicDetailRequest {
+                // 通过导航消息跳转到详情页（保留导航历史）
+                detail_messages.write(NavigateToComicDetailEvent {
                     comic_id: card.comic_id.clone(),
                 });
             }
