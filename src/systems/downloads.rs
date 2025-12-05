@@ -2945,10 +2945,12 @@ pub fn resume_download_button_interaction(
 
 /// 删除下载按钮交互（FSM 架构）
 pub fn delete_download_button_interaction(
+    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &DeleteDownloadButton),
         Changed<Interaction>,
     >,
+    task_item_query: Query<(Entity, &DownloadTaskItem)>,
     mut download_state: ResMut<DownloadManagerState>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
@@ -2966,6 +2968,15 @@ pub fn delete_download_button_interaction(
 
                 // 从任务列表中删除
                 download_state.remove_task(&btn.comic_id);
+
+                // 从 UI 中移除对应的卡片
+                for (entity, task_item) in task_item_query.iter() {
+                    if task_item.comic_id == btn.comic_id {
+                        commands.entity(entity).despawn();
+                        break;
+                    }
+                }
+
                 tracing::info!("删除下载任务: {}", btn.comic_id);
             }
             Interaction::Hovered => {
