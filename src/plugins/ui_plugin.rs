@@ -162,11 +162,13 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
+                    detail_back_button_interaction,
                     episode_card_interaction,
                     start_read_button_interaction,
                     like_button_interaction,
                     favorite_button_interaction,
                     download_button_interaction,
+                    category_tag_interaction,
                     refresh_detail_ui,
                     update_cover_image,
                     handle_detail_scroll,

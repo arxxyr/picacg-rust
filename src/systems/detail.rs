@@ -40,6 +40,10 @@ mod episode_layout {
     pub const PADDING_BOTTOM: f32 = 15.0;
 }
 
+/// 详情页返回按钮
+#[derive(Component)]
+pub struct DetailBackButton;
+
 /// 下载按钮组件
 #[derive(Component)]
 pub struct DownloadButton;
@@ -51,6 +55,12 @@ pub struct DetailLikesText;
 /// 详情页收藏按钮文本
 #[derive(Component)]
 pub struct DetailFavoriteText;
+
+/// 分类标签组件（可点击）
+#[derive(Component)]
+pub struct CategoryTag {
+    pub category: String,
+}
 
 /// 创建漫画详情界面
 pub fn setup_detail_ui(
@@ -87,6 +97,33 @@ pub fn setup_detail_ui(
             })
             .insert(BorderColor::all(AppColors::BORDER))
             .with_children(|header| {
+                // 返回按钮
+                header
+                    .spawn((
+                        DetailBackButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(32.0),
+                            height: Val::Px(32.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("\u{F0141}"), // nf-md-arrow_left
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 20.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
+
                 header.spawn((
                     Text::new("漫画详情"),
                     TextFont {
@@ -484,6 +521,7 @@ fn spawn_action_button<M: Component>(
         .spawn((
             marker,
             Button,
+            Interaction::default(), // 必须添加！否则按钮无法点击
             Node {
                 width: Val::Px(100.0),
                 height: Val::Px(36.0),
@@ -514,6 +552,7 @@ fn spawn_episode_card(parent: &mut ChildSpawnerCommands, episode: &Episode, font
                 episode_order: episode.order,
             },
             Button,
+            Interaction::default(), // 必须添加！否则卡片无法点击
             Node {
                 width: Val::Px(episode_layout::CARD_WIDTH),
                 height: Val::Px(episode_layout::CARD_HEIGHT),
@@ -666,6 +705,33 @@ fn create_detail_ui_internal(
             })
             .insert(BorderColor::all(AppColors::BORDER))
             .with_children(|header| {
+                // 返回按钮
+                header
+                    .spawn((
+                        DetailBackButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(32.0),
+                            height: Val::Px(32.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("\u{F0141}"), // nf-md-arrow_left
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 20.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
+
                 let title = if let Some(ref comic) = detail_state.comic {
                     comic.title.clone()
                 } else {
@@ -825,10 +891,11 @@ fn build_detail_content(
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
-                    row_gap: Val::Px(10.0),
+                    row_gap: Val::Px(8.0),
                     ..default()
                 })
                 .with_children(|details| {
+                    // 标题
                     details.spawn((
                         Text::new(&comic.title),
                         TextFont {
@@ -839,6 +906,7 @@ fn build_detail_content(
                         TextColor(AppColors::TEXT),
                     ));
 
+                    // 作者
                     details.spawn((
                         Text::new(format!("作者: {}", comic.author)),
                         TextFont {
@@ -849,18 +917,119 @@ fn build_detail_content(
                         TextColor(AppColors::TEXT_SECONDARY),
                     ));
 
-                    if !comic.categories.is_empty() {
-                        details.spawn((
-                            Text::new(format!("分类: {}", comic.categories.join(", "))),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
+                    // 汉化组
+                    if let Some(ref team) = comic.chinese_team {
+                        if !team.is_empty() {
+                            details.spawn((
+                                Text::new(format!("汉化: {}", team)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        }
                     }
 
+                    // 分类标签（可点击）
+                    if !comic.categories.is_empty() {
+                        details
+                            .spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(8.0),
+                                row_gap: Val::Px(6.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                row.spawn((
+                                    Text::new("分类: "),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT_SECONDARY),
+                                ));
+                                for cat in &comic.categories {
+                                    row.spawn((
+                                        CategoryTag {
+                                            category: cat.clone(),
+                                        },
+                                        Button,
+                                        Interaction::default(),
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgb(0.2, 0.3, 0.4)),
+                                    ))
+                                    .with_children(|tag| {
+                                        tag.spawn((
+                                            Text::new(cat),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 12.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                                        ));
+                                    });
+                                }
+                            });
+                    }
+
+                    // 标签（tags）
+                    if !comic.tags.is_empty() {
+                        details
+                            .spawn(Node {
+                                flex_direction: FlexDirection::Row,
+                                flex_wrap: FlexWrap::Wrap,
+                                column_gap: Val::Px(6.0),
+                                row_gap: Val::Px(4.0),
+                                align_items: AlignItems::Center,
+                                ..default()
+                            })
+                            .with_children(|row| {
+                                row.spawn((
+                                    Text::new("标签: "),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT_SECONDARY),
+                                ));
+                                for tag in &comic.tags {
+                                    row.spawn((
+                                        Node {
+                                            padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            ..default()
+                                        },
+                                        BorderColor::all(Color::srgb(0.5, 0.4, 0.6)),
+                                        BackgroundColor(Color::srgb(0.15, 0.12, 0.2)),
+                                    ))
+                                    .with_children(
+                                        |tag_box| {
+                                            tag_box.spawn((
+                                                Text::new(tag),
+                                                TextFont {
+                                                    font: font.clone(),
+                                                    font_size: 11.0,
+                                                    ..default()
+                                                },
+                                                TextColor(Color::srgb(0.8, 0.6, 0.9)),
+                                            ));
+                                        },
+                                    );
+                                }
+                            });
+                    }
+
+                    // 统计信息
                     details.spawn((
                         Text::new(format!(
                             "章节: {} | 页数: {}",
@@ -877,8 +1046,8 @@ fn build_detail_content(
                     details.spawn((
                         DetailLikesText,
                         Text::new(format!(
-                            "点赞: {} | 浏览: {}",
-                            comic.likes_count, comic.views_count
+                            "点赞: {} | 浏览: {} | 评论: {}",
+                            comic.likes_count, comic.views_count, comic.comments_count
                         )),
                         TextFont {
                             font: font.clone(),
@@ -888,6 +1057,22 @@ fn build_detail_content(
                         TextColor(AppColors::TEXT_SECONDARY),
                     ));
 
+                    // 更新时间
+                    if let Some(ref updated_at) = comic.updated_at {
+                        // 格式化时间：2023-01-01T12:00:00.000Z -> 2023-01-01
+                        let date = updated_at.split('T').next().unwrap_or(updated_at);
+                        details.spawn((
+                            Text::new(format!("更新: {}", date)),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+                    }
+
+                    // 完结状态
                     let status = if comic.finished {
                         "已完结"
                     } else {
@@ -907,24 +1092,27 @@ fn build_detail_content(
                         }),
                     ));
 
+                    // 描述
                     if let Some(ref desc) = comic.description {
-                        details.spawn(Node {
-                            margin: UiRect::top(Val::Px(10.0)),
-                            ..default()
-                        });
-                        details.spawn((
-                            Text::new(desc.clone()),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
+                        if !desc.is_empty() {
+                            details.spawn(Node {
+                                margin: UiRect::top(Val::Px(8.0)),
                                 ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                            Node {
-                                max_width: Val::Px(500.0),
-                                ..default()
-                            },
-                        ));
+                            });
+                            details.spawn((
+                                Text::new(desc.clone()),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                                Node {
+                                    max_width: Val::Px(500.0),
+                                    ..default()
+                                },
+                            ));
+                        }
                     }
                 });
         });
@@ -1256,6 +1444,58 @@ pub fn clamp_detail_scroll(
             let max_scroll = (info.content_height - info.viewport_height).max(0.0);
             if scroll_pos.y > max_scroll {
                 scroll_pos.y = max_scroll;
+            }
+        }
+    }
+}
+
+/// 返回按钮交互
+pub fn detail_back_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<DetailBackButton>),
+    >,
+    mut navigate_back_messages: MessageWriter<NavigateBackEvent>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
+                navigate_back_messages.write(NavigateBackEvent);
+                tracing::debug!("详情页返回按钮点击");
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.25, 0.30));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::NONE);
+            }
+        }
+    }
+}
+
+/// 分类标签点击交互
+pub fn category_tag_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &CategoryTag),
+        Changed<Interaction>,
+    >,
+    mut navigate_messages: MessageWriter<NavigateToComicsListEvent>,
+) {
+    for (interaction, mut bg_color, tag) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.3, 0.4, 0.5));
+                navigate_messages.write(NavigateToComicsListEvent {
+                    category: tag.category.clone(),
+                });
+                tracing::info!("点击分类标签: {}", tag.category);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.35, 0.45));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.3, 0.4));
             }
         }
     }
