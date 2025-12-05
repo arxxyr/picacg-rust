@@ -120,7 +120,7 @@ impl Plugin for UiPlugin {
             // 漫画列表页面
             .add_systems(
                 OnEnter(AppRoute::ComicsList),
-                (ensure_main_layout, setup_comics_list_ui).chain(),
+                (ensure_main_layout, setup_comics_list_ui, trigger_load_comics).chain(),
             )
             .add_systems(OnExit(AppRoute::ComicsList), cleanup_comics_list_ui)
             .add_systems(
@@ -430,6 +430,27 @@ fn trigger_load_categories(
     // 预创建由 waterfall_create_category_cards 的自动检测来处理
     if categories_state.categories.is_empty() && !categories_state.is_loading {
         load_messages.write(LoadCategoriesRequest);
+    }
+}
+
+/// 触发加载漫画列表（进入漫画列表页面时）
+fn trigger_load_comics(
+    comics_state: Res<ComicsListState>,
+    mut load_messages: MessageWriter<LoadComicsRequest>,
+) {
+    // 如果有分类且没有数据，触发加载
+    if !comics_state.category.is_empty() && comics_state.comics.is_empty() && !comics_state.is_loading
+    {
+        tracing::info!(
+            "触发加载漫画列表: category={}, page={}",
+            comics_state.category,
+            comics_state.page
+        );
+        load_messages.write(LoadComicsRequest {
+            category: comics_state.category.clone(),
+            page: comics_state.page,
+            sort: comics_state.sort.clone(),
+        });
     }
 }
 
