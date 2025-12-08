@@ -1,9 +1,98 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2025-12-05
+> 最后更新: 2025-12-08
 
 ## 其他
  - git commit 带emoji
+
+## 项目结构
+
+采用纯 Cargo Workspace 结构，根目录无 `[package]`，所有 crate 版本统一在根 `Cargo.toml` 管理。
+
+```
+picacg-rust/
+├── Cargo.toml                    # 纯 Workspace 配置（无 [package]）
+├── assets/                       # 静态资源（字体、图片）
+├── docs/                         # 文档
+└── crates/
+    ├── picacg_app/               # 主应用 (picacg)
+    │   └── src/
+    │       ├── main.rs           # 入口
+    │       ├── error.rs          # 错误类型
+    │       ├── components/       # Bevy ECS 组件
+    │       ├── events/           # Bevy 事件定义
+    │       ├── resources/        # Bevy 资源
+    │       ├── systems/          # Bevy 系统函数（页面逻辑）
+    │       └── plugins/          # Bevy 插件
+    ├── picacg_core/              # 核心类型库
+    │   └── src/
+    │       ├── lib.rs
+    │       └── error.rs          # PicacgError, Result
+    ├── picacg_api/               # API 客户端
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── client.rs         # ApiClient
+    │       ├── signer.rs         # 请求签名
+    │       ├── models.rs         # API 数据模型
+    │       └── endpoints/        # API 端点实现
+    ├── picacg_db/                # 数据库层
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── database.rs       # SQLite 数据库
+    │       ├── cache.rs          # Moka 缓存
+    │       └── models.rs         # 数据库模型
+    ├── picacg_config/            # 配置管理
+    │   └── src/
+    │       ├── lib.rs
+    │       └── settings.rs       # AppSettings, ProxySettings
+    └── bevy_ui_toolkit/          # 通用 UI 组件库
+        └── src/
+            ├── lib.rs
+            ├── theme.rs          # 主题系统
+            ├── scrollbar/        # 滚动条组件
+            ├── pagination/       # 分页组件
+            └── waterfall/        # 瀑布流布局
+```
+
+### Crate 依赖关系
+
+```
+picacg_core          ← 无依赖（错误类型）
+    ↑
+picacg_api           ← 依赖 picacg_core
+    ↑
+picacg_db            ← 依赖 picacg_core, picacg_api
+
+picacg_config        ← 依赖 picacg_core
+
+bevy_ui_toolkit      ← 依赖 bevy（独立 UI 库）
+
+picacg (主应用)      ← 依赖以上所有 crate
+```
+
+### Workspace 依赖管理
+
+所有共享依赖在根 `Cargo.toml` 的 `[workspace.dependencies]` 中定义版本：
+
+```toml
+# 根 Cargo.toml
+[workspace.dependencies]
+bevy = { version = "0.17", default-features = true }
+reqwest = { version = "0.12", features = ["json", "cookies", "stream", "rustls-tls", "socks"] }
+serde = { version = "1.0", features = ["derive"] }
+# ... 更多依赖
+```
+
+各 crate 使用 `.workspace = true` 引用：
+
+```toml
+# crates/picacg_api/Cargo.toml
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+```
+
+---
 
 ## 框架概述
 
@@ -1148,18 +1237,19 @@ fn auto_resume_downloads_on_startup(
 - [x] 下载列表标题/分类/标签点击跳转
 - [x] 删除下载任务后 UI 立即更新
 
-### 后续规划：GUI 库抽象
-> 待当前功能稳定后进行
+### 已完成：Workspace 重构与模块拆分
 
-- [ ] 抽取通用 GUI 组件为独立 crate
-  - 自定义滚动条系统（ScrollContainer, ScrollbarTrack, ScrollbarThumb）
-  - 瀑布流卡片布局（WaterfallGrid, CardCreationState）
-  - 按钮样式（PrimaryButton, SecondaryButton, IconButton）
-  - 输入框组件（TextInput with IME support）
-  - 固定底部栏布局（FixedBottomBar）
-  - 标签页组件（TabBar, TabButton）
-  - 通用分页组件（PaginationControl, spawn_pagination_controls）
-- [ ] 发布为独立 crate：`bevy_ui_toolkit` 或 `bevy_picacg_ui`
+- [x] 抽取通用 GUI 组件为独立 crate (`bevy_ui_toolkit`)
+  - 主题系统（Theme, CurrentTheme）
+  - 自定义滚动条系统（ScrollbarPlugin）
+  - 通用分页组件（PaginationPlugin）
+  - 瀑布流布局（WaterfallState）
+- [x] 拆分核心模块为独立 crate
+  - `picacg_core` - 错误类型
+  - `picacg_api` - API 客户端
+  - `picacg_db` - 数据库层
+  - `picacg_config` - 配置管理
+- [x] 统一 Workspace 依赖版本管理
 
 ---
 

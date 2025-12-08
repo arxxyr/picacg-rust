@@ -1,0 +1,20 @@
+[package]
+name = "picacg_db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "PicACG 数据库层"
+
+[dependencies]
+picacg_core = { path = "../picacg_core" }
+picacg_api = { path = "../picacg_api" }
+
+sqlx.workspace = true
+moka.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
+once_cell.workspace = true
+tokio.workspace = true

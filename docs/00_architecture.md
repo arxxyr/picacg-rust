@@ -1,6 +1,6 @@
 # PicACG Rust 客户端架构文档
 
-> 最后更新: 2025-12-02
+> 最后更新: 2025-12-08
 
 ## 项目概述
 
@@ -20,8 +20,8 @@ PicACG Rust 是原 Python 版 PicACG 漫画客户端的 Rust 重写版本，使�
 
 ### 项目状态
 
-- **完成度**: ~60%
-- **代码量**: ~5500 行 Rust
+- **完成度**: ~80%
+- **代码量**: ~8000 行 Rust
 - **二进制大小**: ~15 MB (Release)
 - **启动时间**: < 500ms
 
@@ -60,15 +60,16 @@ PicACG Rust 是原 Python 版 PicACG 漫画客户端的 Rust 重写版本，使�
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Core Libraries                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │
-│  │   api/   │  │   db/    │  │ download/│  │  config/ │        │
-│  │ ──────── │  │ ──────── │  │ ──────── │  │ ──────── │        │
-│  │ client   │  │ database │  │ manager  │  │ settings │        │
-│  │ signer   │  │ cache    │  │ queue    │  │          │        │
-│  │ models   │  │ models   │  │ stats    │  │          │        │
-│  │ endpoints│  │          │  │ task     │  │          │        │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │
+│                      Core Crates (crates/)                      │
+│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐   │
+│  │picacg_api │ │ picacg_db │ │picacg_    │ │bevy_ui_toolkit│   │
+│  │ ───────── │ │ ───────── │ │  config   │ │ ───────────── │   │
+│  │ client    │ │ database  │ │ ───────── │ │ scrollbar     │   │
+│  │ signer    │ │ cache     │ │ settings  │ │ pagination    │   │
+│  │ models    │ │ models    │ │           │ │ waterfall     │   │
+│  │ endpoints │ │           │ │           │ │ theme         │   │
+│  └───────────┘ └───────────┘ └───────────┘ └───────────────┘   │
+│                      ↑ 依赖 picacg_core (错误类型)              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -76,79 +77,63 @@ PicACG Rust 是原 Python 版 PicACG 漫画客户端的 Rust 重写版本，使�
 
 ## 目录结构
 
+采用纯 Cargo Workspace 结构：
+
 ```
 picacg-rust/
-├── Cargo.toml              # 依赖配置
+├── Cargo.toml              # 纯 Workspace 配置（无 [package]）
 ├── assets/                 # 资源文件
-│   └── fonts/              # 字体文件
+│   └── fonts/
 │       └── SarasaTermSCNerd-Regular.ttf
-├── src/
-│   ├── main.rs             # 应用入口
-│   ├── error.rs            # 统一错误处理
-│   │
-│   ├── api/                # API 层 (保留自 iced 版本)
-│   │   ├── mod.rs
-│   │   ├── client.rs       # HTTP 客户端
-│   │   ├── signer.rs       # 请求签名
-│   │   ├── models.rs       # 数据模型
-│   │   └── endpoints/      # API 端点 (28+)
-│   │       ├── auth.rs     # 认证相关
-│   │       ├── comic.rs    # 漫画相关
-│   │       ├── category.rs # 分类相关
-│   │       ├── comment.rs  # 评论相关
-│   │       └── game.rs     # 游戏相关
-│   │
-│   ├── db/                 # 数据库层 (保留)
-│   │   ├── mod.rs
-│   │   ├── database.rs     # SQLite 操作
-│   │   ├── cache.rs        # Moka 缓存
-│   │   └── models.rs       # 数据库模型
-│   │
-│   ├── download/           # 下载管理 (保留)
-│   │   ├── mod.rs
-│   │   ├── manager.rs      # 下载管理器
-│   │   ├── queue.rs        # 优先级队列
-│   │   ├── task.rs         # 下载任务
-│   │   └── stats.rs        # 统计追踪
-│   │
-│   ├── config/             # 配置管理 (保留)
-│   │   ├── mod.rs
-│   │   └── settings.rs     # 代理/用户设置
-│   │
-│   ├── plugins/            # Bevy 插件 (新增)
-│   │   ├── mod.rs
-│   │   ├── ui_plugin.rs    # UI 主插件
-│   │   └── api_plugin.rs   # API 异步任务插件
-│   │
-│   ├── components/         # ECS 组件 (新增)
-│   │   ├── mod.rs
-│   │   └── ui_components.rs
-│   │
-│   ├── resources/          # 全局资源 (新增)
-│   │   ├── mod.rs
-│   │   ├── app_state.rs    # 应用状态
-│   │   └── image_cache.rs  # 图片缓存
-│   │
-│   ├── events/             # 事件定义 (新增)
-│   │   ├── mod.rs
-│   │   ├── api_events.rs   # API 事件
-│   │   ├── navigation.rs   # 导航事件
-│   │   └── ui_events.rs    # UI 事件
-│   │
-│   └── systems/            # ECS 系统 (新增)
-│       ├── mod.rs
-│       ├── setup.rs        # 初始化
-│       ├── login.rs        # 登录页面
-│       ├── proxy_settings.rs # 代理设置
-│       ├── main_layout.rs  # 主布局/侧边栏
-│       ├── categories.rs   # 分类页面
-│       ├── comics.rs       # 漫画列表
-│       ├── scrollbar.rs    # 自定义滚动条
-│       ├── detail.rs       # 漫画详情 (待完善)
-│       ├── reader.rs       # 阅读器 (待实现)
-│       └── navigation.rs   # 导航处理
-│
-└── docs/                   # 文档
+├── docs/                   # 文档
+└── crates/
+    ├── picacg_app/         # 主应用 (picacg)
+    │   └── src/
+    │       ├── main.rs     # 入口
+    │       ├── error.rs    # 错误类型
+    │       ├── plugins/    # Bevy 插件
+    │       │   ├── ui_plugin.rs
+    │       │   └── api_plugin.rs
+    │       ├── components/ # ECS 组件
+    │       ├── resources/  # 全局资源
+    │       ├── events/     # 事件定义
+    │       └── systems/    # ECS 系统（页面逻辑）
+    │           ├── login.rs, register.rs
+    │           ├── categories.rs, comics.rs
+    │           ├── detail.rs, reader.rs
+    │           ├── favorites.rs, rankings.rs
+    │           ├── search.rs, downloads.rs
+    │           ├── settings.rs, proxy_settings.rs
+    │           ├── scrollbar.rs, pagination.rs
+    │           └── waterfall.rs
+    │
+    ├── picacg_core/        # 核心类型库
+    │   └── src/
+    │       └── error.rs    # PicacgError, Result
+    │
+    ├── picacg_api/         # API 客户端
+    │   └── src/
+    │       ├── client.rs   # ApiClient
+    │       ├── signer.rs   # 请求签名
+    │       ├── models.rs   # 数据模型
+    │       └── endpoints/  # API 端点 (28+)
+    │
+    ├── picacg_db/          # 数据库层
+    │   └── src/
+    │       ├── database.rs # SQLite 操作
+    │       ├── cache.rs    # Moka 缓存
+    │       └── models.rs   # 数据库模型
+    │
+    ├── picacg_config/      # 配置管理
+    │   └── src/
+    │       └── settings.rs # AppSettings, ProxySettings
+    │
+    └── bevy_ui_toolkit/    # 通用 UI 组件库
+        └── src/
+            ├── theme.rs    # 主题系统
+            ├── scrollbar/  # 滚动条组件
+            ├── pagination/ # 分页组件
+            └── waterfall/  # 瀑布流布局
 ```
 
 ---

@@ -1,0 +1,73 @@
+[package]
+name = "picacg"
+version.workspace = true
+edition.workspace = true
+authors = ["PicACG Contributors"]
+license.workspace = true
+description = "PicACG 漫画客户端 - Rust Bevy 版"
+
+[[bin]]
+name = "picacg"
+path = "src/main.rs"
+
+[dependencies]
+# === 本地 crate ===
+bevy_ui_toolkit = { path = "../bevy_ui_toolkit" }
+picacg_core = { path = "../picacg_core" }
+picacg_api = { path = "../picacg_api" }
+picacg_db = { path = "../picacg_db" }
+picacg_config = { path = "../picacg_config" }
+
+# === Bevy 核心 ===
+bevy.workspace = true
+bevy-tokio-tasks.workspace = true
+
+# === 异步运行时 ===
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+
+# === 网络与序列化 ===
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# === 错误处理 ===
+anyhow.workspace = true
+thiserror.workspace = true
+
+# === 日志 ===
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# === 加密 ===
+hmac.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+# === 工具库 ===
+uuid.workspace = true
+chrono.workspace = true
+urlencoding.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+directories.workspace = true
+arboard.workspace = true
+
+# === 数据库 ===
+sqlx.workspace = true
+
+# === 缓存 ===
+moka.workspace = true
+
+# === 图片处理 ===
+image.workspace = true
+open.workspace = true
+
+# === 文件对话框 ===
+rfd.workspace = true
+
+[dev-dependencies]
+tokio-test.workspace = true
