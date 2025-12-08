@@ -12,11 +12,13 @@ path = "src/main.rs"
 
 [dependencies]
 # === 本地 crate ===
-bevy_ui_toolkit = { path = "../bevy_ui_toolkit" }
 picacg_core = { path = "../picacg_core" }
 picacg_api = { path = "../picacg_api" }
 picacg_db = { path = "../picacg_db" }
 picacg_config = { path = "../picacg_config" }
+
+# === UI 工具库 ===
+bevy_ui_toolkit.workspace = true
 
 # === Bevy 核心 ===
 bevy.workspace = true
