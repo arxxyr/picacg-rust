@@ -47,6 +47,11 @@ where
     }
 }
 
+/// 获取全局数据库连接池（避免跨 await 持有锁）
+pub fn get_pool() -> SqlitePool {
+    Database::global().read().pool()
+}
+
 // 内嵌的迁移 SQL
 const MIGRATION_INITIAL: &str = r#"
 -- PicACG 初始数据库结构
@@ -133,6 +138,11 @@ impl Database {
         DATABASE
             .get()
             .expect("数据库未初始化，请先调用 Database::init()")
+    }
+
+    /// 获取数据库连接池的克隆（用于避免跨 await 持有锁）
+    pub fn pool(&self) -> SqlitePool {
+        self.pool.clone()
     }
 
     /// 创建新的数据库连接
@@ -569,4 +579,128 @@ impl Database {
                 .await?;
         Ok(count > 0)
     }
+}
+
+// ==================== 独立异步函数（避免跨 await 持有锁）====================
+// 这些函数接收 SqlitePool 参数，可以在不持有 Database 锁的情况下调用
+
+/// 插入或更新下载任务
+pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO download_task (
+            comic_id, comic_title, total_episodes, episode_orders,
+            save_path, state, state_data, created_at, updated_at,
+            categories, tags, completed_episodes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(comic_id) DO UPDATE SET
+            comic_title = excluded.comic_title,
+            total_episodes = excluded.total_episodes,
+            episode_orders = excluded.episode_orders,
+            save_path = excluded.save_path,
+            state = excluded.state,
+            state_data = excluded.state_data,
+            updated_at = excluded.updated_at,
+            categories = excluded.categories,
+            tags = excluded.tags,
+            completed_episodes = excluded.completed_episodes
+        "#,
+    )
+    .bind(&task.comic_id)
+    .bind(&task.comic_title)
+    .bind(task.total_episodes)
+    .bind(&task.episode_orders)
+    .bind(&task.save_path)
+    .bind(&task.state)
+    .bind(&task.state_data)
+    .bind(task.created_at)
+    .bind(task.updated_at)
+    .bind(&task.categories)
+    .bind(&task.tags)
+    .bind(&task.completed_episodes)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 获取所有下载任务
+pub async fn get_all_download_tasks_async(pool: &SqlitePool) -> Result<Vec<DbDownloadTask>> {
+    let tasks =
+        sqlx::query_as::<_, DbDownloadTask>("SELECT * FROM download_task ORDER BY created_at DESC")
+            .fetch_all(pool)
+            .await?;
+    Ok(tasks)
+}
+
+/// 获取单个下载任务
+pub async fn get_download_task_async(
+    pool: &SqlitePool,
+    comic_id: &str,
+) -> Result<Option<DbDownloadTask>> {
+    let task =
+        sqlx::query_as::<_, DbDownloadTask>("SELECT * FROM download_task WHERE comic_id = ?")
+            .bind(comic_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(task)
+}
+
+/// 删除下载任务
+pub async fn delete_download_task_async(pool: &SqlitePool, comic_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM download_task WHERE comic_id = ?")
+        .bind(comic_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 获取未完成的下载任务
+pub async fn get_incomplete_download_tasks_async(pool: &SqlitePool) -> Result<Vec<DbDownloadTask>> {
+    let tasks = sqlx::query_as::<_, DbDownloadTask>(
+        "SELECT * FROM download_task WHERE state != 'Completed' ORDER BY created_at ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(tasks)
+}
+
+/// 获取已完成的下载任务
+pub async fn get_completed_download_tasks_async(pool: &SqlitePool) -> Result<Vec<DbDownloadTask>> {
+    let tasks = sqlx::query_as::<_, DbDownloadTask>(
+        "SELECT * FROM download_task WHERE state = 'Completed' ORDER BY updated_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(tasks)
+}
+
+/// 添加已完成章节
+pub async fn add_completed_episode_async(
+    pool: &SqlitePool,
+    comic_id: &str,
+    episode: i32,
+) -> Result<()> {
+    let task = get_download_task_async(pool, comic_id).await?;
+    let mut completed = task
+        .as_ref()
+        .map(|t| t.get_completed_episodes())
+        .unwrap_or_default();
+
+    if !completed.contains(&episode) {
+        completed.push(episode);
+        completed.sort();
+    }
+
+    let completed_json = serde_json::to_string(&completed).ok();
+    let now = chrono::Utc::now().timestamp();
+
+    sqlx::query(
+        "UPDATE download_task SET completed_episodes = ?, updated_at = ? WHERE comic_id = ?",
+    )
+    .bind(&completed_json)
+    .bind(now)
+    .bind(comic_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }

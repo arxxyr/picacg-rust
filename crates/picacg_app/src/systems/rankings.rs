@@ -28,8 +28,9 @@ pub struct RankingsRoot;
 #[derive(Component)]
 pub struct RankingsScrollContainer;
 
-/// 排行榜内容容器
+/// 排行榜内容容器（预留）
 #[derive(Component)]
+#[allow(dead_code)]
 pub struct RankingsContentContainer;
 
 /// Tab 按钮标记
@@ -42,6 +43,8 @@ pub struct RankingsTabButton {
 #[derive(Component)]
 pub struct RankingsComicCard {
     pub comic_id: String,
+    /// 排名（用于显示）
+    #[allow(dead_code)]
     pub rank: usize,
 }
 
@@ -110,15 +113,18 @@ pub fn setup_rankings_ui(
                 spawn_tab_bar(root, &font, &rankings_state);
 
                 // 滚动区域包装器（与收藏/分类一致的结构）
-                root.spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                })
+                root.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_height: Val::Px(0.0),
+                        position_type: PositionType::Relative,
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|wrapper| {
                     // 滚动容器（直接使用 Wrap，不嵌套 ContentContainer）
                     let scroll_container_id = wrapper
@@ -164,18 +170,21 @@ pub fn setup_rankings_ui(
 /// 创建 Tab 栏
 fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, state: &RankingsState) {
     parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(50.0),
-            padding: UiRect::horizontal(Val::Px(layout::PADDING_LEFT)),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
-            border: UiRect::bottom(Val::Px(1.0)),
-            ..default()
-        })
-        .insert(BorderColor::all(AppColors::BORDER))
-        .insert(BackgroundColor(AppColors::CARD_BG))
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(50.0),
+                padding: UiRect::horizontal(Val::Px(layout::PADDING_LEFT)),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                border: UiRect::bottom(Val::Px(1.0)),
+                ..default()
+            },
+            BorderColor::all(AppColors::BORDER),
+            BackgroundColor(AppColors::CARD_BG),
+            Transform::default(),
+        ))
         .with_children(|bar| {
             // 标题
             bar.spawn((
@@ -217,12 +226,14 @@ fn spawn_tab_button(
         .spawn((
             RankingsTabButton { time_type },
             Button,
+            Interaction::default(),
             Node {
                 padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
             BackgroundColor(bg_color),
-            BorderRadius::all(Val::Px(4.0)),
+            Transform::default(),
         ))
         .with_children(|btn| {
             btn.spawn((
@@ -285,10 +296,10 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });
@@ -671,15 +682,18 @@ fn spawn_loading_indicator(parent: &mut ChildSpawnerCommands, font: &Handle<Font
 /// 创建空状态
 fn spawn_empty_state(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, message: &str) {
     parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(200.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-            ..default()
-        })
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(200.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
         .with_children(|empty| {
             empty.spawn((
                 Text::new("📋"),
@@ -722,11 +736,11 @@ fn spawn_comic_card(
                 height: Val::Px(layout::CARD_HEIGHT),
                 flex_direction: FlexDirection::Column,
                 border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(AppColors::CARD_BG),
             BorderColor::all(AppColors::BORDER),
-            BorderRadius::all(Val::Px(8.0)),
             if hidden {
                 Visibility::Hidden
             } else {
@@ -735,12 +749,15 @@ fn spawn_comic_card(
         ))
         .with_children(|card| {
             // 封面区域（带排名标签）
-            card.spawn(Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(layout::COVER_HEIGHT),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            card.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(layout::COVER_HEIGHT),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|cover_area| {
                 // 封面图片占位
                 cover_area
@@ -753,10 +770,10 @@ fn spawn_comic_card(
                             height: Val::Percent(100.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
+                            border_radius: BorderRadius::top(Val::Px(8.0)),
                             ..default()
                         },
                         BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 1.0)),
-                        BorderRadius::top(Val::Px(8.0)),
                     ))
                     .with_children(|img_area| {
                         // 加载中文字
@@ -792,10 +809,10 @@ fn spawn_comic_card(
                                 Val::Px(4.0),
                                 Val::Px(4.0),
                             ),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(badge_color),
-                        BorderRadius::all(Val::Px(4.0)),
                     ))
                     .with_children(|badge| {
                         badge.spawn((
@@ -811,14 +828,17 @@ fn spawn_comic_card(
             });
 
             // 信息区域
-            card.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(8.0)),
-                row_gap: Val::Px(4.0),
-                ..default()
-            })
+            card.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(8.0)),
+                    row_gap: Val::Px(4.0),
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|info| {
                 // 标题
                 info.spawn((
@@ -855,14 +875,17 @@ fn spawn_comic_card(
 
                 // 分类和标签容器
                 if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                    info.spawn(Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(3.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(layout::CARD_WIDTH - 16.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    })
+                    info.spawn((
+                        Node {
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(3.0),
+                            row_gap: Val::Px(2.0),
+                            max_width: Val::Px(layout::CARD_WIDTH - 16.0),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ))
                     .with_children(|tags_container| {
                         // 分类（蓝色）
                         for category in comic.categories.iter().take(2) {
@@ -903,10 +926,10 @@ fn spawn_tag_badge(
         .spawn((
             Node {
                 padding: UiRect::new(Val::Px(3.0), Val::Px(3.0), Val::Px(1.0), Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(2.0)),
                 ..default()
             },
             BackgroundColor(bg_color),
-            BorderRadius::all(Val::Px(2.0)),
         ))
         .with_children(|badge| {
             badge.spawn((
@@ -991,9 +1014,9 @@ pub fn update_rankings_images(
                     Node {
                         width: Val::Percent(100.0),
                         height: Val::Percent(100.0),
+                        border_radius: BorderRadius::top(Val::Px(8.0)),
                         ..default()
                     },
-                    BorderRadius::top(Val::Px(8.0)),
                 ));
             });
         }

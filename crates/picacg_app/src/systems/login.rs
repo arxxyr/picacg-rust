@@ -184,6 +184,7 @@ pub fn setup_login_ui(
                             input_type: LoginInputType::LoginButton,
                         },
                         Button,
+                        Interaction::default(),
                         Node {
                             width: Val::Percent(100.0),
                             height: Val::Px(44.0),
@@ -194,6 +195,7 @@ pub fn setup_login_ui(
                         },
                         BorderColor::all(Color::NONE),
                         BackgroundColor(AppColors::PRIMARY),
+                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -218,6 +220,7 @@ pub fn setup_login_ui(
                             input_type: LoginInputType::ProxySettingsButton,
                         },
                         Button,
+                        Interaction::default(),
                         Node {
                             width: Val::Percent(100.0),
                             height: Val::Px(44.0),
@@ -228,6 +231,7 @@ pub fn setup_login_ui(
                         },
                         BorderColor::all(Color::NONE),
                         BackgroundColor(AppColors::SECONDARY),
+                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -275,6 +279,7 @@ pub fn setup_login_ui(
                                 ..default()
                             },
                             BackgroundColor(Color::NONE),
+                            Transform::default(),
                         ))
                         .with_children(|btn| {
                             btn.spawn((

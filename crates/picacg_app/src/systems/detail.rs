@@ -537,6 +537,7 @@ fn spawn_action_button<M: Component>(
                 ..default()
             },
             BackgroundColor(color),
+            Transform::default(), // 必须添加！否则子节点 GlobalTransform 警告
         ))
         .with_children(|btn| {
             btn.spawn((
@@ -560,6 +561,7 @@ fn spawn_episode_card(parent: &mut ChildSpawnerCommands, episode: &Episode, font
             },
             Button,
             Interaction::default(), // 必须添加！否则卡片无法点击
+            Transform::default(),   // 必须添加！否则子节点 GlobalTransform 警告
             Node {
                 width: Val::Px(episode_layout::CARD_WIDTH),
                 height: Val::Px(episode_layout::CARD_HEIGHT),
@@ -1456,6 +1458,42 @@ pub fn clamp_detail_scroll(
                 scroll_pos.y = max_scroll;
             }
         }
+    }
+}
+
+/// 更新详情页内容尺寸信息（用于滚动条计算）
+pub fn update_detail_content_size(
+    mut scroll_query: Query<
+        (&ComputedNode, &mut ContentSizeInfo, &Children),
+        With<DetailScrollContainer>,
+    >,
+    children_query: Query<&ComputedNode>,
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let scale_factor = window_query
+        .single()
+        .ok()
+        .map(|w| w.scale_factor() as f32)
+        .unwrap_or(1.0);
+
+    // 滚动容器的上下 padding（各 20px）
+    const SCROLL_PADDING_VERTICAL: f32 = 40.0;
+
+    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
+        let viewport_height = scroll_computed.size().y / scale_factor;
+
+        let mut content_height = 0.0;
+        for child in children.iter() {
+            if let Ok(child_computed) = children_query.get(child) {
+                content_height += child_computed.size().y / scale_factor;
+            }
+        }
+
+        // 加上容器的上下 padding
+        content_height += SCROLL_PADDING_VERTICAL;
+
+        content_info.viewport_height = viewport_height;
+        content_info.content_height = content_height;
     }
 }
 

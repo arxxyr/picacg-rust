@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 // 重新导出 picacg_core 的错误类型
-pub use picacg_core::{PicacgError, Result};
+pub use picacg_core::PicacgError;
 
 // 状态码定义(对应 Python 的 Status 类)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

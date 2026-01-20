@@ -1,6 +1,6 @@
 //! PicACG 漫画客户端 - Rust Bevy 版
 //!
-//! 使用 Bevy 0.17 ECS 架构重写
+//! 使用 Bevy 0.18 ECS 架构重写
 
 mod components;
 mod error;
@@ -8,16 +8,17 @@ mod events;
 mod plugins;
 mod resources;
 mod systems;
+mod utils;
 
 use bevy::{
     asset::{AssetPlugin, UnapprovedPathMode},
     prelude::*,
 };
-use bevy_tokio_tasks::TokioTasksPlugin;
 use picacg_config::{AppSettings, set_log_level_handle};
 use picacg_db::{Database, db_runtime};
 use plugins::{ApiPlugin, UiPlugin};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, reload, util::SubscriberInitExt};
+use utils::TokioTasksPlugin;
 
 fn main() {
     // 加载配置（在初始化日志前）

@@ -10,9 +10,23 @@ pub mod database;
 pub mod models;
 
 pub use cache::{CACHE_MANAGER, CacheManager, CacheStats};
-pub use database::{Database, db_runtime, run_db_operation};
+pub use database::{
+    Database,
+    // 独立异步函数（避免跨 await 持有锁）
+    add_completed_episode_async,
+    db_runtime,
+    delete_download_task_async,
+    get_all_download_tasks_async,
+    get_completed_download_tasks_async,
+    get_download_task_async,
+    get_incomplete_download_tasks_async,
+    get_pool,
+    run_db_operation,
+    upsert_download_task_async,
+};
 pub use models::{
     DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DownloadStateData,
 };
 // 重新导出
 pub use picacg_core::{PicacgError, Result};
+pub use sqlx::sqlite::SqlitePool;

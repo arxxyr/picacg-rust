@@ -80,11 +80,11 @@ fn spawn_placeholder_page(
                             Val::Px(8.0),
                         ),
                         border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5)),
                     BorderColor::all(AppColors::PRIMARY),
-                    BorderRadius::all(Val::Px(6.0)),
                 ))
                 .with_children(|badge| {
                     badge.spawn((

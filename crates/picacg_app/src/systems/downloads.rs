@@ -221,16 +221,14 @@ pub struct OpenCompletedFolderButton {
 fn scan_completed_downloads(
     active_task_ids: &std::collections::HashSet<String>,
 ) -> Vec<CompletedDownload> {
-    use picacg_db::database::{Database, run_db_operation};
+    use picacg_db::{get_completed_download_tasks_async, get_pool, run_db_operation};
 
     let mut downloads = Vec::new();
+    let pool = get_pool();
 
     // 从数据库加载已完成的下载任务
-    let db_tasks = run_db_operation(async {
-        let db = Database::global().read();
-        db.get_completed_download_tasks().await
-    })
-    .unwrap_or_default();
+    let db_tasks = run_db_operation(async move { get_completed_download_tasks_async(&pool).await })
+        .unwrap_or_default();
 
     for db_task in db_tasks {
         // 跳过活跃任务（下载中、等待中、已停止的）
@@ -330,10 +328,10 @@ fn spawn_tag_badge(
         Interaction::default(),
         Node {
             padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(3.0)),
             ..default()
         },
         BackgroundColor(bg_color),
-        BorderRadius::all(Val::Px(3.0)),
     ));
 
     // 根据类型添加不同的组件
@@ -545,11 +543,11 @@ pub fn setup_downloads_ui(
                                                 ),
                                                 border: UiRect::all(Val::Px(1.0)),
                                                 column_gap: Val::Px(8.0),
+                                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                                 ..default()
                                             },
                                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                                             BorderColor::all(AppColors::BORDER),
-                                            BorderRadius::all(Val::Px(4.0)),
                                         ))
                                         .with_children(|header| {
                                             // 折叠图标
@@ -645,11 +643,11 @@ pub fn setup_downloads_ui(
                                                 ),
                                                 border: UiRect::all(Val::Px(1.0)),
                                                 column_gap: Val::Px(8.0),
+                                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                                 ..default()
                                             },
                                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                                             BorderColor::all(AppColors::BORDER),
-                                            BorderRadius::all(Val::Px(4.0)),
                                         ))
                                         .with_children(|header| {
                                             // 折叠图标
@@ -728,13 +726,16 @@ pub fn setup_downloads_ui(
                                 .with_children(|section| {
                                     // 标题行容器（包含可折叠标题 + 全部开始按钮）
                                     section
-                                        .spawn(Node {
-                                            width: Val::Percent(100.0),
-                                            justify_content: JustifyContent::SpaceBetween,
-                                            align_items: AlignItems::Center,
-                                            column_gap: Val::Px(10.0),
-                                            ..default()
-                                        })
+                                        .spawn((
+                                            Node {
+                                                width: Val::Percent(100.0),
+                                                justify_content: JustifyContent::SpaceBetween,
+                                                align_items: AlignItems::Center,
+                                                column_gap: Val::Px(10.0),
+                                                ..default()
+                                            },
+                                            Transform::default(),
+                                        ))
                                         .with_children(|header_row| {
                                             // 可折叠标题（左侧）
                                             header_row
@@ -755,11 +756,13 @@ pub fn setup_downloads_ui(
                                                         ),
                                                         border: UiRect::all(Val::Px(1.0)),
                                                         column_gap: Val::Px(8.0),
+                                                        border_radius: BorderRadius::all(Val::Px(
+                                                            4.0,
+                                                        )),
                                                         ..default()
                                                     },
                                                     BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                                                     BorderColor::all(AppColors::BORDER),
-                                                    BorderRadius::all(Val::Px(4.0)),
                                                 ))
                                                 .with_children(|header| {
                                                     // 折叠图标
@@ -811,11 +814,13 @@ pub fn setup_downloads_ui(
                                                             Val::Px(6.0),
                                                         ),
                                                         border: UiRect::all(Val::Px(1.0)),
+                                                        border_radius: BorderRadius::all(Val::Px(
+                                                            4.0,
+                                                        )),
                                                         ..default()
                                                     },
                                                     BackgroundColor(Color::srgb(0.2, 0.5, 0.3)),
                                                     BorderColor::all(Color::srgb(0.3, 0.7, 0.4)),
-                                                    BorderRadius::all(Val::Px(4.0)),
                                                 ))
                                                 .with_children(|btn| {
                                                     btn.spawn((
@@ -888,11 +893,11 @@ pub fn setup_downloads_ui(
                                                 ),
                                                 border: UiRect::all(Val::Px(1.0)),
                                                 column_gap: Val::Px(8.0),
+                                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                                 ..default()
                                             },
                                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                                             BorderColor::all(AppColors::BORDER),
-                                            BorderRadius::all(Val::Px(4.0)),
                                         ))
                                         .with_children(|header| {
                                             // 折叠图标
@@ -960,11 +965,14 @@ pub fn setup_downloads_ui(
                                 });
 
                             // 底部间距，确保最后的内容不会贴着窗口底部
-                            scroll.spawn(Node {
-                                height: Val::Px(40.0),
-                                min_height: Val::Px(40.0),
-                                ..default()
-                            });
+                            scroll.spawn((
+                                Node {
+                                    height: Val::Px(40.0),
+                                    min_height: Val::Px(40.0),
+                                    ..default()
+                                },
+                                Transform::default(),
+                            ));
                         })
                         .id();
 
@@ -992,10 +1000,10 @@ fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                 right: Val::Px(32.0), // 给滚动条留空间
                 height: Val::Px(36.0),
                 display: Display::None, // 初始隐藏，滚动时显示
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.98)),
-            BorderRadius::all(Val::Px(4.0)),
             ZIndex(100), // 提高 ZIndex 确保可见
         ))
         .with_children(|header| {
@@ -1012,11 +1020,11 @@ fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                         padding: UiRect::horizontal(Val::Px(12.0)),
                         column_gap: Val::Px(8.0),
                         border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgba(0.12, 0.12, 0.16, 0.98)),
                     BorderColor::all(AppColors::BORDER),
-                    BorderRadius::all(Val::Px(4.0)),
                 ))
                 .with_children(|btn| {
                     // 折叠图标
@@ -1088,11 +1096,11 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                             Val::Px(6.0),
                         ),
                         border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
                     BorderColor::all(AppColors::BORDER),
-                    BorderRadius::all(Val::Px(4.0)),
                 ))
                 .with_children(|btn| {
                     btn.spawn((
@@ -1205,11 +1213,11 @@ fn spawn_download_task_item(
                 padding: UiRect::all(Val::Px(15.0)),
                 border: UiRect::all(Val::Px(1.0)),
                 row_gap: Val::Px(10.0),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
             BorderColor::all(AppColors::BORDER),
-            BorderRadius::all(Val::Px(8.0)),
         ))
         .with_children(|item| {
             // 标题行
@@ -1261,14 +1269,17 @@ fn spawn_download_task_item(
             let has_categories = !task.categories.is_empty();
             let has_tags = !task.tags.is_empty();
             if has_categories || has_tags {
-                item.spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                })
+                item.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Row,
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_row| {
                     // 显示所有分类
                     for category in task.categories.iter() {
@@ -1286,10 +1297,10 @@ fn spawn_download_task_item(
                 Node {
                     width: Val::Percent(100.0),
                     height: Val::Px(6.0),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                BorderRadius::all(Val::Px(3.0)),
             ))
             .with_children(|track| {
                 track.spawn((
@@ -1299,6 +1310,7 @@ fn spawn_download_task_item(
                     Node {
                         width: Val::Percent(progress * 100.0),
                         height: Val::Percent(100.0),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
                         ..default()
                     },
                     BackgroundColor(match &task.status {
@@ -1307,7 +1319,6 @@ fn spawn_download_task_item(
                         ComicDownloadStatus::Paused => Color::srgb(0.8, 0.6, 0.2),
                         _ => AppColors::PRIMARY,
                     }),
-                    BorderRadius::all(Val::Px(3.0)),
                 ));
             });
 
@@ -1413,11 +1424,11 @@ fn spawn_control_button_with_display<T: Component>(
                 } else {
                     Display::None
                 },
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
             BackgroundColor(color.with_alpha(0.2)),
             BorderColor::all(color),
-            BorderRadius::all(Val::Px(4.0)),
         ))
         .with_children(|btn| {
             btn.spawn((
@@ -1454,11 +1465,11 @@ fn spawn_completed_download_item(
                 border: UiRect::all(Val::Px(1.0)),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(12.0),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
             BorderColor::all(AppColors::BORDER),
-            BorderRadius::all(Val::Px(8.0)),
             Transform::default(),
         ))
         .with_children(|item| {
@@ -1560,11 +1571,11 @@ fn spawn_completed_download_item(
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.2, 0.5, 0.3).with_alpha(0.2)),
                             BorderColor::all(Color::srgb(0.3, 0.7, 0.4)),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -1591,11 +1602,11 @@ fn spawn_completed_download_item(
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(Color::srgb(0.3, 0.3, 0.4).with_alpha(0.2)),
                         BorderColor::all(Color::srgb(0.5, 0.5, 0.6)),
-                        BorderRadius::all(Val::Px(4.0)),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -1670,10 +1681,10 @@ fn spawn_downloads_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });
@@ -1936,20 +1947,23 @@ pub fn add_new_task_ui(
                     border: UiRect::all(Val::Px(1.0)),
                     flex_direction: FlexDirection::Column,
                     row_gap: Val::Px(8.0),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
                 BorderColor::all(AppColors::BORDER),
-                BorderRadius::all(Val::Px(4.0)),
             ))
             .with_children(|item| {
                 // 标题和按钮行
-                item.spawn(Node {
-                    width: Val::Percent(100.0),
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
+                item.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|row| {
                     // 标题（可点击跳转详情）
                     row.spawn((
@@ -1974,10 +1988,13 @@ pub fn add_new_task_ui(
                     });
 
                     // 按钮容器
-                    row.spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
+                    row.spawn((
+                        Node {
+                            column_gap: Val::Px(8.0),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ))
                     .with_children(|btns| {
                         // 暂停按钮
                         btns.spawn((
@@ -1991,10 +2008,10 @@ pub fn add_new_task_ui(
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 display: Display::Flex,
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.6, 0.5, 0.2)),
-                            BorderRadius::all(Val::Px(3.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -2020,10 +2037,10 @@ pub fn add_new_task_ui(
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 display: Display::None,
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.3, 0.6, 0.3)),
-                            BorderRadius::all(Val::Px(3.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -2049,10 +2066,10 @@ pub fn add_new_task_ui(
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 display: Display::None,
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.7, 0.5, 0.2)),
-                            BorderRadius::all(Val::Px(3.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -2078,10 +2095,10 @@ pub fn add_new_task_ui(
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 display: Display::Flex, // 始终可见
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
-                            BorderRadius::all(Val::Px(3.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -2098,13 +2115,15 @@ pub fn add_new_task_ui(
                 });
 
                 // 进度条容器
-                item.spawn(Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(4.0),
-                    ..default()
-                })
-                .insert(BackgroundColor(Color::srgb(0.2, 0.2, 0.25)))
-                .insert(BorderRadius::all(Val::Px(2.0)))
+                item.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(4.0),
+                        border_radius: BorderRadius::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
+                ))
                 .with_children(|bar_bg| {
                     bar_bg.spawn((
                         DownloadProgressBar {
@@ -2113,10 +2132,10 @@ pub fn add_new_task_ui(
                         Node {
                             width: Val::Percent(0.0),
                             height: Val::Percent(100.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
                             ..default()
                         },
                         BackgroundColor(AppColors::PRIMARY),
-                        BorderRadius::all(Val::Px(2.0)),
                     ));
                 });
 

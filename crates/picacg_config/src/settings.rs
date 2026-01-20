@@ -37,20 +37,15 @@ pub fn update_log_level(level: LogLevel) {
 }
 
 /// 代理类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ProxyType {
     /// HTTP 代理
+    #[default]
     Http,
     /// HTTPS 代理
     Https,
     /// SOCKS5 代理
     Socks5,
-}
-
-impl Default for ProxyType {
-    fn default() -> Self {
-        ProxyType::Http
-    }
 }
 
 /// 代理配置
@@ -125,19 +120,14 @@ pub struct LoginSettings {
 }
 
 /// 日志等级
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
+    #[default]
     Info,
     Warn,
     Error,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::Info
-    }
 }
 
 impl LogLevel {

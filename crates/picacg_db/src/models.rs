@@ -165,7 +165,7 @@ pub struct DbDownloadTask {
 }
 
 /// 下载状态附加数据（序列化为 JSON 存储）
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DownloadStateData {
     #[serde(default)]
     pub current_episode: i32,
@@ -173,16 +173,6 @@ pub struct DownloadStateData {
     pub current_page: i32,
     #[serde(default)]
     pub error: Option<String>,
-}
-
-impl Default for DownloadStateData {
-    fn default() -> Self {
-        Self {
-            current_episode: 0,
-            current_page: 0,
-            error: None,
-        }
-    }
 }
 
 impl DbDownloadTask {

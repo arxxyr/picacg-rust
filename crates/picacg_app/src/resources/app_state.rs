@@ -100,7 +100,7 @@ pub enum Gender {
 
 impl Gender {
     /// 转换为 API 需要的字符串
-    pub fn to_api_string(&self) -> &'static str {
+    pub fn as_api_str(self) -> &'static str {
         match self {
             Gender::Male => "m",
             Gender::Female => "f",
@@ -484,9 +484,10 @@ pub enum ComicDownloadStatus {
 // ==================== FSM 下载系统 ====================
 
 /// 下载状态（FSM 状态机）
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
 pub enum DownloadState {
     /// 排队中（等待下载）
+    #[default]
     Queued,
     /// 下载中
     Downloading {
@@ -502,12 +503,6 @@ pub enum DownloadState {
     Completed,
     /// 失败
     Failed(String),
-}
-
-impl Default for DownloadState {
-    fn default() -> Self {
-        Self::Queued
-    }
 }
 
 impl DownloadState {
@@ -719,14 +714,14 @@ impl DownloadTaskMeta {
 
     /// 保存元数据到数据库
     pub fn save(&self) -> Result<(), String> {
-        use picacg_db::database::{Database, run_db_operation};
+        use picacg_db::{get_pool, run_db_operation, upsert_download_task_async};
 
         let db_task = self.to_db_task();
+        let pool = get_pool();
 
         // 使用 run_db_operation 自动处理运行时上下文
         run_db_operation(async move {
-            let db = Database::global().read();
-            db.upsert_download_task(&db_task)
+            upsert_download_task_async(&pool, &db_task)
                 .await
                 .map_err(|e| format!("保存到数据库失败: {}", e))
         })
@@ -734,15 +729,14 @@ impl DownloadTaskMeta {
 
     /// 从数据库加载元数据
     pub fn load(save_path: &str) -> Result<Self, String> {
-        use picacg_db::database::{Database, run_db_operation};
+        use picacg_db::{get_all_download_tasks_async, get_pool, run_db_operation};
 
         let save_path_owned = save_path.to_string();
+        let pool = get_pool();
 
         // 从数据库加载（通过 save_path 查找）
         run_db_operation(async move {
-            let db = Database::global().read();
-            let tasks = db
-                .get_all_download_tasks()
+            let tasks = get_all_download_tasks_async(&pool)
                 .await
                 .map_err(|e| format!("数据库查询失败: {}", e))?;
 
@@ -758,14 +752,13 @@ impl DownloadTaskMeta {
 
     /// 从数据库加载元数据（通过 comic_id）
     pub fn load_by_comic_id(comic_id: &str) -> Result<Self, String> {
-        use picacg_db::database::{Database, run_db_operation};
+        use picacg_db::{get_download_task_async, get_pool, run_db_operation};
 
         let comic_id_owned = comic_id.to_string();
+        let pool = get_pool();
 
         run_db_operation(async move {
-            let db = Database::global().read();
-            let task = db
-                .get_download_task(&comic_id_owned)
+            let task = get_download_task_async(&pool, &comic_id_owned)
                 .await
                 .map_err(|e| format!("数据库查询失败: {}", e))?
                 .ok_or_else(|| "下载任务不存在".to_string())?;
@@ -786,14 +779,14 @@ impl DownloadTaskMeta {
 
     /// 删除下载任务
     pub fn delete(&self) -> Result<(), String> {
-        use picacg_db::database::{Database, run_db_operation};
+        use picacg_db::{delete_download_task_async, get_pool, run_db_operation};
 
         let comic_id = self.comic_id.clone();
+        let pool = get_pool();
 
         // 从数据库删除
         run_db_operation(async move {
-            let db = Database::global().read();
-            db.delete_download_task(&comic_id)
+            delete_download_task_async(&pool, &comic_id)
                 .await
                 .map_err(|e| format!("删除下载任务失败: {}", e))
         })
@@ -1045,14 +1038,14 @@ impl DownloadManagerState {
 
     /// 从数据库加载未完成的任务
     pub fn load_incomplete_tasks(&mut self) {
-        use picacg_db::database::{Database, run_db_operation};
+        use picacg_db::{get_incomplete_download_tasks_async, get_pool, run_db_operation};
+
+        let pool = get_pool();
 
         // 首先尝试从数据库加载
-        let db_tasks: Vec<picacg_db::models::DbDownloadTask> = run_db_operation(async {
-            let db = Database::global().read();
-            db.get_incomplete_download_tasks().await
-        })
-        .unwrap_or_default();
+        let db_tasks: Vec<picacg_db::models::DbDownloadTask> =
+            run_db_operation(async move { get_incomplete_download_tasks_async(&pool).await })
+                .unwrap_or_default();
 
         for db_task in db_tasks {
             let meta = DownloadTaskMeta::from_db_task(&db_task);

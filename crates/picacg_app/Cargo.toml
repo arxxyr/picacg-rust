@@ -22,7 +22,7 @@ bevy_ui_toolkit.workspace = true
 
 # === Bevy 核心 ===
 bevy.workspace = true
-bevy-tokio-tasks.workspace = true
+# bevy-tokio-tasks 已内嵌在 utils/tokio_tasks.rs
 
 # === 异步运行时 ===
 tokio.workspace = true

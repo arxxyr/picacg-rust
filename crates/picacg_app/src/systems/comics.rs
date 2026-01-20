@@ -71,15 +71,18 @@ pub fn setup_comics_list_ui(
         ))
         .with_children(|root| {
             // 标题栏（包含面包屑导航）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
             .with_children(|header| {
                 // 面包屑: 分类 > 当前分类名
                 header.spawn((
@@ -114,15 +117,18 @@ pub fn setup_comics_list_ui(
             });
 
             // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|wrapper| {
                 // 漫画网格（可滚动）
                 let scroll_container_id = wrapper
@@ -247,10 +253,10 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });
@@ -346,14 +352,17 @@ fn spawn_comic_card(
 
             // 分类标签容器
             if !comic.categories.is_empty() {
-                card.spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(2.0),
-                    max_width: Val::Px(164.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                card.spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(164.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_container| {
                     // 最多显示 3 个分类
                     for category in comic.categories.iter().take(3) {
@@ -366,10 +375,10 @@ fn spawn_comic_card(
                                         Val::Px(1.0),
                                         Val::Px(1.0),
                                     ),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
                                     ..default()
                                 },
                                 BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
-                                BorderRadius::all(Val::Px(2.0)),
                             ))
                             .with_children(|badge| {
                                 badge.spawn((
@@ -388,15 +397,18 @@ fn spawn_comic_card(
 
             // 标签容器
             if !comic.tags.is_empty() {
-                card.spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(2.0),
-                    max_width: Val::Px(164.0),
-                    margin: UiRect::top(Val::Px(2.0)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                card.spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(164.0),
+                        margin: UiRect::top(Val::Px(2.0)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_container| {
                     // 最多显示 3 个标签
                     for tag in comic.tags.iter().take(3) {
@@ -409,10 +421,10 @@ fn spawn_comic_card(
                                         Val::Px(1.0),
                                         Val::Px(1.0),
                                     ),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
                                     ..default()
                                 },
                                 BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
-                                BorderRadius::all(Val::Px(2.0)),
                             ))
                             .with_children(|badge| {
                                 badge.spawn((

@@ -198,6 +198,7 @@ impl Plugin for UiPlugin {
                     update_cover_image,
                     handle_detail_scroll,
                     clamp_detail_scroll,
+                    update_detail_content_size,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,

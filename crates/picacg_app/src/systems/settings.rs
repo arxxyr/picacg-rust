@@ -224,16 +224,19 @@ pub fn setup_settings_ui(
                 spawn_settings_header(root, &font);
 
                 // 设置内容（可滚动）- 包装器需要 Relative 定位以支持 Absolute 子元素
-                root.spawn(Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
-                    ..default()
-                })
+                root.spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_grow: 1.0,
+                        flex_shrink: 1.0,
+                        flex_basis: Val::Px(0.0),
+                        min_height: Val::Px(0.0),
+                        position_type: PositionType::Relative,
+                        overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
+                        ..default()
+                    },
+                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
+                ))
                 .with_children(|content_wrapper| {
                     // 滚动容器
                     let scroll_container = content_wrapper
@@ -292,12 +295,16 @@ pub fn setup_settings_ui(
                             });
 
                             // 底部间距（确保最后的内容可以完全滚动到可见区域）
-                            scroll.spawn(Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Px(120.0),
-                                min_height: Val::Px(120.0),
-                                ..default()
-                            });
+                            scroll.spawn((
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(120.0),
+                                    min_height: Val::Px(120.0),
+                                    ..default()
+                                },
+                                Transform::default(), /* 必须添加，否则子实体的 GlobalTransform
+                                                       * 会报警告 */
+                            ));
                         })
                         .id();
 
@@ -358,11 +365,11 @@ fn spawn_settings_section<F>(
                 margin: UiRect::bottom(Val::Px(20.0)),
                 padding: UiRect::all(Val::Px(15.0)),
                 border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
             BorderColor::all(AppColors::BORDER),
-            BorderRadius::all(Val::Px(8.0)),
         ))
         .with_children(|section| {
             // 分组标题
@@ -435,11 +442,11 @@ fn spawn_download_path_setting(
                     padding: UiRect::horizontal(Val::Px(12.0)),
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                 BorderColor::all(AppColors::BORDER),
-                BorderRadius::all(Val::Px(4.0)),
             ))
             .with_children(|input| {
                 let display_text = if current_path.is_empty() {
@@ -528,13 +535,13 @@ fn spawn_max_concurrent_downloads_setting(
                                 width: Val::Px(28.0),
                                 height: Val::Px(28.0),
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 ..default()
                             },
                             BorderColor::all(AppColors::BORDER),
                             BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -575,13 +582,13 @@ fn spawn_max_concurrent_downloads_setting(
                                 width: Val::Px(28.0),
                                 height: Val::Px(28.0),
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 ..default()
                             },
                             BorderColor::all(AppColors::BORDER),
                             BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -653,6 +660,7 @@ fn spawn_auto_resume_downloads_setting(
                     width: Val::Px(24.0),
                     height: Val::Px(24.0),
                     border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     ..default()
@@ -667,7 +675,6 @@ fn spawn_auto_resume_downloads_setting(
                 } else {
                     AppColors::BORDER
                 }),
-                BorderRadius::all(Val::Px(4.0)),
             ))
             .with_children(|checkbox| {
                 // 勾选标记（使用 Nerd Font 图标）
@@ -732,11 +739,11 @@ fn spawn_cache_setting(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 Node {
                     padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
                     border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
                 BorderColor::all(Color::srgb(0.8, 0.3, 0.3)),
-                BorderRadius::all(Val::Px(4.0)),
             ))
             .with_children(|btn| {
                 btn.spawn((
@@ -828,6 +835,7 @@ fn spawn_proxy_setting(
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
                     BackgroundColor(if settings.proxy.enabled {
@@ -840,7 +848,6 @@ fn spawn_proxy_setting(
                     } else {
                         AppColors::BORDER
                     }),
-                    BorderRadius::all(Val::Px(4.0)),
                 ))
                 .with_children(|btn| {
                     btn.spawn((
@@ -913,6 +920,7 @@ fn spawn_proxy_setting(
                                             Val::Px(6.0),
                                         ),
                                         border: UiRect::all(Val::Px(1.0)),
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
                                     BackgroundColor(if is_selected {
@@ -925,7 +933,6 @@ fn spawn_proxy_setting(
                                     } else {
                                         AppColors::BORDER
                                     }),
-                                    BorderRadius::all(Val::Px(4.0)),
                                 ))
                                 .with_children(|btn| {
                                     btn.spawn((
@@ -982,11 +989,11 @@ fn spawn_proxy_setting(
                                 padding: UiRect::horizontal(Val::Px(10.0)),
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                             BorderColor::all(AppColors::BORDER),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|input| {
                             input.spawn((
@@ -1031,11 +1038,11 @@ fn spawn_proxy_setting(
                                 padding: UiRect::horizontal(Val::Px(10.0)),
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                             BorderColor::all(AppColors::BORDER),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|input| {
                             input.spawn((
@@ -1123,6 +1130,7 @@ fn spawn_log_level_setting(
                                     Val::Px(6.0),
                                 ),
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(if is_selected {
@@ -1135,7 +1143,6 @@ fn spawn_log_level_setting(
                             } else {
                                 AppColors::BORDER
                             }),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((
@@ -1182,11 +1189,11 @@ fn spawn_save_button_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                         Val::Px(10.0),
                     ),
                     border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
                 BackgroundColor(AppColors::PRIMARY),
                 BorderColor::all(AppColors::PRIMARY),
-                BorderRadius::all(Val::Px(4.0)),
             ))
             .with_children(|btn| {
                 btn.spawn((
@@ -1259,10 +1266,10 @@ fn spawn_settings_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container:
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });

@@ -11,12 +11,12 @@ resolver = "2"
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-license = "GPL-3.0"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 # === Bevy 核心 ===
-bevy = { version = "0.17", default-features = true }
-bevy-tokio-tasks = "0.17"
+bevy = { version = "0.18.0", default-features = true, features = ["bevy_debug_stepping"] }
+# bevy-tokio-tasks 已内嵌在 picacg_app/src/utils/tokio_tasks.rs
 bevy_ui_toolkit = { git = "https://git.yang.cafe:30080/loosqk/bevy_ui_toolkit.git" }
 
 # === 异步运行时 ===
@@ -65,7 +65,7 @@ image = "0.25"
 open = "5.3.3"
 
 # === 文件对话框 ===
-rfd = "0.16.0"
+rfd = "0.17.2"
 
 # === 编译配置 ===
 [profile.dev]

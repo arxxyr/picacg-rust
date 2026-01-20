@@ -64,13 +64,16 @@ pub fn setup_categories_ui(
         ))
         .with_children(|root| {
             // 页面标题栏
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
             .with_children(|header| {
                 header.spawn((
                     Text::new("分类浏览"),
@@ -84,15 +87,18 @@ pub fn setup_categories_ui(
             });
 
             // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|wrapper| {
                 // 分类网格容器（可滚动）
                 let scroll_container_id = wrapper
@@ -220,10 +226,10 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });

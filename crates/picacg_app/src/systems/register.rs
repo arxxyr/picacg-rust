@@ -218,10 +218,13 @@ pub fn setup_register_ui(
                     );
 
                     // 底部间距
-                    form.spawn(Node {
-                        height: Val::Px(20.0),
-                        ..default()
-                    });
+                    form.spawn((
+                        Node {
+                            height: Val::Px(20.0),
+                            ..default()
+                        },
+                        Transform::default(),
+                    ));
                 });
 
             // 按钮区域
@@ -878,7 +881,7 @@ fn trigger_register(
         password: register_state.password.clone(),
         name: register_state.name.clone(),
         birthday: register_state.birthday.clone(),
-        gender: register_state.gender.to_api_string().to_string(),
+        gender: register_state.gender.as_api_str().to_string(),
         question1: register_state.question1.clone(),
         question2: register_state.question2.clone(),
         question3: register_state.question3.clone(),

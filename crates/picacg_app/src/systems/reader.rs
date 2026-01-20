@@ -26,6 +26,7 @@ pub struct ReaderImageContainer;
 #[derive(Component)]
 pub struct ReaderCurrentImage {
     /// 当前图片的 URL
+    #[allow(dead_code)]
     pub url: String,
 }
 
@@ -86,6 +87,7 @@ pub struct WebtoonScrollContainer;
 /// Webtoon 模式图片项
 #[derive(Component)]
 pub struct WebtoonImageItem {
+    #[allow(dead_code)]
     pub index: usize,
 }
 
@@ -101,8 +103,10 @@ mod consts {
     /// 缩放步长
     pub const SCALE_STEP: f32 = 0.1;
     /// Webtoon 模式预加载图片数量（向下）
+    #[allow(dead_code)]
     pub const WEBTOON_PRELOAD_AHEAD: usize = 5;
     /// Webtoon 模式保留图片数量（向上）
+    #[allow(dead_code)]
     pub const WEBTOON_KEEP_BEHIND: usize = 10;
 }
 
@@ -269,12 +273,15 @@ fn spawn_toolbar(
 
             // 右侧：缩放显示 + 模式切换
             toolbar
-                .spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                })
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|right| {
                     // 缩放显示
                     right.spawn((
@@ -301,11 +308,11 @@ fn spawn_toolbar(
                             Node {
                                 padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
                                 border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
                             BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 0.8)),
                             BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                            BorderRadius::all(Val::Px(4.0)),
                         ))
                         .with_children(|btn| {
                             btn.spawn((

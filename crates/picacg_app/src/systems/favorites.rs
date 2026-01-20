@@ -58,6 +58,8 @@ pub struct FavoriteCard {
 /// 收藏卡片缩略图标记
 #[derive(Component)]
 pub struct FavoriteThumbnail {
+    /// 图片 URL（用于图片加载）
+    #[allow(dead_code)]
     pub url: String,
 }
 
@@ -130,15 +132,18 @@ pub fn setup_favorites_ui(
         ))
         .with_children(|root| {
             // 标题栏
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
             .with_children(|header| {
                 header.spawn((
                     Text::new("我的收藏"),
@@ -152,15 +157,18 @@ pub fn setup_favorites_ui(
             });
 
             // 滚动区域包装器
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|wrapper| {
                 // 收藏网格（可滚动）
                 let scroll_container_id = wrapper
@@ -297,10 +305,10 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });
@@ -397,14 +405,17 @@ fn spawn_favorite_card(
 
             // 分类和标签容器
             if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                card.spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(2.0),
-                    max_width: Val::Px(164.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                card.spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(164.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_container| {
                     // 分类（蓝色）
                     for category in comic.categories.iter().take(2) {
@@ -444,10 +455,10 @@ fn spawn_tag_badge(
         .spawn((
             Node {
                 padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(1.0), Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(2.0)),
                 ..default()
             },
             BackgroundColor(bg_color),
-            BorderRadius::all(Val::Px(2.0)),
         ))
         .with_children(|badge| {
             badge.spawn((

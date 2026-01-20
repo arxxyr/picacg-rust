@@ -195,11 +195,11 @@ fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) 
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
                 BorderColor::all(AppColors::PRIMARY),
-                BorderRadius::all(Val::Percent(50.0)),
             ))
             .with_children(|avatar| {
                 avatar.spawn((
@@ -347,9 +347,9 @@ fn spawn_sidebar_button(
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(10.0),
                 border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
                 ..default()
             },
-            BorderRadius::all(Val::Px(6.0)),
             BorderColor::all(Color::NONE),
             BackgroundColor(Color::NONE),
         ))

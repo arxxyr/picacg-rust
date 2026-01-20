@@ -5,7 +5,6 @@
 #![allow(dead_code)]
 
 use bevy::{asset::RenderAssetUsages, prelude::*};
-use bevy_tokio_tasks::TokioTasksRuntime;
 use picacg_api::ApiClient;
 use picacg_config::AppSettings;
 
@@ -13,6 +12,7 @@ use crate::{
     events::*,
     resources::{DownloadManagerState, DownloadTaskMeta, SharedTaskControl, *},
     systems::login::save_credentials_on_login,
+    utils::TokioTasksRuntime,
 };
 
 /// API 插件
@@ -536,9 +536,11 @@ async fn download_image(url: &str) -> Result<Vec<u8>, String> {
 
     type HmacSha256 = Hmac<Sha256>;
 
-    let settings = AppSettings::global().read();
-    let proxy_url = settings.proxy.to_proxy_url();
-    drop(settings);
+    // 使用独立作用域确保锁在 await 之前释放
+    let proxy_url = {
+        let settings = AppSettings::global().read();
+        settings.proxy.to_proxy_url()
+    };
 
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
@@ -1332,7 +1334,7 @@ fn spawn_download_task(
 ///
 /// 可以从任何有 TaskContext 的异步上下文中调用
 async fn execute_download_task(
-    ctx: &mut bevy_tokio_tasks::TaskContext,
+    ctx: &mut crate::utils::TaskContext,
     client: ApiClient,
     comic_id: String,
     save_path: String,
@@ -1470,12 +1472,11 @@ async fn execute_download_task(
 
             // 在数据库中标记章节完成
             let comic_id_for_complete = comic_id.clone();
-            use picacg_db::database::{Database, run_db_operation};
+            use picacg_db::{add_completed_episode_async, get_pool, run_db_operation};
+            let pool = get_pool();
             run_db_operation(async move {
-                let db = Database::global().read();
-                if let Err(e) = db
-                    .add_completed_episode(&comic_id_for_complete, episode_order)
-                    .await
+                if let Err(e) =
+                    add_completed_episode_async(&pool, &comic_id_for_complete, episode_order).await
                 {
                     tracing::warn!("更新章节完成状态到数据库失败: {}", e);
                 }
@@ -1588,8 +1589,6 @@ async fn execute_download_task(
             let control = control.clone();
             let completed_count = completed_count.clone();
             let failed_images = failed_images.clone();
-            let episode_order = episode_order;
-            let total_pages = total_pages;
 
             // 启动并发下载任务
             let handle = tokio::spawn(async move {
@@ -1757,8 +1756,6 @@ async fn execute_download_task(
                 let control = control.clone();
                 let retry_success_count = retry_success_count.clone();
                 let still_failed = still_failed.clone();
-                let episode_order = episode_order;
-                let total_pages = total_pages;
 
                 let handle = tokio::spawn(async move {
                     let _permit = semaphore.acquire().await.unwrap();
@@ -1826,12 +1823,11 @@ async fn execute_download_task(
         // 如果没有失败的图片，在数据库中标记章节完成
         if final_fail_count == 0 {
             let comic_id_for_complete = comic_id.clone();
-            use picacg_db::database::{Database, run_db_operation};
+            use picacg_db::{add_completed_episode_async, get_pool, run_db_operation};
+            let pool = get_pool();
             run_db_operation(async move {
-                let db = Database::global().read();
-                if let Err(e) = db
-                    .add_completed_episode(&comic_id_for_complete, episode_order)
-                    .await
+                if let Err(e) =
+                    add_completed_episode_async(&pool, &comic_id_for_complete, episode_order).await
                 {
                     tracing::warn!("更新章节完成状态到数据库失败: {}", e);
                 } else {
@@ -1879,9 +1875,11 @@ async fn download_image_to_file(
 
     type HmacSha256 = Hmac<Sha256>;
 
-    let settings = AppSettings::global().read();
-    let proxy_url = settings.proxy.to_proxy_url();
-    drop(settings);
+    // 使用独立作用域确保锁在 await 之前释放
+    let proxy_url = {
+        let settings = AppSettings::global().read();
+        settings.proxy.to_proxy_url()
+    };
 
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
@@ -1981,10 +1979,10 @@ fn handle_download_completed(
         download_state.downloading_ids.remove(&event.comic_id);
 
         // 更新 FSM 状态
-        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
-            if let Err(e) = fsm.complete() {
-                tracing::warn!("更新下载完成状态失败: {}", e);
-            }
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id)
+            && let Err(e) = fsm.complete()
+        {
+            tracing::warn!("更新下载完成状态失败: {}", e);
         }
 
         tracing::info!("下载完成: {} -> {}", event.comic_id, event.save_path);
@@ -2000,10 +1998,10 @@ fn handle_download_failed(
         download_state.downloading_ids.remove(&event.comic_id);
 
         // 更新 FSM 状态
-        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
-            if let Err(e) = fsm.fail(event.error.clone()) {
-                tracing::warn!("更新下载失败状态失败: {}", e);
-            }
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id)
+            && let Err(e) = fsm.fail(event.error.clone())
+        {
+            tracing::warn!("更新下载失败状态失败: {}", e);
         }
 
         tracing::error!("下载失败: {} - {}", event.comic_id, event.error);
@@ -2019,10 +2017,10 @@ fn handle_download_paused(
         download_state.downloading_ids.remove(&event.comic_id);
 
         // 更新 FSM 状态
-        if let Some(fsm) = download_state.find_task_mut(&event.comic_id) {
-            if let Err(e) = fsm.pause() {
-                tracing::warn!("更新下载暂停状态失败: {}", e);
-            }
+        if let Some(fsm) = download_state.find_task_mut(&event.comic_id)
+            && let Err(e) = fsm.pause()
+        {
+            tracing::warn!("更新下载暂停状态失败: {}", e);
         }
 
         tracing::info!("下载已暂停: {}", event.comic_id);
@@ -2072,10 +2070,10 @@ fn handle_resume_download(
                 comic_title
             );
             // 将任务状态更新为 Waiting（排队等待）
-            if let Some(fsm) = download_state.find_task_mut(&comic_id) {
-                if let Err(e) = fsm.queue() {
-                    tracing::warn!("更新任务状态为等待中失败: {}", e);
-                }
+            if let Some(fsm) = download_state.find_task_mut(&comic_id)
+                && let Err(e) = fsm.queue()
+            {
+                tracing::warn!("更新任务状态为等待中失败: {}", e);
             }
             continue; // 等待其他任务完成后自动启动
         }

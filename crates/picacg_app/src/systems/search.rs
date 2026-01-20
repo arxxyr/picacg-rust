@@ -21,9 +21,11 @@ use crate::{
 
 /// 搜索布局常量
 mod search_layout {
-    /// 卡片宽度
+    /// 卡片宽度（预留）
+    #[allow(dead_code)]
     pub const CARD_WIDTH: f32 = 180.0;
-    /// 卡片高度
+    /// 卡片高度（预留）
+    #[allow(dead_code)]
     pub const CARD_HEIGHT: f32 = 300.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
@@ -33,7 +35,8 @@ mod search_layout {
     pub const PADDING_LEFT: f32 = 20.0;
     /// 右内边距
     pub const PADDING_RIGHT: f32 = 20.0 + super::SCROLLBAR_WIDTH;
-    /// 上内边距
+    /// 上内边距（预留）
+    #[allow(dead_code)]
     pub const PADDING_TOP: f32 = 20.0;
     /// 下内边距
     pub const PADDING_BOTTOM: f32 = 40.0;
@@ -76,6 +79,7 @@ pub struct SearchResultCard {
 /// 搜索结果图片标记
 #[derive(Component)]
 pub struct SearchResultImage {
+    #[allow(dead_code)]
     pub comic_id: String,
     pub url: String,
 }
@@ -138,15 +142,18 @@ pub fn setup_search_ui(
         ))
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
             .with_children(|header| {
                 // 搜索图标
                 header.spawn((
@@ -171,11 +178,11 @@ pub fn setup_search_ui(
                             padding: UiRect::horizontal(Val::Px(12.0)),
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BorderColor::all(AppColors::BORDER),
                         BackgroundColor(AppColors::CARD_BG),
-                        BorderRadius::all(Val::Px(4.0)),
                         Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
                                                * 位置计算） */
                     ))
@@ -208,15 +215,17 @@ pub fn setup_search_ui(
                     .spawn((
                         SearchButton,
                         Button,
+                        Interaction::default(),
                         Node {
                             width: Val::Px(80.0),
                             height: Val::Px(40.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(AppColors::PRIMARY),
-                        BorderRadius::all(Val::Px(4.0)),
+                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -232,15 +241,18 @@ pub fn setup_search_ui(
             });
 
             // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|wrapper| {
                 // 滚动容器
                 let scroll_container = wrapper
@@ -533,10 +545,10 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     position_type: PositionType::Absolute,
                     top: Val::Px(0.0),
                     left: Val::Px(0.0),
+                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                     ..default()
                 },
                 BackgroundColor(THUMB_COLOR),
-                BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
                 ZIndex(1),
             ));
         });
@@ -561,11 +573,11 @@ fn spawn_search_result_card(
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::all(Val::Px(8.0)),
                 border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 ..default()
             },
             BorderColor::all(AppColors::BORDER),
             BackgroundColor(AppColors::CARD_BG),
-            BorderRadius::all(Val::Px(4.0)),
             if hidden {
                 Visibility::Hidden
             } else {
@@ -574,15 +586,18 @@ fn spawn_search_result_card(
         ))
         .with_children(|card| {
             // 封面图片容器
-            card.spawn(Node {
-                width: Val::Px(164.0),
-                height: Val::Px(220.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                overflow: Overflow::clip(),
-                ..default()
-            })
-            .insert(BackgroundColor(AppColors::SECONDARY))
+            card.spawn((
+                Node {
+                    width: Val::Px(164.0),
+                    height: Val::Px(220.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(AppColors::SECONDARY),
+                Transform::default(),
+            ))
             .with_children(|img_container| {
                 let cover_url = comic.thumb.url();
                 if let Some(handle) = image_cache.get(&cover_url) {
@@ -650,14 +665,17 @@ fn spawn_search_result_card(
 
             // 分类标签容器
             if !comic.categories.is_empty() {
-                card.spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(2.0),
-                    max_width: Val::Px(164.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                card.spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(164.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_container| {
                     // 最多显示 3 个分类
                     for category in comic.categories.iter().take(3) {
@@ -670,10 +688,10 @@ fn spawn_search_result_card(
                                         Val::Px(1.0),
                                         Val::Px(1.0),
                                     ),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
                                     ..default()
                                 },
                                 BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
-                                BorderRadius::all(Val::Px(2.0)),
                             ))
                             .with_children(|badge| {
                                 badge.spawn((
@@ -692,15 +710,18 @@ fn spawn_search_result_card(
 
             // 标签容器
             if !comic.tags.is_empty() {
-                card.spawn(Node {
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(4.0),
-                    row_gap: Val::Px(2.0),
-                    max_width: Val::Px(164.0),
-                    margin: UiRect::top(Val::Px(2.0)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                })
+                card.spawn((
+                    Node {
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(4.0),
+                        row_gap: Val::Px(2.0),
+                        max_width: Val::Px(164.0),
+                        margin: UiRect::top(Val::Px(2.0)),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
                 .with_children(|tags_container| {
                     // 最多显示 3 个标签
                     for tag in comic.tags.iter().take(3) {
@@ -713,10 +734,10 @@ fn spawn_search_result_card(
                                         Val::Px(1.0),
                                         Val::Px(1.0),
                                     ),
+                                    border_radius: BorderRadius::all(Val::Px(2.0)),
                                     ..default()
                                 },
                                 BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
-                                BorderRadius::all(Val::Px(2.0)),
                             ))
                             .with_children(|badge| {
                                 badge.spawn((
@@ -765,7 +786,7 @@ pub fn search_input_interaction(
     >,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut bg_color, mut border_color, mut input, transform, computed) in
+    for (interaction, mut bg_color, mut border_color, mut input, _transform, computed) in
         interaction_query.iter_mut()
     {
         match *interaction {
@@ -1230,15 +1251,18 @@ pub fn refresh_search_ui(
         ))
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
             .with_children(|header| {
                 // 搜索图标
                 header.spawn((
@@ -1270,11 +1294,11 @@ pub fn refresh_search_ui(
                             padding: UiRect::horizontal(Val::Px(12.0)),
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BorderColor::all(input_border_color),
                         BackgroundColor(AppColors::CARD_BG),
-                        BorderRadius::all(Val::Px(4.0)),
                         Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
                                                * 位置计算） */
                     ))
@@ -1307,15 +1331,17 @@ pub fn refresh_search_ui(
                     .spawn((
                         SearchButton,
                         Button,
+                        Interaction::default(),
                         Node {
                             width: Val::Px(80.0),
                             height: Val::Px(40.0),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
                         BackgroundColor(AppColors::PRIMARY),
-                        BorderRadius::all(Val::Px(4.0)),
+                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -1331,15 +1357,18 @@ pub fn refresh_search_ui(
             });
 
             // 滚动区域包装器（用于放置滚动条）
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },
+                Transform::default(),
+            ))
             .with_children(|wrapper| {
                 // 滚动容器
                 let scroll_container = wrapper
