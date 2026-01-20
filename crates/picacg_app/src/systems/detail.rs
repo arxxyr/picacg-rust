@@ -927,18 +927,18 @@ fn build_detail_content(
                     ));
 
                     // 汉化组
-                    if let Some(ref team) = comic.chinese_team {
-                        if !team.is_empty() {
-                            details.spawn((
-                                Text::new(format!("汉化: {}", team)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        }
+                    if let Some(ref team) = comic.chinese_team
+                        && !team.is_empty()
+                    {
+                        details.spawn((
+                            Text::new(format!("汉化: {}", team)),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
                     }
 
                     // 分类标签（可点击）
@@ -1105,26 +1105,26 @@ fn build_detail_content(
                     ));
 
                     // 描述
-                    if let Some(ref desc) = comic.description {
-                        if !desc.is_empty() {
-                            details.spawn(Node {
-                                margin: UiRect::top(Val::Px(8.0)),
+                    if let Some(ref desc) = comic.description
+                        && !desc.is_empty()
+                    {
+                        details.spawn(Node {
+                            margin: UiRect::top(Val::Px(8.0)),
+                            ..default()
+                        });
+                        details.spawn((
+                            Text::new(desc.clone()),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 13.0,
                                 ..default()
-                            });
-                            details.spawn((
-                                Text::new(desc.clone()),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    max_width: Val::Px(500.0),
-                                    ..default()
-                                },
-                            ));
-                        }
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                            Node {
+                                max_width: Val::Px(500.0),
+                                ..default()
+                            },
+                        ));
                     }
                 });
         });
@@ -1473,7 +1473,7 @@ pub fn update_detail_content_size(
     let scale_factor = window_query
         .single()
         .ok()
-        .map(|w| w.scale_factor() as f32)
+        .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
     // 滚动容器的上下 padding（各 20px）

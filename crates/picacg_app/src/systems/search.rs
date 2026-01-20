@@ -884,15 +884,15 @@ pub fn handle_search_keyboard_input(
                     match input.as_str() {
                         "v" | "V" => {
                             // Ctrl+V 粘贴
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                if let Ok(text) = clipboard.get_text() {
-                                    // 过滤控制字符，只保留可打印字符
-                                    let filtered: String =
-                                        text.chars().filter(|c| !c.is_control()).collect();
-                                    search_state.keyword.push_str(&filtered);
-                                    update_input_text(&search_state.keyword, &mut text_query);
-                                    tracing::info!("粘贴内容: {:?}", filtered);
-                                }
+                            if let Ok(mut clipboard) = arboard::Clipboard::new()
+                                && let Ok(text) = clipboard.get_text()
+                            {
+                                // 过滤控制字符，只保留可打印字符
+                                let filtered: String =
+                                    text.chars().filter(|c| !c.is_control()).collect();
+                                search_state.keyword.push_str(&filtered);
+                                update_input_text(&search_state.keyword, &mut text_query);
+                                tracing::info!("粘贴内容: {:?}", filtered);
                             }
                         }
                         "a" | "A" => {
@@ -901,11 +901,11 @@ pub fn handle_search_keyboard_input(
                         }
                         "c" | "C" => {
                             // Ctrl+C 复制当前内容到剪贴板
-                            if !search_state.keyword.is_empty() {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(&search_state.keyword);
-                                    tracing::info!("复制内容: {:?}", search_state.keyword);
-                                }
+                            if !search_state.keyword.is_empty()
+                                && let Ok(mut clipboard) = arboard::Clipboard::new()
+                            {
+                                let _ = clipboard.set_text(&search_state.keyword);
+                                tracing::info!("复制内容: {:?}", search_state.keyword);
                             }
                         }
                         "x" | "X" => {

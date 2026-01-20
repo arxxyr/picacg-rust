@@ -403,16 +403,19 @@ pub fn sidebar_button_interaction(
     for (interaction, mut bg_color, mut border_color, sidebar_btn) in &mut interaction_query {
         // 判断是否为当前激活的路由
         // 注意：ComicDetail/ReadView 不高亮任何按钮，因为可从多个入口进入
-        let is_active = match (sidebar_btn.route, current_route.get()) {
-            (SidebarRoute::Home, AppRoute::Home) => true,
-            (SidebarRoute::Categories, AppRoute::Categories | AppRoute::ComicsList) => true,
-            (SidebarRoute::Search, AppRoute::Search) => true,
-            (SidebarRoute::Rankings, AppRoute::Rankings) => true,
-            (SidebarRoute::Favorites, AppRoute::Favorites) => true,
-            (SidebarRoute::Downloads, AppRoute::Downloads) => true,
-            (SidebarRoute::Settings, AppRoute::Settings) => true,
-            _ => false,
-        };
+        let is_active = matches!(
+            (sidebar_btn.route, current_route.get()),
+            (SidebarRoute::Home, AppRoute::Home)
+                | (
+                    SidebarRoute::Categories,
+                    AppRoute::Categories | AppRoute::ComicsList
+                )
+                | (SidebarRoute::Search, AppRoute::Search)
+                | (SidebarRoute::Rankings, AppRoute::Rankings)
+                | (SidebarRoute::Favorites, AppRoute::Favorites)
+                | (SidebarRoute::Downloads, AppRoute::Downloads)
+                | (SidebarRoute::Settings, AppRoute::Settings)
+        );
 
         match *interaction {
             Interaction::Pressed => {
@@ -457,16 +460,19 @@ pub fn update_sidebar_active_state(
 
     for (sidebar_btn, mut bg_color, mut border_color) in &mut button_query {
         // 注意：ComicDetail/ReadView 不高亮任何按钮，因为可从多个入口进入
-        let is_active = match (sidebar_btn.route, current_route.get()) {
-            (SidebarRoute::Home, AppRoute::Home) => true,
-            (SidebarRoute::Categories, AppRoute::Categories | AppRoute::ComicsList) => true,
-            (SidebarRoute::Search, AppRoute::Search) => true,
-            (SidebarRoute::Rankings, AppRoute::Rankings) => true,
-            (SidebarRoute::Favorites, AppRoute::Favorites) => true,
-            (SidebarRoute::Downloads, AppRoute::Downloads) => true,
-            (SidebarRoute::Settings, AppRoute::Settings) => true,
-            _ => false,
-        };
+        let is_active = matches!(
+            (sidebar_btn.route, current_route.get()),
+            (SidebarRoute::Home, AppRoute::Home)
+                | (
+                    SidebarRoute::Categories,
+                    AppRoute::Categories | AppRoute::ComicsList
+                )
+                | (SidebarRoute::Search, AppRoute::Search)
+                | (SidebarRoute::Rankings, AppRoute::Rankings)
+                | (SidebarRoute::Favorites, AppRoute::Favorites)
+                | (SidebarRoute::Downloads, AppRoute::Downloads)
+                | (SidebarRoute::Settings, AppRoute::Settings)
+        );
 
         if is_active {
             *bg_color = BackgroundColor(AppColors::PRIMARY);

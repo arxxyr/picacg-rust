@@ -18,11 +18,5 @@ pub fn setup_fonts(asset_server: Res<AssetServer>, mut app_font: ResMut<AppFont>
 }
 
 /// 应用字体资源
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Default)]
 pub struct AppFont(pub Handle<Font>);
-
-impl Default for AppFont {
-    fn default() -> Self {
-        Self(Handle::default())
-    }
-}

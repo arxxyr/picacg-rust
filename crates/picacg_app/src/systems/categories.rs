@@ -334,7 +334,6 @@ pub fn refresh_categories_ui(
     asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
     scroll_container_query: Query<(Entity, Option<&Children>), With<CategoriesScrollContainer>>,
-    card_query: Query<&CategoryCard>,
     error_query: Query<Entity, With<ErrorMessage>>,
 ) {
     // 只在状态变化时检查
@@ -345,46 +344,32 @@ pub fn refresh_categories_ui(
     // 如果有错误，显示错误信息
     if let Some(ref error) = categories_state.error {
         // 如果还没有错误信息 UI，添加它
-        if error_query.is_empty() {
-            if let Ok((container_entity, _)) = scroll_container_query.single() {
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
-                let error_entity = commands
-                    .spawn((
-                        ErrorMessage,
-                        Text::new(error.clone()),
-                        TextFont {
-                            font,
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::ERROR),
-                    ))
-                    .id();
-                commands.entity(container_entity).add_child(error_entity);
-            }
+        if error_query.is_empty()
+            && let Ok((container_entity, _)) = scroll_container_query.single()
+        {
+            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let error_entity = commands
+                .spawn((
+                    ErrorMessage,
+                    Text::new(error.clone()),
+                    TextFont {
+                        font,
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::ERROR),
+                ))
+                .id();
+            commands.entity(container_entity).add_child(error_entity);
         }
-        return;
     }
 
     // 如果数据存在或已有卡片，让瀑布式系统处理，不干涉
-    if !categories_state.categories.is_empty() {
-        return;
-    }
-
-    // 检查是否已有卡片
-    if let Ok((_, children)) = scroll_container_query.single() {
-        let has_cards = children
-            .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
-            .unwrap_or(false);
-        if has_cards {
-            return;
-        }
-    }
-
-    // 数据为空且没有卡片，不做任何操作（保持加载中状态）
+    // 数据为空且没有卡片则保持加载中状态
 }
 
 /// 瀑布式显示分类卡片（预创建所有隐藏卡片，然后分批显示）
+#[allow(clippy::too_many_arguments)]
 pub fn waterfall_create_category_cards(
     mut commands: Commands,
     mut creation_state: ResMut<CategoriesCardCreationState>,
@@ -608,7 +593,7 @@ pub fn update_categories_content_size(
     let scale_factor = windows
         .single()
         .ok()
-        .map(|w| w.scale_factor() as f32)
+        .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
     for (scroll_computed, mut content_size_info) in &mut scroll_query {
@@ -636,7 +621,7 @@ pub fn update_categories_content_size(
         let columns = ((available_width + COLUMN_GAP) / card_with_gap)
             .floor()
             .max(1.0) as usize;
-        let rows = (card_count + columns - 1) / columns;
+        let rows = card_count.div_ceil(columns);
 
         // 计算内容高度（逻辑像素）
         let content_height = PADDING_TOP

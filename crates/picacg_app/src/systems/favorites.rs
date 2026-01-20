@@ -709,7 +709,7 @@ pub fn update_favorites_content_size(
     let scale_factor = window_query
         .single()
         .ok()
-        .map(|w| w.scale_factor() as f32)
+        .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
     for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {

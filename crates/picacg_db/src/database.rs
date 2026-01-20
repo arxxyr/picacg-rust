@@ -675,15 +675,23 @@ pub async fn get_completed_download_tasks_async(pool: &SqlitePool) -> Result<Vec
 }
 
 /// 添加已完成章节
+///
+/// 优化：只查询 completed_episodes 字段而不是整行数据
 pub async fn add_completed_episode_async(
     pool: &SqlitePool,
     comic_id: &str,
     episode: i32,
 ) -> Result<()> {
-    let task = get_download_task_async(pool, comic_id).await?;
-    let mut completed = task
-        .as_ref()
-        .map(|t| t.get_completed_episodes())
+    // 只查询 completed_episodes 字段，减少数据传输
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT completed_episodes FROM download_task WHERE comic_id = ?")
+            .bind(comic_id)
+            .fetch_optional(pool)
+            .await?;
+
+    let mut completed: Vec<i32> = row
+        .and_then(|(json,)| json)
+        .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
 
     if !completed.contains(&episode) {

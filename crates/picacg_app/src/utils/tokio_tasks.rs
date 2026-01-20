@@ -5,6 +5,8 @@
 //!
 //! MIT License
 
+#![allow(clippy::type_complexity)]
+
 use std::{
     future::Future,
     sync::{
@@ -177,20 +179,32 @@ pub struct TaskContext {
 
 impl TaskContext {
     /// 在主线程上运行代码
+    ///
+    /// # Panics
+    ///
+    /// 如果主线程 channel 已关闭（通常意味着应用正在终止），会 panic。
+    /// 这是预期行为，因为主线程关闭后无法执行任何回调。
     pub async fn run_on_main_thread<Runnable, Output>(&mut self, runnable: Runnable) -> Output
     where
         Runnable: FnOnce(&mut MainThreadContext) -> Output + Send + 'static,
         Output: Send + 'static,
     {
         let (result_tx, result_rx) = oneshot::channel();
-        self.update_run_tx
+        // 如果发送失败，说明主线程已终止，应用正在关闭
+        if self
+            .update_run_tx
             .send(Box::new(move |world| {
                 let mut ctx = MainThreadContext { world };
                 let result = runnable(&mut ctx);
                 let _ = result_tx.send(result);
             }))
-            .expect("Failed to send runnable to main thread");
-        result_rx.await.expect("Failed to receive result")
+            .is_err()
+        {
+            tracing::warn!("主线程 channel 已关闭，无法执行回调");
+            panic!("主线程 channel 已关闭");
+        }
+        // 等待结果，如果接收失败说明回调未执行
+        result_rx.await.expect("回调结果接收失败，主线程可能已终止")
     }
 
     /// 等待下一个更新周期

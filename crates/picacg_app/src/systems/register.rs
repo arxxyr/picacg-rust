@@ -621,17 +621,17 @@ pub fn register_ime_input(
     mut text_query: Query<(&mut Text, &mut TextColor)>,
 ) {
     for event in ime_events.read() {
-        if let Ime::Commit { value, .. } = event {
-            if let Some(focused_type) = focus.focused {
-                let field = get_field_mut(&mut register_state, focused_type);
-                field.push_str(value);
-                update_register_input_text(
-                    &mut input_query,
-                    &mut text_query,
-                    &register_state,
-                    focused_type,
-                );
-            }
+        if let Ime::Commit { value, .. } = event
+            && let Some(focused_type) = focus.focused
+        {
+            let field = get_field_mut(&mut register_state, focused_type);
+            field.push_str(value);
+            update_register_input_text(
+                &mut input_query,
+                &mut text_query,
+                &register_state,
+                focused_type,
+            );
         }
     }
 }
@@ -903,7 +903,7 @@ fn is_valid_date(date: &str) -> bool {
 
     match (year, month, day) {
         (Some(y), Some(m), Some(d)) => {
-            y >= 1900 && y <= 2100 && m >= 1 && m <= 12 && d >= 1 && d <= 31
+            (1900..=2100).contains(&y) && (1..=12).contains(&m) && (1..=31).contains(&d)
         }
         _ => false,
     }

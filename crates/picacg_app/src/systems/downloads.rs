@@ -2476,7 +2476,7 @@ pub fn update_downloads_content_size(
     let scale_factor = window_query
         .single()
         .ok()
-        .map(|w| w.scale_factor() as f32)
+        .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
     // 滚动容器的上下 padding（各 20px）
@@ -2634,7 +2634,7 @@ pub fn update_floating_header(
     let scale_factor = window_query
         .single()
         .ok()
-        .map(|w| w.scale_factor() as f32)
+        .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
     // 滚动容器的 padding
@@ -2841,7 +2841,7 @@ pub fn floating_header_click_interaction(
                     let scale_factor = window_query
                         .single()
                         .ok()
-                        .map(|w| w.scale_factor() as f32)
+                        .map(|w| w.scale_factor())
                         .unwrap_or(1.0);
 
                     // 区域间距
@@ -2979,10 +2979,10 @@ pub fn delete_download_button_interaction(
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.4));
 
                 // 删除元数据文件
-                if let Some(fsm) = download_state.find_task(&btn.comic_id) {
-                    if let Err(e) = fsm.meta.delete() {
-                        tracing::warn!("删除元数据文件失败: {}", e);
-                    }
+                if let Some(fsm) = download_state.find_task(&btn.comic_id)
+                    && let Err(e) = fsm.meta.delete()
+                {
+                    tracing::warn!("删除元数据文件失败: {}", e);
                 }
 
                 // 从任务列表中删除

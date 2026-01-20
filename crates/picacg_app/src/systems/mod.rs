@@ -2,6 +2,9 @@
 //!
 //! 定义应用中使用的所有系统
 
+// Bevy ECS 系统函数通常需要多个参数进行依赖注入，这是框架设计模式
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 #![allow(unused_imports)]
 
 mod categories;
