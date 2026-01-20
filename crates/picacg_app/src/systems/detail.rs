@@ -684,7 +684,7 @@ pub fn refresh_detail_ui(
     }
 }
 
-/// 内部创建详情 UI（供 refresh 使用）
+/// 内部创建详情 UI（供 setup 和 refresh 共用）
 fn create_detail_ui_internal(
     commands: &mut Commands,
     font: &Handle<Font>,
@@ -701,6 +701,7 @@ fn create_detail_ui_internal(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏

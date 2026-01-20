@@ -114,6 +114,407 @@ pub struct SearchEmptyText;
 
 // ==================== 系统函数 ====================
 
+/// 搜索页面 UI 构建参数
+struct SearchUiBuildParams<'a> {
+    font: &'a Handle<Font>,
+    search_state: &'a SearchState,
+    input_focused: bool,
+}
+
+/// 构建搜索页面 UI（内部函数，供 setup 和 refresh 共用）
+fn build_search_ui(commands: &mut Commands, params: &SearchUiBuildParams) -> Entity {
+    let SearchUiBuildParams {
+        font,
+        search_state,
+        input_focused,
+    } = params;
+
+    let input_border_color = if *input_focused {
+        AppColors::PRIMARY
+    } else {
+        AppColors::BORDER
+    };
+
+    commands
+        .spawn((
+            SearchRoot,
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+            BackgroundColor(AppColors::BACKGROUND),
+            Transform::default(),
+        ))
+        .with_children(|root| {
+            // 搜索头部（输入框 + 按钮）
+            spawn_search_header(root, font, search_state, *input_focused, input_border_color);
+
+            // 滚动区域包装器
+            spawn_scroll_area(root, font, search_state);
+
+            // 分页控件
+            spawn_pagination_controls(root, font, search_state);
+        })
+        .id()
+}
+
+/// 创建搜索头部（图标 + 输入框 + 按钮）
+fn spawn_search_header(
+    root: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+    input_focused: bool,
+    input_border_color: Color,
+) {
+    root.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(15.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        },
+        BorderColor::all(AppColors::BORDER),
+        Transform::default(),
+    ))
+    .with_children(|header| {
+        // 搜索图标
+        header.spawn((
+            Text::new("\u{1F50D}"),
+            TextFont {
+                font: font.clone(),
+                font_size: 20.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+        ));
+
+        // 搜索输入框容器
+        let (display_text, text_color) = if search_state.keyword.is_empty() {
+            (
+                "输入关键词搜索漫画、作者、标签...".to_string(),
+                AppColors::TEXT_SECONDARY,
+            )
+        } else {
+            (search_state.keyword.clone(), AppColors::TEXT)
+        };
+
+        header
+            .spawn((
+                SearchInputField {
+                    focused: input_focused,
+                },
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(400.0),
+                    height: Val::Px(40.0),
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BorderColor::all(input_border_color),
+                BackgroundColor(AppColors::CARD_BG),
+                Transform::default(),
+            ))
+            .with_children(|input| {
+                input.spawn((
+                    SearchInputText,
+                    Text::new(display_text),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(text_color),
+                ));
+            });
+
+        // 搜索按钮
+        header
+            .spawn((
+                SearchButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(80.0),
+                    height: Val::Px(40.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(AppColors::PRIMARY),
+                Transform::default(),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("搜索"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
+    });
+}
+
+/// 创建滚动区域
+fn spawn_scroll_area(
+    root: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+) {
+    root.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            flex_basis: Val::Px(0.0),
+            min_height: Val::Px(0.0),
+            position_type: PositionType::Relative,
+            ..default()
+        },
+        Transform::default(),
+    ))
+    .with_children(|wrapper| {
+        let scroll_container = wrapper
+            .spawn((
+                SearchScrollContainer,
+                ScrollContainer,
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+                ScrollPosition::default(),
+                ContentSizeInfo::default(),
+            ))
+            .with_children(|scroll| {
+                spawn_scroll_content(scroll, font, search_state);
+            })
+            .id();
+
+        spawn_scrollbar_inline(wrapper, scroll_container);
+    });
+}
+
+/// 创建滚动内容（根据状态显示不同内容）
+fn spawn_scroll_content(
+    scroll: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+) {
+    if search_state.is_loading {
+        scroll.spawn((
+            SearchLoadingText,
+            Text::new("正在搜索..."),
+            TextFont {
+                font: font.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+    } else if let Some(error) = &search_state.error {
+        scroll.spawn((
+            SearchErrorText,
+            Text::new(format!("搜索失败: {}", error)),
+            TextFont {
+                font: font.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(Color::srgb(0.9, 0.3, 0.3)),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+    } else if search_state.has_searched && search_state.results.is_empty() {
+        scroll.spawn((
+            SearchEmptyText,
+            Text::new(format!("未找到与 \"{}\" 相关的漫画", search_state.keyword)),
+            TextFont {
+                font: font.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+    } else if !search_state.has_searched {
+        scroll.spawn((
+            Text::new("输入关键词开始搜索"),
+            TextFont {
+                font: font.clone(),
+                font_size: 16.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+            Node {
+                margin: UiRect::all(Val::Px(20.0)),
+                ..default()
+            },
+        ));
+    } else {
+        // 搜索结果
+        scroll.spawn((
+            Text::new(format!(
+                "共找到 {} 页结果（第 {} 页）",
+                search_state.total_pages, search_state.page
+            )),
+            TextFont {
+                font: font.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+            Node {
+                margin: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(15.0), Val::Px(10.0)),
+                ..default()
+            },
+        ));
+
+        scroll.spawn((
+            SearchResultsGrid,
+            Node {
+                width: Val::Percent(100.0),
+                flex_wrap: FlexWrap::Wrap,
+                padding: UiRect {
+                    left: Val::Px(search_layout::PADDING_LEFT),
+                    right: Val::Px(search_layout::PADDING_RIGHT),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(search_layout::PADDING_BOTTOM),
+                },
+                column_gap: Val::Px(search_layout::COLUMN_GAP),
+                row_gap: Val::Px(search_layout::ROW_GAP),
+                ..default()
+            },
+        ));
+    }
+}
+
+/// 创建分页控件
+fn spawn_pagination_controls(
+    root: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+) {
+    root.spawn((
+        SearchPaginationContainer,
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(50.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(20.0),
+            border: UiRect::top(Val::Px(1.0)),
+            ..default()
+        },
+        BorderColor::all(AppColors::BORDER),
+        BackgroundColor(AppColors::SURFACE),
+        Transform::default(),
+    ))
+    .with_children(|pagination| {
+        // 上一页按钮
+        let prev_color = if search_state.page > 1 {
+            AppColors::PRIMARY
+        } else {
+            AppColors::SECONDARY
+        };
+        pagination
+            .spawn((
+                SearchPrevPageButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(80.0),
+                    height: Val::Px(36.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(prev_color),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("上一页"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
+
+        // 页码
+        pagination.spawn((
+            SearchPageNumberText,
+            Text::new(format!(
+                "{} / {}",
+                search_state.page,
+                search_state.total_pages.max(1)
+            )),
+            TextFont {
+                font: font.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT),
+        ));
+
+        // 下一页按钮
+        let next_color = if search_state.page < search_state.total_pages {
+            AppColors::PRIMARY
+        } else {
+            AppColors::SECONDARY
+        };
+        pagination
+            .spawn((
+                SearchNextPageButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(80.0),
+                    height: Val::Px(36.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(next_color),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("下一页"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
+    });
+}
+
 /// 创建搜索界面
 pub fn setup_search_ui(
     mut commands: Commands,
@@ -125,374 +526,19 @@ pub fn setup_search_ui(
     let font: Handle<Font> = asset_server.load(FONT_PATH);
     let content_area = content_area_query.single().ok();
 
-    // 清空之前的创建状态
     creation_state.clear();
 
-    let search_root = commands
-        .spawn((
-            SearchRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
-        .with_children(|root| {
-            // 搜索头部（输入框 + 按钮）
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                Transform::default(),
-            ))
-            .with_children(|header| {
-                // 搜索图标
-                header.spawn((
-                    Text::new("🔍"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                // 搜索输入框容器
-                header
-                    .spawn((
-                        SearchInputField { focused: false },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(400.0),
-                            height: Val::Px(40.0),
-                            padding: UiRect::horizontal(Val::Px(12.0)),
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BorderColor::all(AppColors::BORDER),
-                        BackgroundColor(AppColors::CARD_BG),
-                        Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
-                                               * 位置计算） */
-                    ))
-                    .with_children(|input| {
-                        let display_text = if search_state.keyword.is_empty() {
-                            "输入关键词搜索漫画、作者、标签...".to_string()
-                        } else {
-                            search_state.keyword.clone()
-                        };
-                        let text_color = if search_state.keyword.is_empty() {
-                            AppColors::TEXT_SECONDARY
-                        } else {
-                            AppColors::TEXT
-                        };
-
-                        input.spawn((
-                            SearchInputText,
-                            Text::new(display_text),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(text_color),
-                        ));
-                    });
-
-                // 搜索按钮
-                header
-                    .spawn((
-                        SearchButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(40.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                        Transform::default(),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("搜索"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器（用于放置滚动条）
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|wrapper| {
-                // 滚动容器
-                let scroll_container = wrapper
-                    .spawn((
-                        SearchScrollContainer,
-                        ScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|scroll| {
-                        // 加载中提示
-                        if search_state.is_loading {
-                            scroll.spawn((
-                                SearchLoadingText,
-                                Text::new("正在搜索..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 错误提示
-                        else if let Some(error) = &search_state.error {
-                            scroll.spawn((
-                                SearchErrorText,
-                                Text::new(format!("搜索失败: {}", error)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.9, 0.3, 0.3)),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 空结果提示
-                        else if search_state.has_searched && search_state.results.is_empty() {
-                            scroll.spawn((
-                                SearchEmptyText,
-                                Text::new(format!(
-                                    "未找到与 \"{}\" 相关的漫画",
-                                    search_state.keyword
-                                )),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 初始提示
-                        else if !search_state.has_searched {
-                            scroll.spawn((
-                                Text::new("输入关键词开始搜索"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 搜索结果
-                        else {
-                            // 结果统计
-                            scroll.spawn((
-                                Text::new(format!(
-                                    "共找到 {} 页结果（第 {} 页）",
-                                    search_state.total_pages, search_state.page
-                                )),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::new(
-                                        Val::Px(20.0),
-                                        Val::Px(20.0),
-                                        Val::Px(15.0),
-                                        Val::Px(10.0),
-                                    ),
-                                    ..default()
-                                },
-                            ));
-
-                            // 结果网格（卡片通过瀑布式创建系统添加）
-                            scroll.spawn((
-                                SearchResultsGrid,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    flex_wrap: FlexWrap::Wrap,
-                                    padding: UiRect {
-                                        left: Val::Px(search_layout::PADDING_LEFT),
-                                        right: Val::Px(search_layout::PADDING_RIGHT),
-                                        top: Val::Px(0.0),
-                                        bottom: Val::Px(search_layout::PADDING_BOTTOM),
-                                    },
-                                    column_gap: Val::Px(search_layout::COLUMN_GAP),
-                                    row_gap: Val::Px(search_layout::ROW_GAP),
-                                    ..default()
-                                },
-                            ));
-                        }
-                    })
-                    .id();
-
-                // 滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container);
-            });
-
-            // 分页控件（固定在底部）
-            root.spawn((
-                SearchPaginationContainer,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(50.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(20.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(AppColors::SURFACE),
-                Transform::default(),
-            ))
-            .with_children(|pagination| {
-                // 上一页按钮
-                pagination
-                    .spawn((
-                        SearchPrevPageButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if search_state.page > 1 {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("上一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                // 页码
-                pagination.spawn((
-                    SearchPageNumberText,
-                    Text::new(format!(
-                        "{} / {}",
-                        search_state.page,
-                        search_state.total_pages.max(1)
-                    )),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 下一页按钮
-                pagination
-                    .spawn((
-                        SearchNextPageButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if search_state.page < search_state.total_pages {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("下一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-        })
-        .id();
+    let params = SearchUiBuildParams {
+        font: &font,
+        search_state: &search_state,
+        input_focused: false,
+    };
+    let search_root = build_search_ui(&mut commands, &params);
 
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(search_root);
     }
 
-    // 启动预创建模式
     if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
     {
         creation_state.start_precreate(search_state.results.len(), font);
@@ -1225,388 +1271,22 @@ pub fn refresh_search_ui(
         commands.entity(entity).despawn();
     }
 
-    // 清空之前的创建状态
     creation_state.clear();
 
-    // 重新创建 UI
     let font: Handle<Font> = asset_server.load(FONT_PATH);
-    let content_area = content_area_query.single().ok();
-
-    let Some(content_entity) = content_area else {
+    let Some(content_entity) = content_area_query.single().ok() else {
         return;
     };
 
-    // 创建搜索页面 UI
-    let search_root = commands
-        .spawn((
-            SearchRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
-        .with_children(|root| {
-            // 搜索头部（输入框 + 按钮）
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                Transform::default(),
-            ))
-            .with_children(|header| {
-                // 搜索图标
-                header.spawn((
-                    Text::new("🔍"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                // 搜索输入框容器（恢复焦点状态）
-                let input_border_color = if was_focused {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                };
-                header
-                    .spawn((
-                        SearchInputField {
-                            focused: was_focused,
-                        },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(400.0),
-                            height: Val::Px(40.0),
-                            padding: UiRect::horizontal(Val::Px(12.0)),
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BorderColor::all(input_border_color),
-                        BackgroundColor(AppColors::CARD_BG),
-                        Transform::default(), /* 需要 Transform 以获得 GlobalTransform（IME
-                                               * 位置计算） */
-                    ))
-                    .with_children(|input| {
-                        let display_text = if search_state.keyword.is_empty() {
-                            "输入关键词搜索漫画、作者、标签...".to_string()
-                        } else {
-                            search_state.keyword.clone()
-                        };
-                        let text_color = if search_state.keyword.is_empty() {
-                            AppColors::TEXT_SECONDARY
-                        } else {
-                            AppColors::TEXT
-                        };
-
-                        input.spawn((
-                            SearchInputText,
-                            Text::new(display_text),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(text_color),
-                        ));
-                    });
-
-                // 搜索按钮
-                header
-                    .spawn((
-                        SearchButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(40.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                        Transform::default(),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("搜索"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器（用于放置滚动条）
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|wrapper| {
-                // 滚动容器
-                let scroll_container = wrapper
-                    .spawn((
-                        SearchScrollContainer,
-                        ScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|scroll| {
-                        // 加载中提示
-                        if search_state.is_loading {
-                            scroll.spawn((
-                                SearchLoadingText,
-                                Text::new("正在搜索..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 错误提示
-                        else if let Some(error) = &search_state.error {
-                            scroll.spawn((
-                                SearchErrorText,
-                                Text::new(format!("搜索失败: {}", error)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.9, 0.3, 0.3)),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 空结果提示
-                        else if search_state.has_searched && search_state.results.is_empty() {
-                            scroll.spawn((
-                                SearchEmptyText,
-                                Text::new(format!(
-                                    "未找到与 \"{}\" 相关的漫画",
-                                    search_state.keyword
-                                )),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 初始提示
-                        else if !search_state.has_searched {
-                            scroll.spawn((
-                                Text::new("输入关键词开始搜索"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::all(Val::Px(20.0)),
-                                    ..default()
-                                },
-                            ));
-                        }
-                        // 搜索结果
-                        else {
-                            // 结果统计
-                            scroll.spawn((
-                                Text::new(format!(
-                                    "共找到 {} 页结果（第 {} 页）",
-                                    search_state.total_pages, search_state.page
-                                )),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                                Node {
-                                    margin: UiRect::new(
-                                        Val::Px(20.0),
-                                        Val::Px(20.0),
-                                        Val::Px(15.0),
-                                        Val::Px(10.0),
-                                    ),
-                                    ..default()
-                                },
-                            ));
-
-                            // 结果网格（卡片通过瀑布式创建系统添加）
-                            scroll.spawn((
-                                SearchResultsGrid,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    flex_wrap: FlexWrap::Wrap,
-                                    padding: UiRect {
-                                        left: Val::Px(search_layout::PADDING_LEFT),
-                                        right: Val::Px(search_layout::PADDING_RIGHT),
-                                        top: Val::Px(0.0),
-                                        bottom: Val::Px(search_layout::PADDING_BOTTOM),
-                                    },
-                                    column_gap: Val::Px(search_layout::COLUMN_GAP),
-                                    row_gap: Val::Px(search_layout::ROW_GAP),
-                                    ..default()
-                                },
-                            ));
-                        }
-                    })
-                    .id();
-
-                // 滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container);
-            });
-
-            // 分页控件（固定在底部）
-            root.spawn((
-                SearchPaginationContainer,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(50.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(20.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(AppColors::SURFACE),
-                Transform::default(),
-            ))
-            .with_children(|pagination| {
-                // 上一页按钮
-                pagination
-                    .spawn((
-                        SearchPrevPageButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if search_state.page > 1 {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("上一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                // 页码
-                pagination.spawn((
-                    SearchPageNumberText,
-                    Text::new(format!(
-                        "{} / {}",
-                        search_state.page,
-                        search_state.total_pages.max(1)
-                    )),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 下一页按钮
-                pagination
-                    .spawn((
-                        SearchNextPageButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(80.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(if search_state.page < search_state.total_pages {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::SECONDARY
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("下一页"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-        })
-        .id();
+    let params = SearchUiBuildParams {
+        font: &font,
+        search_state: &search_state,
+        input_focused: was_focused,
+    };
+    let search_root = build_search_ui(&mut commands, &params);
 
     commands.entity(content_entity).add_child(search_root);
 
-    // 启动预创建模式
     if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
     {
         creation_state.start_precreate(search_state.results.len(), font);
