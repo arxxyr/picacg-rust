@@ -375,6 +375,10 @@ pub struct DownloadStatusText {
 #[derive(Component)]
 pub struct OpenDownloadFolderButton;
 
+/// 打开 CBZ 文件夹按钮标记
+#[derive(Component)]
+pub struct OpenCbzFolderButton;
+
 /// 暂停下载按钮标记
 #[derive(Component)]
 pub struct PauseDownloadButton {
@@ -396,6 +400,30 @@ pub struct DeleteDownloadButton {
 /// 重试下载按钮标记
 #[derive(Component)]
 pub struct RetryDownloadButton {
+    pub comic_id: String,
+}
+
+/// 下载任务独立设置按钮标记
+#[derive(Component)]
+pub struct DownloadTaskSettingsButton {
+    pub comic_id: String,
+}
+
+/// 下载任务独立设置面板标记
+#[derive(Component)]
+pub struct DownloadTaskSettingsPanel {
+    pub comic_id: String,
+}
+
+/// 下载任务独立路径选择按钮
+#[derive(Component)]
+pub struct TaskPathSelectButton {
+    pub comic_id: String,
+}
+
+/// 下载任务独立 CBZ 开关
+#[derive(Component)]
+pub struct TaskCbzToggle {
     pub comic_id: String,
 }
 
@@ -1083,35 +1111,77 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                 TextColor(AppColors::TEXT),
             ));
 
-            // 打开文件夹按钮
+            // 按钮组容器
             header
-                .spawn((
-                    OpenDownloadFolderButton,
-                    Button,
-                    Node {
-                        padding: UiRect::new(
-                            Val::Px(12.0),
-                            Val::Px(12.0),
-                            Val::Px(6.0),
-                            Val::Px(6.0),
-                        ),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                    BorderColor::all(AppColors::BORDER),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new("\u{F0770} 打开文件夹"), // 󰝰 nf-md-folder_open
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 13.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                },))
+                .with_children(|btn_group| {
+                    // 打开原图文件夹按钮
+                    btn_group
+                        .spawn((
+                            OpenDownloadFolderButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(12.0),
+                                    Val::Px(12.0),
+                                    Val::Px(6.0),
+                                    Val::Px(6.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("\u{F0770} 原图"), // 󰝰 nf-md-folder_open
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+
+                    // 打开 CBZ 文件夹按钮
+                    btn_group
+                        .spawn((
+                            OpenCbzFolderButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(12.0),
+                                    Val::Px(12.0),
+                                    Val::Px(6.0),
+                                    Val::Px(6.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("\u{F0770} CBZ"), // 󰝰 nf-md-folder_open
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
                 });
         });
 }
@@ -1395,8 +1465,40 @@ fn spawn_download_task_item(
                                 Color::srgb(0.8, 0.3, 0.3),
                                 can_delete,
                             );
+
+                            // 设置按钮（独立下载设置）
+                            spawn_control_button_with_display(
+                                btns,
+                                font,
+                                "\u{F0493}", // 󰒓 nf-md-cog
+                                DownloadTaskSettingsButton {
+                                    comic_id: task.comic_id.clone(),
+                                },
+                                Color::srgb(0.5, 0.5, 0.7),
+                                true,
+                            );
                         });
                 });
+
+            // 独立设置标注（如果有自定义设置）
+            if task.custom_download_path.is_some() || task.custom_auto_pack_cbz.is_some() {
+                let mut settings_parts = Vec::new();
+                if let Some(ref path) = task.custom_download_path {
+                    settings_parts.push(format!("路径: {}", path));
+                }
+                if let Some(cbz) = task.custom_auto_pack_cbz {
+                    settings_parts.push(format!("CBZ: {}", if cbz { "开" } else { "关" }));
+                }
+                item.spawn((
+                    Text::new(format!("\u{F0493} {}", settings_parts.join(" | "))),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 10.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgba(0.5, 0.5, 0.7, 0.8)),
+                ));
+            }
         });
 }
 
@@ -1590,6 +1692,20 @@ fn spawn_completed_download_item(
                         });
                     }
 
+                    // 设置按钮（独立下载设置）
+                    if has_comic_id {
+                        spawn_control_button_with_display(
+                            btns,
+                            font,
+                            "\u{F0493}", // 󰒓 nf-md-cog
+                            DownloadTaskSettingsButton {
+                                comic_id: download.comic_id.clone(),
+                            },
+                            Color::srgb(0.5, 0.5, 0.7),
+                            true,
+                        );
+                    }
+
                     // 打开文件夹按钮
                     btns.spawn((
                         OpenCompletedFolderButton {
@@ -1732,6 +1848,55 @@ pub fn open_download_folder_interaction(
                 }
 
                 tracing::info!("打开下载文件夹: {:?}", download_path);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+/// 打开 CBZ 文件夹按钮交互
+pub fn open_cbz_folder_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<OpenCbzFolderButton>),
+    >,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
+
+                // 打开 CBZ 文件夹
+                let cbz_path = get_download_base_path().join("CBZ");
+
+                // 如果目录不存在则创建
+                if !cbz_path.exists() {
+                    let _ = std::fs::create_dir_all(&cbz_path);
+                }
+
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("explorer")
+                        .arg(&cbz_path)
+                        .spawn();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open").arg(&cbz_path).spawn();
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg(&cbz_path)
+                        .spawn();
+                }
+
+                tracing::info!("打开 CBZ 文件夹: {:?}", cbz_path);
             }
             Interaction::Hovered => {
                 *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
@@ -3419,6 +3584,342 @@ pub fn download_tag_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgba(0.2, 0.6, 0.4, 0.3));
+            }
+        }
+    }
+}
+
+/// 下载任务独立设置按钮交互
+///
+/// 点击设置按钮后，展开/收起内联设置面板（路径选择 + CBZ 开关）
+pub fn task_settings_button_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<(&Interaction, &DownloadTaskSettingsButton), Changed<Interaction>>,
+    panel_query: Query<(Entity, &DownloadTaskSettingsPanel)>,
+    download_state: Res<DownloadManagerState>,
+    asset_server: Res<AssetServer>,
+    task_item_query: Query<(Entity, &DownloadTaskItem)>,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+) {
+    for (interaction, settings_btn) in &mut interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let comic_id = &settings_btn.comic_id;
+
+        // 检查是否已有面板，有则关闭
+        let existing_panel = panel_query
+            .iter()
+            .find(|(_, panel)| panel.comic_id == *comic_id);
+
+        if let Some((panel_entity, _)) = existing_panel {
+            commands.entity(panel_entity).despawn();
+            continue;
+        }
+
+        // 找到父任务项 Entity
+        let parent_entity = task_item_query
+            .iter()
+            .find(|(_, item)| item.comic_id == *comic_id)
+            .map(|(e, _)| e)
+            .or_else(|| {
+                completed_item_query
+                    .iter()
+                    .find(|(_, item)| item.comic_id == *comic_id)
+                    .map(|(e, _)| e)
+            });
+
+        let Some(parent_entity) = parent_entity else {
+            continue;
+        };
+
+        // 获取当前任务的设置
+        let task = download_state.find_task(comic_id);
+        let custom_path = task.and_then(|t| t.meta.custom_download_path.clone());
+        let custom_cbz = task.and_then(|t| t.meta.custom_auto_pack_cbz);
+
+        let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+        // 创建设置面板
+        let panel_entity = commands
+            .spawn((
+                DownloadTaskSettingsPanel {
+                    comic_id: comic_id.clone(),
+                },
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    padding: UiRect::all(Val::Px(10.0)),
+                    row_gap: Val::Px(8.0),
+                    border: UiRect::top(Val::Px(1.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
+                BorderColor::all(Color::srgba(0.3, 0.3, 0.5, 0.5)),
+            ))
+            .with_children(|panel| {
+                // 标题
+                panel.spawn((
+                    Text::new("独立设置"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(Color::srgb(0.5, 0.5, 0.7)),
+                ));
+
+                // 下载路径行
+                panel
+                    .spawn((Node {
+                        width: Val::Percent(100.0),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },))
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new("路径:"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 11.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+
+                        let path_text = custom_path.as_deref().unwrap_or("(使用全局设置)");
+                        row.spawn((
+                            Text::new(path_text),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 11.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                            Node {
+                                flex_grow: 1.0,
+                                ..default()
+                            },
+                        ));
+
+                        // 选择路径按钮
+                        row.spawn((
+                            TaskPathSelectButton {
+                                comic_id: comic_id.clone(),
+                            },
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("\u{F0770} 选择"), // 󰝰
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                    });
+
+                // CBZ 打包开关行
+                panel
+                    .spawn((Node {
+                        width: Val::Percent(100.0),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },))
+                    .with_children(|row| {
+                        row.spawn((
+                            Text::new("CBZ 打包:"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 11.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+
+                        let cbz_text = match custom_cbz {
+                            Some(true) => "开启",
+                            Some(false) => "关闭",
+                            None => "(使用全局设置)",
+                        };
+
+                        // 三态切换按钮：全局 → 开启 → 关闭 → 全局
+                        row.spawn((
+                            TaskCbzToggle {
+                                comic_id: comic_id.clone(),
+                            },
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(12.0),
+                                    Val::Px(12.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(match custom_cbz {
+                                Some(true) => Color::srgb(0.2, 0.5, 0.3).with_alpha(0.3),
+                                Some(false) => Color::srgb(0.5, 0.2, 0.2).with_alpha(0.3),
+                                None => Color::srgb(0.15, 0.15, 0.2),
+                            }),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(cbz_text),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                    });
+            })
+            .id();
+
+        commands.entity(parent_entity).add_child(panel_entity);
+    }
+}
+
+/// 下载任务路径选择按钮交互
+pub fn task_path_select_interaction(
+    mut interaction_query: Query<(&Interaction, &TaskPathSelectButton), Changed<Interaction>>,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    for (interaction, path_btn) in &mut interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let comic_id = &path_btn.comic_id;
+
+        // 使用 rfd 文件对话框选择文件夹
+        let dialog = rfd::FileDialog::new();
+        let Some(selected_path) = dialog.pick_folder() else {
+            continue;
+        };
+        let new_path = selected_path.to_string_lossy().to_string();
+
+        // 获取当前任务
+        let Some(fsm) = download_state.find_task_mut(comic_id) else {
+            continue;
+        };
+
+        let old_path = fsm.meta.save_path.clone();
+
+        // 更新路径
+        fsm.meta.custom_download_path = Some(new_path.clone());
+
+        // 如果旧路径存在，尝试移动文件
+        let old_dir = std::path::Path::new(&old_path);
+        if old_dir.exists() && old_dir.is_dir() {
+            let new_dir = std::path::Path::new(&new_path);
+            // 获取旧路径的文件夹名
+            if let Some(folder_name) = old_dir.file_name() {
+                let target_dir = new_dir.join(folder_name);
+                if !target_dir.exists() {
+                    if let Err(e) = move_dir_recursive(old_dir, &target_dir) {
+                        tracing::error!("移动下载文件失败: {}", e);
+                    } else {
+                        // 更新 save_path 为新目标
+                        fsm.meta.save_path = target_dir.to_string_lossy().to_string();
+                        tracing::info!("已移动下载文件: {} -> {}", old_path, fsm.meta.save_path);
+                    }
+                }
+            }
+        }
+
+        // 保存到数据库
+        if let Err(e) = fsm.meta.save() {
+            tracing::error!("保存独立路径设置失败: {}", e);
+        }
+    }
+}
+
+/// 递归移动目录
+fn move_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    // 先尝试 rename（同文件系统的情况下最快）
+    if std::fs::rename(src, dst).is_ok() {
+        return Ok(());
+    }
+
+    // rename 失败（可能跨文件系统），逐文件复制
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            move_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    // 删除原目录
+    std::fs::remove_dir_all(src)?;
+    Ok(())
+}
+
+/// 下载任务 CBZ 开关交互（三态循环：全局 → 开启 → 关闭 → 全局）
+pub fn task_cbz_toggle_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<(&Interaction, &TaskCbzToggle), Changed<Interaction>>,
+    mut download_state: ResMut<DownloadManagerState>,
+    panel_query: Query<(Entity, &DownloadTaskSettingsPanel)>,
+) {
+    for (interaction, cbz_toggle) in &mut interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let comic_id = &cbz_toggle.comic_id;
+
+        let Some(fsm) = download_state.find_task_mut(comic_id) else {
+            continue;
+        };
+
+        // 三态切换：None → Some(true) → Some(false) → None
+        fsm.meta.custom_auto_pack_cbz = match fsm.meta.custom_auto_pack_cbz {
+            None => Some(true),
+            Some(true) => Some(false),
+            Some(false) => None,
+        };
+
+        // 保存到数据库
+        if let Err(e) = fsm.meta.save() {
+            tracing::error!("保存 CBZ 设置失败: {}", e);
+        }
+
+        // 关闭并重新打开面板以刷新显示
+        for (panel_entity, panel) in panel_query.iter() {
+            if panel.comic_id == *comic_id {
+                commands.entity(panel_entity).despawn();
             }
         }
     }

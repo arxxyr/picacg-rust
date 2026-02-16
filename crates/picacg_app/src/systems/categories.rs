@@ -1,6 +1,6 @@
 //! 分类浏览系统
 
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy};
+use bevy::{input::mouse::MouseWheel, prelude::*};
 
 use crate::{
     components::*,
@@ -8,7 +8,11 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
-        scrollbar::scrollbar_config::*,
+        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
+        ui_common::{
+            GridLayoutParams, calculate_grid_content_height, calculate_scroll_delta,
+            spawn_scrollbar,
+        },
         waterfall::CategoriesCardCreationState,
     },
 };
@@ -155,7 +159,7 @@ pub fn setup_categories_ui(
                     .id();
 
                 // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
+                spawn_scrollbar(wrapper, scroll_container_id);
             });
         })
         .id();
@@ -167,72 +171,6 @@ pub fn setup_categories_ui(
 
     // 注意：预创建由 waterfall_create_category_cards 的自动检测来启动
     // 不在这里启动，避免与延迟执行的 commands 冲突
-}
-
-/// 内联创建滚动条（用于 ChildSpawnerCommands）
-///
-/// 布局结构：
-/// ScrollbarContainer (Absolute, right=0)
-///   ├── ScrollbarTrack (Button, fills 100%, ZIndex=0)
-///   └── ScrollbarThumb (Button, Absolute, ZIndex=1)
-///
-/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道（与滑块同级，ZIndex 较低）
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                // 添加 Transform 以获得 GlobalTransform（滚动条点击需要）
-                Transform::default(),
-            ));
-
-            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
-            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
 }
 
 /// 创建分类卡片（返回 Entity，可选隐藏）
@@ -524,36 +462,18 @@ pub fn handle_categories_scroll(
     >,
 ) {
     for event in mouse_wheel_events.read() {
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let scroll_delta = match event.unit {
-                bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-                bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-            };
+        let scroll_delta = calculate_scroll_delta(event);
 
-            // 获取内容和视口高度
-            let (content_height, viewport_height) = if let Some(info) = content_size_info {
-                (info.content_height, info.viewport_height)
-            } else {
-                let size = computed_node.size();
-                (size.y, size.y)
-            };
+        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
+            let (content_height, viewport_height) = content_size_info
+                .map(|info| (info.content_height, info.viewport_height))
+                .unwrap_or_else(|| {
+                    let size = computed_node.size();
+                    (size.y, size.y)
+                });
 
             let max_scroll = (content_height - viewport_height).max(0.0);
-
-            // 更新滚动位置
-            let old_scroll = scroll_position.y;
             scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-
-            // 详细日志：每次滚动时输出（trace 级别）
-            tracing::trace!(
-                "[Categories] 滚动: delta={:.1}, old={:.1}, new={:.1}, max={:.1}, content={:.1}, viewport={:.1}",
-                scroll_delta,
-                old_scroll,
-                scroll_position.y,
-                max_scroll,
-                content_height,
-                viewport_height
-            );
         }
     }
 }
@@ -580,8 +500,6 @@ pub fn clamp_categories_scroll(
 }
 
 /// 更新分类页面内容尺寸信息
-///
-/// 使用手动网格计算（基于卡片数量和布局常量）。
 pub fn update_categories_content_size(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
     mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<CategoriesScrollContainer>>,
@@ -589,67 +507,36 @@ pub fn update_categories_content_size(
 ) {
     use category_layout::*;
 
-    // 获取 scale_factor 用于日志
     let scale_factor = windows
         .single()
         .ok()
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
+    let layout_params = GridLayoutParams {
+        card_width: CARD_WIDTH,
+        card_height: CARD_HEIGHT,
+        column_gap: COLUMN_GAP,
+        row_gap: ROW_GAP,
+        padding_left: PADDING_LEFT,
+        padding_right: PADDING_RIGHT,
+        padding_top: PADDING_TOP,
+        padding_bottom: PADDING_BOTTOM,
+    };
+
     for (scroll_computed, mut content_size_info) in &mut scroll_query {
         let viewport_size = scroll_computed.size();
-        // ComputedNode::size() 返回物理像素，转换为逻辑像素
         let viewport_width = viewport_size.x / scale_factor;
         let viewport_height = viewport_size.y / scale_factor;
 
-        // 如果视口尺寸为0，说明布局还没完成
         if viewport_height <= 0.0 || viewport_width <= 0.0 {
             continue;
         }
 
-        // 计算卡片数量
         let card_count = card_query.iter().count();
-        if card_count == 0 {
-            content_size_info.content_height = 0.0;
-            content_size_info.viewport_height = viewport_height;
-            continue;
-        }
-
-        // 计算列数（所有值都是逻辑像素）
-        let available_width = viewport_width - PADDING_LEFT - PADDING_RIGHT;
-        let card_with_gap = CARD_WIDTH + COLUMN_GAP;
-        let columns = ((available_width + COLUMN_GAP) / card_with_gap)
-            .floor()
-            .max(1.0) as usize;
-        let rows = card_count.div_ceil(columns);
-
-        // 计算内容高度（逻辑像素）
-        let content_height = PADDING_TOP
-            + (rows as f32) * CARD_HEIGHT
-            + ((rows.saturating_sub(1)) as f32) * ROW_GAP
-            + PADDING_BOTTOM;
-
-        // 调试日志（值变化时输出）
-        static LAST_DEBUG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let current_hash =
-            ((content_height as u32) as u64) << 32 | ((viewport_height as u32) as u64);
-        let last = LAST_DEBUG.load(std::sync::atomic::Ordering::Relaxed);
-        if current_hash != last {
-            LAST_DEBUG.store(current_hash, std::sync::atomic::Ordering::Relaxed);
-            tracing::trace!(
-                "[Categories] scale={:.2}, cards={}, cols={}, rows={}, viewport={:.0}, content={:.0}, max_scroll={:.0}",
-                scale_factor,
-                card_count,
-                columns,
-                rows,
-                viewport_height,
-                content_height,
-                (content_height - viewport_height).max(0.0)
-            );
-        }
-
-        content_size_info.content_height = content_height;
         content_size_info.viewport_height = viewport_height;
+        content_size_info.content_height =
+            calculate_grid_content_height(viewport_width, card_count, &layout_params);
     }
 }
 

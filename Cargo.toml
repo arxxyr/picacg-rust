@@ -67,6 +67,9 @@ open = "5.3.3"
 # === 文件对话框 ===
 rfd = "0.17.2"
 
+# === 压缩 ===
+zip = { version = "2", default-features = false }
+
 # === 编译配置 ===
 [profile.dev]
 opt-level = 0

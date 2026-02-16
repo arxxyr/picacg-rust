@@ -177,10 +177,14 @@ pub struct ComicsListState {
     pub total_pages: i32,
     /// 排序方式
     pub sort: String,
-    /// 是否正在加载
+    /// 是否正在加载（首次加载）
     pub is_loading: bool,
+    /// 是否正在加载更多（无限滚动追加）
+    pub is_loading_more: bool,
     /// 错误信息
     pub error: Option<String>,
+    /// 保存的滚动位置（用于返回时恢复）
+    pub scroll_y: f32,
 }
 
 impl Default for ComicsListState {
@@ -192,7 +196,9 @@ impl Default for ComicsListState {
             total_pages: 1,
             sort: "dd".to_string(),
             is_loading: false,
+            is_loading_more: false,
             error: None,
+            scroll_y: 0.0,
         }
     }
 }
@@ -591,6 +597,12 @@ pub struct DownloadTaskMeta {
     /// 标签列表
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 独立下载路径（None 时使用全局设置）
+    #[serde(default)]
+    pub custom_download_path: Option<String>,
+    /// 独立 CBZ 打包开关（None 时使用全局设置）
+    #[serde(default)]
+    pub custom_auto_pack_cbz: Option<bool>,
 }
 
 impl DownloadTaskMeta {
@@ -619,7 +631,22 @@ impl DownloadTaskMeta {
             updated_at: now,
             categories,
             tags,
+            custom_download_path: None,
+            custom_auto_pack_cbz: None,
         }
+    }
+
+    /// 获取有效的下载路径（优先使用独立设置，回退到全局）
+    pub fn effective_download_path(&self) -> &str {
+        self.custom_download_path
+            .as_deref()
+            .unwrap_or(&self.save_path)
+    }
+
+    /// 获取有效的 CBZ 打包开关（优先使用独立设置，回退到全局）
+    pub fn effective_auto_pack_cbz(&self) -> bool {
+        self.custom_auto_pack_cbz
+            .unwrap_or_else(|| picacg_config::AppSettings::global().read().auto_pack_cbz)
     }
 
     /// 转换为数据库实体
@@ -675,6 +702,8 @@ impl DownloadTaskMeta {
         db_task.updated_at = self.updated_at;
         db_task.set_categories(&self.categories);
         db_task.set_tags(&self.tags);
+        db_task.custom_download_path = self.custom_download_path.clone();
+        db_task.set_custom_auto_pack_cbz(self.custom_auto_pack_cbz);
 
         db_task
     }
@@ -709,6 +738,8 @@ impl DownloadTaskMeta {
             updated_at: db_task.updated_at,
             categories: db_task.get_categories(),
             tags: db_task.get_tags(),
+            custom_download_path: db_task.custom_download_path.clone(),
+            custom_auto_pack_cbz: db_task.get_custom_auto_pack_cbz(),
         }
     }
 
@@ -884,6 +915,8 @@ impl DownloadTaskFSM {
             save_path: self.meta.save_path.clone(),
             categories: self.meta.categories.clone(),
             tags: self.meta.tags.clone(),
+            custom_download_path: self.meta.custom_download_path.clone(),
+            custom_auto_pack_cbz: self.meta.custom_auto_pack_cbz,
         }
     }
 
@@ -978,6 +1011,10 @@ pub struct ComicDownloadTask {
     pub categories: Vec<String>,
     /// 标签列表
     pub tags: Vec<String>,
+    /// 独立下载路径
+    pub custom_download_path: Option<String>,
+    /// 独立 CBZ 打包开关
+    pub custom_auto_pack_cbz: Option<bool>,
 }
 
 /// 下载管理状态（FSM 架构）

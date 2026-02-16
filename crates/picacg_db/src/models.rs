@@ -162,6 +162,12 @@ pub struct DbDownloadTask {
     pub tags: Option<String>, // JSON 数组
     #[sqlx(default)]
     pub completed_episodes: Option<String>, // JSON 数组：已完成下载的章节号
+    /// 独立下载路径（None 时使用全局设置）
+    #[sqlx(default)]
+    pub custom_download_path: Option<String>,
+    /// 独立 CBZ 打包开关（None 时使用全局设置）
+    #[sqlx(default)]
+    pub custom_auto_pack_cbz: Option<i64>, // 0=false, 1=true, NULL=使用全局
 }
 
 /// 下载状态附加数据（序列化为 JSON 存储）
@@ -197,7 +203,24 @@ impl DbDownloadTask {
             categories: None,
             tags: None,
             completed_episodes: None,
+            custom_download_path: None,
+            custom_auto_pack_cbz: None,
         }
+    }
+
+    /// 获取独立下载路径
+    pub fn get_custom_download_path(&self) -> Option<&str> {
+        self.custom_download_path.as_deref()
+    }
+
+    /// 获取独立 CBZ 打包开关
+    pub fn get_custom_auto_pack_cbz(&self) -> Option<bool> {
+        self.custom_auto_pack_cbz.map(|v| v != 0)
+    }
+
+    /// 设置独立 CBZ 打包开关
+    pub fn set_custom_auto_pack_cbz(&mut self, value: Option<bool>) {
+        self.custom_auto_pack_cbz = value.map(|v| if v { 1 } else { 0 });
     }
 
     /// 获取分类列表

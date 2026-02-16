@@ -1,6 +1,6 @@
 //! 漫画列表系统
 
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy, window::PrimaryWindow};
+use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
 
 use crate::{
     components::*,
@@ -8,17 +8,14 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
-        pagination::{
-            PaginationNextButton, PaginationPageText, PaginationPrevButton,
-            check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
+        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
+        ui_common::{
+            GridLayoutParams, calculate_grid_content_height, calculate_scroll_delta,
+            spawn_scrollbar,
         },
-        scrollbar::scrollbar_config::*,
         waterfall::ComicsCardCreationState,
     },
 };
-
-/// 漫画列表页面标记类型（用于分页组件的泛型参数）
-pub struct ComicsPage;
 
 /// 漫画卡片布局常量
 mod comic_layout {
@@ -151,7 +148,7 @@ pub fn setup_comics_list_ui(
                             overflow: Overflow::scroll_y(),
                             ..default()
                         },
-                        ScrollPosition::default(),
+                        ScrollPosition(Vec2::new(0.0, comics_state.scroll_y)),
                         ContentSizeInfo::default(),
                     ))
                     .with_children(|grid| {
@@ -172,16 +169,10 @@ pub fn setup_comics_list_ui(
                     .id();
 
                 // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
+                spawn_scrollbar(wrapper, scroll_container_id);
             });
 
-            // 分页控件（使用通用分页组件）
-            spawn_pagination_controls::<ComicsPage>(
-                root,
-                &font,
-                comics_state.page.max(0) as u32,
-                comics_state.total_pages.max(0) as u32,
-            );
+            // 无限滚动不再需要分页控件
         })
         .id();
 
@@ -194,72 +185,6 @@ pub fn setup_comics_list_ui(
     if !comics_state.comics.is_empty() && !comics_state.is_loading {
         creation_state.start_precreate(comics_state.comics.len(), font);
     }
-}
-
-/// 内联创建滚动条（用于 ChildSpawnerCommands）
-///
-/// 布局结构：
-/// ScrollbarContainer (Absolute, right=0)
-///   ├── ScrollbarTrack (Button, fills 100%, ZIndex=0)
-///   └── ScrollbarThumb (Button, Absolute, ZIndex=1)
-///
-/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道（与滑块同级，ZIndex 较低）
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                // 添加 Transform 以获得 GlobalTransform（滚动条点击需要）
-                Transform::default(),
-            ));
-
-            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
-            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
 }
 
 /// 创建漫画卡片（返回 Entity，可选隐藏）
@@ -444,12 +369,19 @@ fn spawn_comic_card(
         .id()
 }
 
-/// 清理漫画列表界面
+/// 清理漫画列表界面（退出时保存滚动位置）
 pub fn cleanup_comics_list_ui(
     mut commands: Commands,
     query: Query<Entity, With<ComicsListRoot>>,
     mut creation_state: ResMut<ComicsCardCreationState>,
+    scroll_query: Query<&ScrollPosition, With<ComicsScrollContainer>>,
+    mut comics_state: ResMut<ComicsListState>,
 ) {
+    // 保存滚动位置，返回时恢复
+    if let Ok(scroll_pos) = scroll_query.single() {
+        comics_state.scroll_y = scroll_pos.y;
+    }
+
     // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
     creation_state.clear();
 
@@ -486,58 +418,46 @@ pub fn comic_card_interaction(
     }
 }
 
-/// 分页按钮交互系统
-#[allow(clippy::too_many_arguments)]
-pub fn pagination_interaction(
-    mut commands: Commands,
-    prev_query: Query<&Interaction, (Changed<Interaction>, With<PaginationPrevButton<ComicsPage>>)>,
-    next_query: Query<&Interaction, (Changed<Interaction>, With<PaginationNextButton<ComicsPage>>)>,
-    card_query: Query<Entity, With<ComicCard>>,
+/// 无限滚动自动加载更多漫画
+pub fn auto_load_more_comics(
+    scroll_query: Query<(&ScrollPosition, Option<&ContentSizeInfo>), With<ComicsScrollContainer>>,
     mut comics_state: ResMut<ComicsListState>,
-    mut load_comics_messages: MessageWriter<LoadComicsRequest>,
-    mut creation_state: ResMut<ComicsCardCreationState>,
-    mut scroll_query: Query<&mut ScrollPosition, With<ComicsScrollContainer>>,
+    mut load_messages: MessageWriter<LoadComicsRequest>,
 ) {
-    // 使用通用分页交互检查函数
-    let Some(is_next) = check_pagination_interaction::<ComicsPage>(
-        &prev_query,
-        &next_query,
-        comics_state.page.max(0) as u32,
-        comics_state.total_pages.max(0) as u32,
-    ) else {
+    let Ok((scroll_pos, content_info)) = scroll_query.single() else {
         return;
     };
 
-    // 更新页码
-    if is_next {
+    let Some(info) = content_info else {
+        return;
+    };
+
+    // 视口或内容高度为 0 时不触发
+    if info.viewport_height <= 0.0 || info.content_height <= 0.0 {
+        return;
+    }
+
+    let remaining = info.content_height - info.viewport_height - scroll_pos.y;
+
+    // 距底部 200px 时触发加载下一页
+    if remaining < 200.0
+        && !comics_state.is_loading
+        && !comics_state.is_loading_more
+        && comics_state.page < comics_state.total_pages
+    {
         comics_state.page += 1;
-    } else {
-        comics_state.page -= 1;
+        comics_state.is_loading_more = true;
+        load_messages.write(LoadComicsRequest {
+            category: comics_state.category.clone(),
+            page: comics_state.page,
+            sort: comics_state.sort.clone(),
+        });
+        tracing::debug!(
+            "无限滚动：加载第 {}/{} 页",
+            comics_state.page,
+            comics_state.total_pages
+        );
     }
-
-    // 删除所有旧卡片
-    for entity in card_query.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    // 清除数据和状态
-    comics_state.comics.clear();
-    comics_state.is_loading = true;
-    creation_state.clear();
-
-    // 重置滚动位置
-    for mut scroll_pos in scroll_query.iter_mut() {
-        scroll_pos.y = 0.0;
-    }
-
-    // 发送加载请求
-    load_comics_messages.write(LoadComicsRequest {
-        category: comics_state.category.clone(),
-        page: comics_state.page,
-        sort: comics_state.sort.clone(),
-    });
-
-    tracing::debug!("切换到漫画列表第 {} 页", comics_state.page);
 }
 
 /// 漫画列表页面滚动处理系统
@@ -549,36 +469,18 @@ pub fn handle_comics_scroll(
     >,
 ) {
     for event in mouse_wheel_events.read() {
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let scroll_delta = match event.unit {
-                bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-                bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-            };
+        let scroll_delta = calculate_scroll_delta(event);
 
-            // 获取内容和视口高度
-            let (content_height, viewport_height) = if let Some(info) = content_size_info {
-                (info.content_height, info.viewport_height)
-            } else {
-                let size = computed_node.size();
-                (size.y, size.y)
-            };
+        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
+            let (content_height, viewport_height) = content_size_info
+                .map(|info| (info.content_height, info.viewport_height))
+                .unwrap_or_else(|| {
+                    let size = computed_node.size();
+                    (size.y, size.y)
+                });
 
             let max_scroll = (content_height - viewport_height).max(0.0);
-
-            // 更新滚动位置
-            let old_scroll = scroll_position.y;
             scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-
-            // 详细日志（trace 级别）
-            tracing::trace!(
-                "[Comics] 滚动: delta={:.1}, old={:.1}, new={:.1}, max={:.1}, content={:.1}, viewport={:.1}",
-                scroll_delta,
-                old_scroll,
-                scroll_position.y,
-                max_scroll,
-                content_height,
-                viewport_height
-            );
         }
     }
 }
@@ -605,8 +507,6 @@ pub fn clamp_comics_scroll(
 }
 
 /// 更新漫画列表内容尺寸信息
-///
-/// 使用手动网格计算（基于卡片数量和布局常量）。
 pub fn update_comics_content_size(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<ComicsScrollContainer>>,
@@ -614,67 +514,36 @@ pub fn update_comics_content_size(
 ) {
     use comic_layout::*;
 
-    // 获取 scale_factor
     let scale_factor = windows
         .single()
         .ok()
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
+    let layout_params = GridLayoutParams {
+        card_width: CARD_WIDTH,
+        card_height: CARD_HEIGHT,
+        column_gap: COLUMN_GAP,
+        row_gap: ROW_GAP,
+        padding_left: PADDING_LEFT,
+        padding_right: PADDING_RIGHT,
+        padding_top: PADDING_TOP,
+        padding_bottom: PADDING_BOTTOM,
+    };
+
     for (scroll_computed, mut content_size_info) in &mut scroll_query {
         let viewport_size = scroll_computed.size();
-        // ComputedNode::size() 返回物理像素，转换为逻辑像素
         let viewport_width = viewport_size.x / scale_factor;
         let viewport_height = viewport_size.y / scale_factor;
 
-        // 如果视口尺寸为0，说明布局还没完成
         if viewport_height <= 0.0 || viewport_width <= 0.0 {
             continue;
         }
 
-        // 计算卡片数量
         let card_count = card_query.iter().count();
-        if card_count == 0 {
-            content_size_info.content_height = 0.0;
-            content_size_info.viewport_height = viewport_height;
-            continue;
-        }
-
-        // 计算列数（所有值都是逻辑像素）
-        let available_width = viewport_width - PADDING_LEFT - PADDING_RIGHT;
-        let card_with_gap = CARD_WIDTH + COLUMN_GAP;
-        let columns = ((available_width + COLUMN_GAP) / card_with_gap)
-            .floor()
-            .max(1.0) as usize;
-        let rows = card_count.div_ceil(columns);
-
-        // 计算内容高度（逻辑像素）
-        let content_height = PADDING_TOP
-            + (rows as f32) * CARD_HEIGHT
-            + ((rows.saturating_sub(1)) as f32) * ROW_GAP
-            + PADDING_BOTTOM;
-
-        // 调试日志（值变化时输出）
-        static LAST_DEBUG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let current_hash =
-            ((content_height as u32) as u64) << 32 | ((viewport_height as u32) as u64);
-        let last = LAST_DEBUG.load(std::sync::atomic::Ordering::Relaxed);
-        if current_hash != last {
-            LAST_DEBUG.store(current_hash, std::sync::atomic::Ordering::Relaxed);
-            tracing::trace!(
-                "[Comics] scale={:.2}, cards={}, cols={}, rows={}, viewport={:.0}, content={:.0}, max_scroll={:.0}",
-                scale_factor,
-                card_count,
-                columns,
-                rows,
-                viewport_height,
-                content_height,
-                (content_height - viewport_height).max(0.0)
-            );
-        }
-
-        content_size_info.content_height = content_height;
         content_size_info.viewport_height = viewport_height;
+        content_size_info.content_height =
+            calculate_grid_content_height(viewport_width, card_count, &layout_params);
     }
 }
 
@@ -721,41 +590,7 @@ pub fn refresh_comics_list_ui(
     // 数据为空且没有卡片则保持加载中状态
 }
 
-/// 刷新分页控件 UI（更新页码显示和按钮状态）
-#[allow(clippy::type_complexity)]
-pub fn refresh_comics_pagination_ui(
-    comics_state: Res<ComicsListState>,
-    mut page_text_query: Query<&mut Text, With<PaginationPageText<ComicsPage>>>,
-    mut prev_btn_query: Query<
-        &mut BackgroundColor,
-        (
-            With<PaginationPrevButton<ComicsPage>>,
-            Without<PaginationNextButton<ComicsPage>>,
-        ),
-    >,
-    mut next_btn_query: Query<
-        &mut BackgroundColor,
-        (
-            With<PaginationNextButton<ComicsPage>>,
-            Without<PaginationPrevButton<ComicsPage>>,
-        ),
-    >,
-) {
-    if !comics_state.is_changed() {
-        return;
-    }
-
-    // 使用通用分页显示更新函数
-    update_pagination_display::<ComicsPage>(
-        &mut page_text_query,
-        &mut prev_btn_query,
-        &mut next_btn_query,
-        comics_state.page.max(0) as u32,
-        comics_state.total_pages.max(0) as u32,
-    );
-}
-
-/// 瀑布式显示漫画卡片（预创建所有隐藏卡片，然后分批显示）
+/// 瀑布式显示漫画卡片（支持无限滚动增量创建）
 #[allow(clippy::too_many_arguments)]
 pub fn waterfall_create_comic_cards(
     mut commands: Commands,
@@ -769,36 +604,48 @@ pub fn waterfall_create_comic_cards(
     asset_server: Res<AssetServer>,
 ) {
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
-    // （解决系统执行顺序导致 is_changed() 检测失败的问题）
     if !creation_state.is_creating
         && !comics_state.comics.is_empty()
         && comics_state.error.is_none()
+        && let Ok((_, children)) = scroll_container_query.single()
     {
-        // 检查当前容器中是否有卡片
-        if let Ok((container_entity, children)) = scroll_container_query.single() {
-            // 检查容器的子元素中是否有 ComicCard
-            let has_cards = children
-                .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
-                .unwrap_or(false);
+        // 统计容器中已有的卡片数量
+        let existing_card_count = children
+            .map(|c| {
+                c.iter()
+                    .filter(|child| card_query.get(*child).is_ok())
+                    .count()
+            })
+            .unwrap_or(0);
 
-            if !has_cards {
-                // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
-                for entity in loading_query.iter() {
-                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                        entity_commands.despawn();
-                    }
+        let total_comics = comics_state.comics.len();
+
+        if existing_card_count == 0 && total_comics > 0 {
+            // 首次加载：没有卡片，创建全部
+            for entity in loading_query.iter() {
+                if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                    entity_commands.despawn();
                 }
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
-                creation_state.start_precreate(comics_state.comics.len(), font);
-                tracing::debug!("自动启动漫画卡片预创建: {} 个", comics_state.comics.len());
             }
-            let _ = container_entity; // suppress warning
+            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            creation_state.start_precreate(total_comics, font);
+            tracing::debug!("自动启动漫画卡片预创建: {} 个", total_comics);
+        } else if existing_card_count < total_comics && existing_card_count > 0 {
+            // 无限滚动追加：有新数据追加，增量创建新卡片
+            let new_count = total_comics - existing_card_count;
+            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            creation_state.start_precreate(new_count, font);
+            tracing::debug!(
+                "无限滚动追加卡片: 已有 {}，新增 {}",
+                existing_card_count,
+                new_count
+            );
         }
     }
 
     // 检查是否需要预创建
     if creation_state.needs_precreate() {
-        let Ok((container_entity, _)) = scroll_container_query.single() else {
+        let Ok((container_entity, children)) = scroll_container_query.single() else {
             return;
         };
 
@@ -814,10 +661,22 @@ pub fn waterfall_create_comic_cards(
             return;
         }
 
+        // 计算已有卡片数，从该偏移量开始创建新卡片
+        let existing_card_count = children
+            .map(|c| {
+                c.iter()
+                    .filter(|child| card_query.get(*child).is_ok())
+                    .count()
+            })
+            .unwrap_or(0);
+
+        let start_index = existing_card_count;
+        let end_index = (start_index + count).min(comics.len());
+
         // 一次性创建所有隐藏卡片
-        let mut entities = Vec::with_capacity(count);
+        let mut entities = Vec::with_capacity(end_index - start_index);
         commands.entity(container_entity).with_children(|parent| {
-            for i in 0..count {
+            for i in start_index..end_index {
                 if let Some(comic) = comics.get(i) {
                     let entity = spawn_comic_card(parent, comic, &font, &image_cache, true);
                     entities.push(entity);
@@ -828,7 +687,11 @@ pub fn waterfall_create_comic_cards(
         // 设置预创建完成后的实体列表
         let entity_count = entities.len();
         creation_state.set_precreated_entities(entities);
-        tracing::debug!("漫画卡片预创建完成: {} 个", entity_count);
+        tracing::debug!(
+            "漫画卡片预创建完成: {} 个（从索引 {} 开始）",
+            entity_count,
+            start_index
+        );
         return;
     }
 
@@ -854,7 +717,10 @@ pub fn waterfall_create_comic_cards(
     // 标记显示完成
     if !creation_state.has_pending() {
         creation_state.finish();
-        tracing::debug!("漫画卡片瀑布式显示完成: {} 个", comics_state.comics.len());
+        tracing::debug!(
+            "漫画卡片瀑布式显示完成: 共 {} 个",
+            comics_state.comics.len()
+        );
     }
 }
 

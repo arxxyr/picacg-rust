@@ -71,5 +71,8 @@ open.workspace = true
 # === 文件对话框 ===
 rfd.workspace = true
 
+# === 压缩 ===
+zip.workspace = true
+
 [dev-dependencies]
 tokio-test.workspace = true

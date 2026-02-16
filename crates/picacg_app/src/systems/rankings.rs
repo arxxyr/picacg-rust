@@ -1,6 +1,6 @@
 //! 排行榜页面系统
 
-use bevy::{prelude::*, ui::FocusPolicy, window::PrimaryWindow};
+use bevy::{prelude::*, window::PrimaryWindow};
 use picacg_api::endpoints::RankTimeType;
 
 use crate::{
@@ -9,7 +9,11 @@ use crate::{
     resources::*,
     systems::{
         login::{AppColors, FONT_PATH},
-        scrollbar::scrollbar_config::*,
+        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
+        ui_common::{
+            GridLayoutParams, TagColor, calculate_grid_content_height, calculate_scroll_delta,
+            format_number, spawn_scrollbar, spawn_tag_badge_truncated, truncate_text,
+        },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
 };
@@ -159,7 +163,7 @@ pub fn setup_rankings_ui(
                         .id();
 
                     // 滚动条
-                    spawn_scrollbar_inline(wrapper, scroll_container_id);
+                    spawn_scrollbar(wrapper, scroll_container_id);
                 });
             });
     });
@@ -244,63 +248,6 @@ fn spawn_tab_button(
                     ..default()
                 },
                 TextColor(AppColors::TEXT),
-            ));
-        });
-}
-
-/// 创建滚动条（与收藏/分类一致的实现）
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-            Transform::default(),
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                Transform::default(),
-            ));
-
-            // 滚动条滑块
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
             ));
         });
 }
@@ -889,79 +836,23 @@ fn spawn_comic_card(
                     .with_children(|tags_container| {
                         // 分类（蓝色）
                         for category in comic.categories.iter().take(2) {
-                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
+                            spawn_tag_badge_truncated(
+                                tags_container,
+                                category,
+                                font,
+                                TagColor::Category,
+                                6,
+                            );
                         }
                         // 标签（绿色）
                         for tag in comic.tags.iter().take(2) {
-                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
+                            spawn_tag_badge_truncated(tags_container, tag, font, TagColor::Tag, 6);
                         }
                     });
                 }
             });
         })
         .id()
-}
-
-/// 标签颜色类型
-enum TagColor {
-    /// 分类（蓝色）
-    Category,
-    /// 标签（绿色）
-    Tag,
-}
-
-/// 创建标签徽章
-fn spawn_tag_badge(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    font: &Handle<Font>,
-    color_type: TagColor,
-) {
-    let (bg_color, text_color) = match color_type {
-        TagColor::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
-        TagColor::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
-    };
-
-    parent
-        .spawn((
-            Node {
-                padding: UiRect::new(Val::Px(3.0), Val::Px(3.0), Val::Px(1.0), Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(bg_color),
-        ))
-        .with_children(|badge| {
-            badge.spawn((
-                Text::new(truncate_text(text, 6)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 9.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
-}
-
-/// 截断文本
-fn truncate_text(text: &str, max_chars: usize) -> String {
-    if text.chars().count() > max_chars {
-        format!("{}...", text.chars().take(max_chars).collect::<String>())
-    } else {
-        text.to_string()
-    }
-}
-
-/// 格式化数字
-fn format_number(n: i64) -> String {
-    if n >= 10000 {
-        format!("{:.1}万", n as f64 / 10000.0)
-    } else if n >= 1000 {
-        format!("{:.1}k", n as f64 / 1000.0)
-    } else {
-        n.to_string()
-    }
 }
 
 // ==================== 图片加载 ====================
@@ -1035,10 +926,7 @@ pub fn handle_rankings_scroll(
     mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
     for event in mouse_wheel_events.read() {
-        let scroll_delta = match event.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-        };
+        let scroll_delta = calculate_scroll_delta(event);
 
         for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
             let max_scroll = content_info
@@ -1049,11 +937,11 @@ pub fn handle_rankings_scroll(
     }
 }
 
-/// 更新排行榜内容尺寸（与分类/收藏一致的计算方式）
+/// 更新排行榜内容尺寸
 pub fn update_rankings_content_size(
     mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<RankingsScrollContainer>>,
     card_query: Query<Entity, With<RankingsComicCard>>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
     use layout::*;
 
@@ -1062,6 +950,17 @@ pub fn update_rankings_content_size(
         .ok()
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
+
+    let layout_params = GridLayoutParams {
+        card_width: CARD_WIDTH,
+        card_height: CARD_HEIGHT,
+        column_gap: COLUMN_GAP,
+        row_gap: ROW_GAP,
+        padding_left: PADDING_LEFT,
+        padding_right: PADDING_RIGHT,
+        padding_top: PADDING_TOP,
+        padding_bottom: PADDING_BOTTOM,
+    };
 
     for (scroll_computed, mut content_info) in scroll_query.iter_mut() {
         let viewport_size = scroll_computed.size();
@@ -1073,28 +972,9 @@ pub fn update_rankings_content_size(
         }
 
         let card_count = card_query.iter().count();
-        if card_count == 0 {
-            content_info.content_height = 0.0;
-            content_info.viewport_height = viewport_height;
-            continue;
-        }
-
-        // 计算列数
-        let available_width = viewport_width - PADDING_LEFT - PADDING_RIGHT;
-        let card_with_gap = CARD_WIDTH + COLUMN_GAP;
-        let columns = ((available_width + COLUMN_GAP) / card_with_gap)
-            .floor()
-            .max(1.0) as usize;
-        let rows = card_count.div_ceil(columns);
-
-        // 计算内容高度
-        let content_height = PADDING_TOP
-            + (rows as f32) * CARD_HEIGHT
-            + ((rows.saturating_sub(1)) as f32) * ROW_GAP
-            + PADDING_BOTTOM;
-
         content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
+        content_info.content_height =
+            calculate_grid_content_height(viewport_width, card_count, &layout_params);
     }
 }
 

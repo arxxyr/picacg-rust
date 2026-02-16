@@ -63,6 +63,10 @@ impl Plugin for ApiPlugin {
             .add_message::<DownloadPausedEvent>()
             .add_message::<ResumeDownloadRequest>()
             .add_message::<RedownloadRequest>()
+            // CBZ 打包相关消息
+            .add_message::<CbzPackageRequest>()
+            .add_message::<CbzPackageCompletedEvent>()
+            .add_message::<CbzPackageFailedEvent>()
             // 搜索相关消息
             .add_message::<SearchComicsRequestEvent>()
             .add_message::<SearchResultsLoadedEvent>()
@@ -142,6 +146,15 @@ impl Plugin for ApiPlugin {
             )
             // 注册系统 - 用户注册
             .add_systems(Update, handle_register_request)
+            // 注册系统 - CBZ 打包
+            .add_systems(
+                Update,
+                (
+                    handle_cbz_package_request,
+                    handle_cbz_package_completed,
+                    handle_cbz_package_failed,
+                ),
+            )
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -343,6 +356,7 @@ fn handle_load_comics(
                         ctx.world.write_message(ComicsLoadedEvent {
                             comics: response.comics.docs,
                             total_pages: response.comics.pages,
+                            page,
                         });
                     })
                     .await;
@@ -359,7 +373,7 @@ fn handle_load_comics(
     }
 }
 
-/// 处理漫画列表加载响应
+/// 处理漫画列表加载响应（支持追加模式）
 fn handle_comics_response(
     mut loaded_messages: MessageReader<ComicsLoadedEvent>,
     mut failed_messages: MessageReader<ComicsLoadFailedEvent>,
@@ -367,9 +381,17 @@ fn handle_comics_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
-        comics_state.is_loading = false;
-        comics_state.comics = event.comics.clone();
         comics_state.total_pages = event.total_pages;
+
+        if event.page <= 1 {
+            // 首次加载：替换数据
+            comics_state.is_loading = false;
+            comics_state.comics = event.comics.clone();
+        } else {
+            // 无限滚动追加：合并数据
+            comics_state.is_loading_more = false;
+            comics_state.comics.extend(event.comics.clone());
+        }
 
         // 触发加载图片
         for comic in &event.comics {
@@ -381,6 +403,7 @@ fn handle_comics_response(
 
     for event in failed_messages.read() {
         comics_state.is_loading = false;
+        comics_state.is_loading_more = false;
         comics_state.error = Some(event.error.clone());
     }
 }
@@ -773,10 +796,9 @@ fn handle_comic_detail_response(
             url: event.comic.thumb.url(),
         });
 
-        // 加载章节列表
+        // 加载章节列表（自动获取所有页）
         episodes_messages.write(LoadEpisodesRequest {
             comic_id: detail_state.comic_id.clone(),
-            page: 1,
         });
     }
 
@@ -788,7 +810,7 @@ fn handle_comic_detail_response(
 
 // ==================== 章节列表处理 ====================
 
-/// 处理加载章节列表请求
+/// 处理加载章节列表请求（自动获取所有页）
 fn handle_load_episodes(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<LoadEpisodesRequest>,
@@ -800,31 +822,50 @@ fn handle_load_episodes(
 
         let client = api_client.0.clone();
         let comic_id = event.comic_id.clone();
-        let page = event.page;
 
         runtime.spawn_background_task(move |mut ctx| async move {
             use picacg_api::endpoints::comic::GetEpisodesRequest;
 
-            let request = GetEpisodesRequest { comic_id, page };
+            let mut all_episodes = Vec::new();
+            let mut page = 1;
 
-            match client.request(request).await {
-                Ok(response) => {
-                    ctx.run_on_main_thread(move |ctx| {
-                        ctx.world.write_message(EpisodesLoadedEvent {
-                            episodes: response.eps.docs,
-                            total_pages: response.eps.pages,
-                        });
-                    })
-                    .await;
-                }
-                Err(e) => {
-                    let error = e.to_string();
-                    ctx.run_on_main_thread(move |ctx| {
-                        ctx.world.write_message(EpisodesLoadFailedEvent { error });
-                    })
-                    .await;
+            loop {
+                let request = GetEpisodesRequest {
+                    comic_id: comic_id.clone(),
+                    page,
+                };
+
+                match client.request(request).await {
+                    Ok(response) => {
+                        let total_pages = response.eps.pages;
+                        all_episodes.extend(response.eps.docs);
+                        if page >= total_pages {
+                            break;
+                        }
+                        page += 1;
+                    }
+                    Err(e) => {
+                        let error = e.to_string();
+                        ctx.run_on_main_thread(move |ctx| {
+                            ctx.world.write_message(EpisodesLoadFailedEvent { error });
+                        })
+                        .await;
+                        return;
+                    }
                 }
             }
+
+            // 按章节顺序排序
+            all_episodes.sort_by_key(|e| e.order);
+
+            let total_pages = page;
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(EpisodesLoadedEvent {
+                    episodes: all_episodes,
+                    total_pages,
+                });
+            })
+            .await;
         });
     }
 }
@@ -1145,7 +1186,7 @@ pub fn get_download_base_path_public() -> std::path::PathBuf {
     get_download_base_path()
 }
 
-/// 获取下载保存路径
+/// 获取下载根目录
 /// 优先使用设置中的自定义路径，否则使用程序目录下的 Downloads 文件夹
 fn get_download_base_path() -> std::path::PathBuf {
     // 先检查设置中是否有自定义路径
@@ -1161,6 +1202,18 @@ fn get_download_base_path() -> std::path::PathBuf {
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("Downloads")
+}
+
+/// 获取原图下载保存路径
+/// 新结构：Downloads/Images/<漫画标题>
+fn get_images_download_path() -> std::path::PathBuf {
+    get_download_base_path().join("Images")
+}
+
+/// 获取 CBZ 文件保存目录
+/// 新结构：Downloads/CBZ/<漫画标题>.cbz
+fn get_cbz_output_path() -> std::path::PathBuf {
+    get_download_base_path().join("CBZ")
 }
 
 /// 清理文件名中的非法字符
@@ -1228,7 +1281,7 @@ fn handle_download_comic(
             continue;
         }
 
-        let save_path = get_download_base_path()
+        let save_path = get_images_download_path()
             .join(sanitize_filename(&comic_title))
             .to_string_lossy()
             .to_string();
@@ -1974,9 +2027,16 @@ fn handle_download_progress(
 fn handle_download_completed(
     mut messages: MessageReader<DownloadCompletedEvent>,
     mut download_state: ResMut<DownloadManagerState>,
+    mut cbz_messages: MessageWriter<CbzPackageRequest>,
 ) {
     for event in messages.read() {
         download_state.downloading_ids.remove(&event.comic_id);
+
+        // 获取漫画标题（用于 CBZ 打包）
+        let comic_title = download_state
+            .find_task(&event.comic_id)
+            .map(|fsm| fsm.meta.comic_title.clone())
+            .unwrap_or_default();
 
         // 更新 FSM 状态
         if let Some(fsm) = download_state.find_task_mut(&event.comic_id)
@@ -1986,6 +2046,20 @@ fn handle_download_completed(
         }
 
         tracing::info!("下载完成: {} -> {}", event.comic_id, event.save_path);
+
+        // 检查是否启用了自动打包 CBZ（优先使用任务独立设置）
+        let auto_pack_cbz = download_state
+            .find_task(&event.comic_id)
+            .map(|fsm| fsm.meta.effective_auto_pack_cbz())
+            .unwrap_or_else(|| AppSettings::global().read().auto_pack_cbz);
+        if auto_pack_cbz && !comic_title.is_empty() {
+            tracing::info!("触发 CBZ 打包: {}", comic_title);
+            cbz_messages.write(CbzPackageRequest {
+                comic_id: event.comic_id.clone(),
+                comic_title,
+                source_path: event.save_path.clone(),
+            });
+        }
     }
 }
 
@@ -2172,6 +2246,8 @@ fn handle_redownload(
                 updated_at: now,
                 categories: old_categories,
                 tags: old_tags,
+                custom_download_path: old_meta.custom_download_path.clone(),
+                custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
             };
             // 保存到数据库（更新状态从 Completed 变为 Queued）
             if let Err(e) = queued_meta.save() {
@@ -2198,6 +2274,8 @@ fn handle_redownload(
             updated_at: now,
             categories: old_categories,
             tags: old_tags,
+            custom_download_path: old_meta.custom_download_path.clone(),
+            custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
         };
         download_state.add_task(temp_meta);
         download_state.downloading_ids.insert(comic_id.clone());
@@ -2274,6 +2352,8 @@ fn handle_redownload(
                 updated_at: now,
                 categories: comic.categories.clone(),
                 tags: comic.tags.clone(),
+                custom_download_path: None,
+                custom_auto_pack_cbz: None,
             };
 
             if let Err(e) = meta.save() {
@@ -2643,5 +2723,211 @@ fn handle_register_request(
             })
             .await;
         });
+    }
+}
+
+// ==================== CBZ 打包处理 ====================
+
+/// 判断是否为图片文件
+fn is_image_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let ext_lower = ext.to_lowercase();
+            matches!(
+                ext_lower.as_str(),
+                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// 递归收集图片文件
+/// 返回 (相对路径, 绝对路径) 的列表
+fn collect_image_files(
+    source_dir: &std::path::Path,
+) -> std::io::Result<Vec<(String, std::path::PathBuf)>> {
+    let mut entries = Vec::new();
+
+    fn walk_dir(
+        dir: &std::path::Path,
+        base: &std::path::Path,
+        entries: &mut Vec<(String, std::path::PathBuf)>,
+    ) -> std::io::Result<()> {
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    walk_dir(&path, base, entries)?;
+                } else if is_image_file(&path) {
+                    // 计算相对路径
+                    let relative = path
+                        .strip_prefix(base)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .to_string();
+                    // 将 Windows 路径分隔符转换为 /
+                    let archive_name = relative.replace('\\', "/");
+                    entries.push((archive_name, path));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    walk_dir(source_dir, source_dir, &mut entries)?;
+    Ok(entries)
+}
+
+/// 创建 CBZ 文件
+/// 使用 Stored 模式（图片本身已压缩，无需再压缩）
+fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, String> {
+    use std::io::Write;
+
+    use zip::{CompressionMethod, write::SimpleFileOptions};
+
+    let source_dir = std::path::Path::new(source_path);
+    if !source_dir.exists() {
+        return Err(format!("源目录不存在: {}", source_path));
+    }
+
+    // 创建 CBZ 输出目录
+    let cbz_dir = get_cbz_output_path();
+    if let Err(e) = std::fs::create_dir_all(&cbz_dir) {
+        return Err(format!("创建 CBZ 目录失败: {}", e));
+    }
+
+    // CBZ 文件路径
+    let cbz_filename = format!("{}.cbz", sanitize_filename(comic_title));
+    let cbz_path = cbz_dir.join(&cbz_filename);
+
+    // 收集所有图片文件
+    let mut entries = collect_image_files(source_dir).map_err(|e| e.to_string())?;
+    if entries.is_empty() {
+        return Err("没有找到图片文件".to_string());
+    }
+
+    // 按文件名排序（确保章节和页面顺序正确）
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    tracing::info!("开始打包 CBZ: {} ({} 个文件)", cbz_filename, entries.len());
+
+    // 创建 ZIP 文件
+    let file = std::fs::File::create(&cbz_path).map_err(|e| format!("创建 CBZ 文件失败: {}", e))?;
+    let mut zip = zip::ZipWriter::new(file);
+
+    // 使用 Stored 模式（不压缩，图片本身已压缩）
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+
+    // 写入文件
+    for (archive_name, file_path) in &entries {
+        let data = std::fs::read(file_path).map_err(|e| {
+            tracing::warn!("读取文件失败: {} - {}", file_path.display(), e);
+            format!("读取文件失败: {}", e)
+        })?;
+
+        zip.start_file(archive_name, options)
+            .map_err(|e| format!("添加文件到 ZIP 失败: {}", e))?;
+        zip.write_all(&data)
+            .map_err(|e| format!("写入 ZIP 数据失败: {}", e))?;
+    }
+
+    zip.finish()
+        .map_err(|e| format!("完成 ZIP 文件失败: {}", e))?;
+
+    let cbz_path_str = cbz_path.to_string_lossy().to_string();
+    tracing::info!("CBZ 打包完成: {}", cbz_path_str);
+
+    Ok(cbz_path_str)
+}
+
+/// 处理 CBZ 打包请求
+fn handle_cbz_package_request(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<CbzPackageRequest>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+        let comic_title = event.comic_title.clone();
+        let source_path = event.source_path.clone();
+
+        tracing::info!("收到 CBZ 打包请求: {}", comic_title);
+
+        // 使用 spawn_blocking 在后台线程执行 IO 密集型操作
+        runtime.spawn_background_task(move |mut ctx| async move {
+            // 在阻塞线程中执行打包
+            let result =
+                tokio::task::spawn_blocking(move || create_cbz_package(&source_path, &comic_title))
+                    .await;
+
+            // 处理结果
+            match result {
+                Ok(Ok(cbz_path)) => {
+                    let comic_id_clone = comic_id.clone();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(CbzPackageCompletedEvent {
+                            comic_id: comic_id_clone,
+                            cbz_path,
+                        });
+                    })
+                    .await;
+                }
+                Ok(Err(error)) => {
+                    let comic_id_clone = comic_id.clone();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(CbzPackageFailedEvent {
+                            comic_id: comic_id_clone,
+                            error,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = format!("打包任务执行失败: {}", e);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(CbzPackageFailedEvent { comic_id, error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理 CBZ 打包完成
+fn handle_cbz_package_completed(mut messages: MessageReader<CbzPackageCompletedEvent>) {
+    for event in messages.read() {
+        tracing::info!("CBZ 打包完成: {} -> {}", event.comic_id, event.cbz_path);
+
+        // 检查是否需要删除原图文件夹
+        let delete_images = AppSettings::global().read().delete_images_after_cbz;
+        if delete_images {
+            // 从 CBZ 路径推断原图路径
+            // CBZ: Downloads/CBZ/漫画标题.cbz
+            // Images: Downloads/Images/漫画标题/
+            let cbz_path = std::path::Path::new(&event.cbz_path);
+            if let Some(cbz_filename) = cbz_path.file_stem() {
+                let images_dir = get_images_download_path().join(cbz_filename);
+                if images_dir.exists() {
+                    match std::fs::remove_dir_all(&images_dir) {
+                        Ok(()) => {
+                            tracing::info!("已删除原图文件夹: {}", images_dir.display());
+                        }
+                        Err(e) => {
+                            tracing::warn!("删除原图文件夹失败: {} - {}", images_dir.display(), e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 处理 CBZ 打包失败
+fn handle_cbz_package_failed(mut messages: MessageReader<CbzPackageFailedEvent>) {
+    for event in messages.read() {
+        tracing::error!("CBZ 打包失败: {} - {}", event.comic_id, event.error);
     }
 }

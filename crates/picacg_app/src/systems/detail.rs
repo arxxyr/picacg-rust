@@ -489,6 +489,13 @@ pub fn setup_detail_ui(
                                         spawn_episode_card(grid, episode, &font);
                                     }
                                 });
+
+                            // 底部间距，确保最后一行章节卡片不被截断
+                            content.spawn(Node {
+                                height: Val::Px(30.0),
+                                min_height: Val::Px(30.0),
+                                ..default()
+                            });
                         } else {
                             // 空状态
                             content.spawn((
@@ -1232,6 +1239,13 @@ fn build_detail_content(
                 spawn_episode_card(grid, episode, font);
             }
         });
+
+    // 底部间距，确保最后一行章节卡片不被截断
+    content.spawn(Node {
+        height: Val::Px(30.0),
+        min_height: Val::Px(30.0),
+        ..default()
+    });
 }
 
 /// 章节卡片交互

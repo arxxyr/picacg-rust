@@ -98,6 +98,8 @@ pub struct LoadComicsRequest {
 pub struct ComicsLoadedEvent {
     pub comics: Vec<Comic>,
     pub total_pages: i32,
+    /// 当前加载的页码（用于区分首次加载和追加）
+    pub page: i32,
 }
 
 /// 漫画列表加载失败
@@ -128,11 +130,10 @@ pub struct ComicDetailLoadFailedEvent {
 
 // ==================== 章节列表消息 ====================
 
-/// 加载章节列表请求
+/// 加载章节列表请求（自动获取所有页）
 #[derive(Message)]
 pub struct LoadEpisodesRequest {
     pub comic_id: String,
-    pub page: i32,
 }
 
 /// 章节列表加载完成
@@ -363,5 +364,36 @@ pub struct RankingsLoadedEvent {
 /// 排行榜加载失败
 #[derive(Message)]
 pub struct RankingsLoadFailedEvent {
+    pub error: String,
+}
+
+// ==================== CBZ 打包消息 ====================
+
+/// CBZ 打包请求
+#[derive(Message)]
+pub struct CbzPackageRequest {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 漫画标题
+    pub comic_title: String,
+    /// 原图文件夹路径
+    pub source_path: String,
+}
+
+/// CBZ 打包完成事件
+#[derive(Message)]
+pub struct CbzPackageCompletedEvent {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// CBZ 文件路径
+    pub cbz_path: String,
+}
+
+/// CBZ 打包失败事件
+#[derive(Message)]
+pub struct CbzPackageFailedEvent {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 错误信息
     pub error: String,
 }

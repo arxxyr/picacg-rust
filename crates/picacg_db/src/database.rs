@@ -172,6 +172,8 @@ impl Database {
             "ALTER TABLE download_task ADD COLUMN categories TEXT",
             "ALTER TABLE download_task ADD COLUMN tags TEXT",
             "ALTER TABLE download_task ADD COLUMN completed_episodes TEXT",
+            "ALTER TABLE download_task ADD COLUMN custom_download_path TEXT",
+            "ALTER TABLE download_task ADD COLUMN custom_auto_pack_cbz INTEGER",
         ] {
             match sqlx::query(sql).execute(&pool).await {
                 Ok(_) => debug!("迁移成功: {}", sql),
@@ -441,8 +443,9 @@ impl Database {
             INSERT INTO download_task (
                 comic_id, comic_title, total_episodes, episode_orders,
                 save_path, state, state_data, created_at, updated_at,
-                categories, tags, completed_episodes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                categories, tags, completed_episodes,
+                custom_download_path, custom_auto_pack_cbz
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(comic_id) DO UPDATE SET
                 comic_title = excluded.comic_title,
                 total_episodes = excluded.total_episodes,
@@ -453,7 +456,9 @@ impl Database {
                 updated_at = excluded.updated_at,
                 categories = excluded.categories,
                 tags = excluded.tags,
-                completed_episodes = excluded.completed_episodes
+                completed_episodes = excluded.completed_episodes,
+                custom_download_path = excluded.custom_download_path,
+                custom_auto_pack_cbz = excluded.custom_auto_pack_cbz
             "#,
         )
         .bind(&task.comic_id)
@@ -468,6 +473,8 @@ impl Database {
         .bind(&task.categories)
         .bind(&task.tags)
         .bind(&task.completed_episodes)
+        .bind(&task.custom_download_path)
+        .bind(task.custom_auto_pack_cbz)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -591,8 +598,9 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
         INSERT INTO download_task (
             comic_id, comic_title, total_episodes, episode_orders,
             save_path, state, state_data, created_at, updated_at,
-            categories, tags, completed_episodes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            categories, tags, completed_episodes,
+            custom_download_path, custom_auto_pack_cbz
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(comic_id) DO UPDATE SET
             comic_title = excluded.comic_title,
             total_episodes = excluded.total_episodes,
@@ -603,7 +611,9 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
             updated_at = excluded.updated_at,
             categories = excluded.categories,
             tags = excluded.tags,
-            completed_episodes = excluded.completed_episodes
+            completed_episodes = excluded.completed_episodes,
+            custom_download_path = excluded.custom_download_path,
+            custom_auto_pack_cbz = excluded.custom_auto_pack_cbz
         "#,
     )
     .bind(&task.comic_id)
@@ -618,6 +628,8 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
     .bind(&task.categories)
     .bind(&task.tags)
     .bind(&task.completed_episodes)
+    .bind(&task.custom_download_path)
+    .bind(task.custom_auto_pack_cbz)
     .execute(pool)
     .await?;
     Ok(())

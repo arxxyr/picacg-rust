@@ -151,9 +151,8 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     comic_card_interaction,
-                    pagination_interaction,
+                    auto_load_more_comics,
                     refresh_comics_list_ui,
-                    refresh_comics_pagination_ui,
                     waterfall_create_comic_cards,
                     update_comics_images,
                     handle_comics_scroll,
@@ -267,6 +266,9 @@ impl Plugin for UiPlugin {
                     // 最大并发下载数交互
                     max_concurrent_downloads_decrease_interaction,
                     max_concurrent_downloads_increase_interaction,
+                    // CBZ 打包设置交互
+                    auto_pack_cbz_checkbox_interaction,
+                    delete_images_after_cbz_checkbox_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,
@@ -291,6 +293,7 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     open_download_folder_interaction,
+                    open_cbz_folder_interaction,
                     completed_download_item_interaction,
                     // 区域折叠交互
                     section_header_collapse_interaction,
@@ -307,6 +310,10 @@ impl Plugin for UiPlugin {
                     download_title_interaction,
                     download_category_interaction,
                     download_tag_interaction,
+                    // 独立设置交互
+                    task_settings_button_interaction,
+                    task_path_select_interaction,
+                    task_cbz_toggle_interaction,
                     refresh_downloads_ui,
                     add_new_task_ui,
                     handle_download_completed_ui,

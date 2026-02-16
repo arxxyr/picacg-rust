@@ -156,6 +156,25 @@ pub struct MaxConcurrentDownloadsState {
     pub value: usize,
 }
 
+// ==================== CBZ 打包设置组件 ====================
+
+/// 自动打包 CBZ 勾选框
+#[derive(Component)]
+pub struct AutoPackCbzCheckbox;
+
+/// 打包后删除原图勾选框
+#[derive(Component)]
+pub struct DeleteImagesAfterCbzCheckbox;
+
+/// CBZ 打包设置状态
+#[derive(Resource)]
+pub struct CbzPackageSettingsState {
+    /// 是否自动打包 CBZ
+    pub auto_pack_cbz: bool,
+    /// 打包后是否删除原图
+    pub delete_images_after_cbz: bool,
+}
+
 /// 创建设置页面 UI
 pub fn setup_settings_ui(
     mut commands: Commands,
@@ -203,6 +222,12 @@ pub fn setup_settings_ui(
     // 初始化最大并发下载数状态
     commands.insert_resource(MaxConcurrentDownloadsState {
         value: settings.max_concurrent_downloads,
+    });
+
+    // 初始化 CBZ 打包设置状态
+    commands.insert_resource(CbzPackageSettingsState {
+        auto_pack_cbz: settings.auto_pack_cbz,
+        delete_images_after_cbz: settings.delete_images_after_cbz,
     });
 
     // 在内容区域下创建设置页面
@@ -281,6 +306,12 @@ pub fn setup_settings_ui(
                                     section,
                                     &font,
                                     settings.auto_resume_downloads,
+                                );
+                                spawn_auto_pack_cbz_setting(section, &font, settings.auto_pack_cbz);
+                                spawn_delete_images_after_cbz_setting(
+                                    section,
+                                    &font,
+                                    settings.delete_images_after_cbz,
                                 );
                             });
 
@@ -678,6 +709,176 @@ fn spawn_auto_resume_downloads_setting(
             ))
             .with_children(|checkbox| {
                 // 勾选标记（使用 Nerd Font 图标）
+                checkbox.spawn((
+                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        });
+}
+
+/// 创建自动打包 CBZ 设置
+fn spawn_auto_pack_cbz_setting(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    is_enabled: bool,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(16.0)),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 左侧标签和说明
+            row.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|left| {
+                    left.spawn((
+                        Text::new("下载完成后自动打包 CBZ"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+                    left.spawn((
+                        Text::new("将漫画打包为 CBZ 格式，方便导入阅读器"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+
+            // 右侧勾选框
+            row.spawn((
+                AutoPackCbzCheckbox,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    Color::srgb(0.12, 0.12, 0.16)
+                }),
+                BorderColor::all(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    AppColors::BORDER
+                }),
+            ))
+            .with_children(|checkbox| {
+                checkbox.spawn((
+                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 16.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+        });
+}
+
+/// 创建打包后删除原图设置
+fn spawn_delete_images_after_cbz_setting(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    is_enabled: bool,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::top(Val::Px(16.0)),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 左侧标签和说明
+            row.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|left| {
+                    left.spawn((
+                        Text::new("打包 CBZ 后删除原图"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+                    left.spawn((
+                        Text::new("打包成功后自动删除 Images 目录中的原图"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+
+            // 右侧勾选框
+            row.spawn((
+                DeleteImagesAfterCbzCheckbox,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    Color::srgb(0.12, 0.12, 0.16)
+                }),
+                BorderColor::all(if is_enabled {
+                    AppColors::PRIMARY
+                } else {
+                    AppColors::BORDER
+                }),
+            ))
+            .with_children(|checkbox| {
                 checkbox.spawn((
                     Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
                     TextFont {
@@ -1436,6 +1637,7 @@ pub fn save_settings_button_interaction(
     log_state: Res<LogLevelInputState>,
     auto_resume_state: Res<AutoResumeDownloadsState>,
     max_concurrent_state: Res<MaxConcurrentDownloadsState>,
+    cbz_state: Res<CbzPackageSettingsState>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
@@ -1460,6 +1662,10 @@ pub fn save_settings_button_interaction(
 
                 // 保存最大并发下载数
                 settings.max_concurrent_downloads = max_concurrent_state.value;
+
+                // 保存 CBZ 打包设置
+                settings.auto_pack_cbz = cbz_state.auto_pack_cbz;
+                settings.delete_images_after_cbz = cbz_state.delete_images_after_cbz;
 
                 if let Err(e) = settings.save() {
                     tracing::error!("保存设置失败: {}", e);
@@ -1980,6 +2186,125 @@ pub fn max_concurrent_downloads_increase_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+// ==================== CBZ 打包设置交互系统 ====================
+
+/// 自动打包 CBZ 勾选框交互
+pub fn auto_pack_cbz_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<AutoPackCbzCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut cbz_state: ResMut<CbzPackageSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                // 切换状态
+                cbz_state.auto_pack_cbz = !cbz_state.auto_pack_cbz;
+                let is_enabled = cbz_state.auto_pack_cbz;
+
+                tracing::info!("自动打包 CBZ: {}", if is_enabled { "启用" } else { "禁用" });
+
+                // 更新外观
+                if is_enabled {
+                    *bg_color = BackgroundColor(AppColors::PRIMARY);
+                    *border_color = BorderColor::all(AppColors::PRIMARY);
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+
+                // 更新勾选标记
+                for child in children.iter() {
+                    if let Ok(mut text) = text_query.get_mut(child) {
+                        **text = if is_enabled {
+                            "\u{F012C}".to_string()
+                        } else {
+                            String::new()
+                        };
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                if !cbz_state.auto_pack_cbz {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !cbz_state.auto_pack_cbz {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 打包后删除原图勾选框交互
+pub fn delete_images_after_cbz_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<DeleteImagesAfterCbzCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut cbz_state: ResMut<CbzPackageSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                // 切换状态
+                cbz_state.delete_images_after_cbz = !cbz_state.delete_images_after_cbz;
+                let is_enabled = cbz_state.delete_images_after_cbz;
+
+                tracing::info!(
+                    "打包后删除原图: {}",
+                    if is_enabled { "启用" } else { "禁用" }
+                );
+
+                // 更新外观
+                if is_enabled {
+                    *bg_color = BackgroundColor(AppColors::PRIMARY);
+                    *border_color = BorderColor::all(AppColors::PRIMARY);
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+
+                // 更新勾选标记
+                for child in children.iter() {
+                    if let Ok(mut text) = text_query.get_mut(child) {
+                        **text = if is_enabled {
+                            "\u{F012C}".to_string()
+                        } else {
+                            String::new()
+                        };
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                if !cbz_state.delete_images_after_cbz {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !cbz_state.delete_images_after_cbz {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
             }
         }
     }

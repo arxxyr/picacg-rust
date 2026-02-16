@@ -26,6 +26,7 @@ mod scrollbar;
 mod search;
 mod settings;
 mod setup;
+pub mod ui_common;
 pub mod waterfall;
 
 pub use categories::*;
@@ -47,4 +48,5 @@ pub use scrollbar::*;
 pub use search::*;
 pub use settings::*;
 pub use setup::*;
+pub use ui_common::*;
 pub use waterfall::*;

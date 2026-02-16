@@ -151,7 +151,9 @@ pub fn handle_navigation_messages(
         comics_state.page = 1;
         comics_state.total_pages = 0;
         comics_state.is_loading = false;
+        comics_state.is_loading_more = false;
         comics_state.error = None;
+        comics_state.scroll_y = 0.0;
         next_route.set(AppRoute::ComicsList);
     }
 

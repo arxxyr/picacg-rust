@@ -3,7 +3,6 @@
 use bevy::{
     input::keyboard::Key,
     prelude::*,
-    ui::FocusPolicy,
     window::{Ime, PrimaryWindow},
 };
 
@@ -14,7 +13,8 @@ use crate::{
     systems::{
         downloads::ScrollContainer,
         login::{AppColors, FONT_PATH},
-        scrollbar::scrollbar_config::*,
+        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
+        ui_common::{calculate_scroll_delta, spawn_scrollbar},
         waterfall::SearchCardCreationState,
     },
 };
@@ -304,7 +304,7 @@ fn spawn_scroll_area(
             })
             .id();
 
-        spawn_scrollbar_inline(wrapper, scroll_container);
+        spawn_scrollbar(wrapper, scroll_container);
     });
 }
 
@@ -543,61 +543,6 @@ pub fn setup_search_ui(
     {
         creation_state.start_precreate(search_state.results.len(), font);
     }
-}
-
-/// 创建滚动条
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-            Transform::default(),
-        ))
-        .with_children(|scrollbar| {
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                Transform::default(),
-            ));
-
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
 }
 
 /// 创建搜索结果卡片
@@ -1187,10 +1132,7 @@ pub fn handle_search_scroll(
     mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
     for event in mouse_wheel_events.read() {
-        let scroll_delta = match event.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-        };
+        let scroll_delta = calculate_scroll_delta(event);
 
         for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
             let max_scroll = content_info

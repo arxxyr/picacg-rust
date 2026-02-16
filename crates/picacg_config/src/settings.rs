@@ -194,6 +194,12 @@ pub struct AppSettings {
     /// 最大同时下载漫画数量（默认 3）
     #[serde(default = "default_max_concurrent_downloads")]
     pub max_concurrent_downloads: usize,
+    /// 下载完成后自动打包为 CBZ 格式
+    #[serde(default)]
+    pub auto_pack_cbz: bool,
+    /// 打包 CBZ 后删除原图文件夹
+    #[serde(default)]
+    pub delete_images_after_cbz: bool,
 }
 
 fn default_max_concurrent_downloads() -> usize {
@@ -213,6 +219,8 @@ impl Default for AppSettings {
             database_path: String::new(),
             auto_resume_downloads: false,
             max_concurrent_downloads: 3,
+            auto_pack_cbz: false,
+            delete_images_after_cbz: false,
         }
     }
 }

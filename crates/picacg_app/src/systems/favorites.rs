@@ -2,7 +2,7 @@
 //!
 //! 实现我的收藏页面
 
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy, window::PrimaryWindow};
+use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
 
 use crate::{
     components::*,
@@ -14,7 +14,8 @@ use crate::{
             PaginationNextButton, PaginationPageText, PaginationPrevButton,
             check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
         },
-        scrollbar::scrollbar_config::*,
+        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
+        ui_common::{TagColor, calculate_scroll_delta, spawn_scrollbar, spawn_tag_badge},
     },
 };
 
@@ -225,7 +226,7 @@ pub fn setup_favorites_ui(
                     .id();
 
                 // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
+                spawn_scrollbar(wrapper, scroll_container_id);
             });
 
             // 分页控件（使用通用分页组件）
@@ -255,63 +256,6 @@ pub fn setup_favorites_ui(
     }
 
     tracing::info!("收藏页面 UI 已创建");
-}
-
-/// 内联创建滚动条
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-            Transform::default(),
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                Transform::default(),
-            ));
-
-            // 滚动条滑块
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
 }
 
 /// 创建收藏卡片
@@ -431,48 +375,6 @@ fn spawn_favorite_card(
         .id()
 }
 
-/// 标签颜色类型
-enum TagColor {
-    /// 分类（蓝色）
-    Category,
-    /// 标签（绿色）
-    Tag,
-}
-
-/// 创建标签徽章
-fn spawn_tag_badge(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    font: &Handle<Font>,
-    color_type: TagColor,
-) {
-    let (bg_color, text_color) = match color_type {
-        TagColor::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
-        TagColor::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
-    };
-
-    parent
-        .spawn((
-            Node {
-                padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(1.0), Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(bg_color),
-        ))
-        .with_children(|badge| {
-            badge.spawn((
-                Text::new(text),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 10.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
-}
-
 /// 清理收藏页面
 pub fn cleanup_favorites_ui(
     mut commands: Commands,
@@ -586,18 +488,15 @@ pub fn handle_favorites_scroll(
     >,
 ) {
     for event in mouse_wheel_events.read() {
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let scroll_delta = match event.unit {
-                bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-                bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-            };
+        let scroll_delta = calculate_scroll_delta(event);
 
-            let (content_height, viewport_height) = if let Some(info) = content_size_info {
-                (info.content_height, info.viewport_height)
-            } else {
-                let size = computed_node.size();
-                (size.y, size.y)
-            };
+        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
+            let (content_height, viewport_height) = content_size_info
+                .map(|info| (info.content_height, info.viewport_height))
+                .unwrap_or_else(|| {
+                    let size = computed_node.size();
+                    (size.y, size.y)
+                });
 
             let max_scroll = (content_height - viewport_height).max(0.0);
             scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
