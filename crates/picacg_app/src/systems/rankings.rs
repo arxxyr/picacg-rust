@@ -11,8 +11,8 @@ use crate::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            GridLayoutParams, TagColor, calculate_grid_content_height, calculate_scroll_delta,
-            format_number, spawn_scrollbar, spawn_tag_badge_truncated, truncate_text,
+            GridLayoutParams, TagColor, calculate_scroll_delta, format_number,
+            measure_grid_content_height, spawn_scrollbar, spawn_tag_badge_truncated, truncate_text,
         },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
@@ -939,8 +939,11 @@ pub fn handle_rankings_scroll(
 
 /// 更新排行榜内容尺寸
 pub fn update_rankings_content_size(
-    mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<RankingsScrollContainer>>,
-    card_query: Query<Entity, With<RankingsComicCard>>,
+    mut scroll_query: Query<
+        (&ComputedNode, &mut ContentSizeInfo, Option<&Children>),
+        With<RankingsScrollContainer>,
+    >,
+    child_computed_query: Query<&ComputedNode>,
     window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
     use layout::*;
@@ -953,7 +956,6 @@ pub fn update_rankings_content_size(
 
     let layout_params = GridLayoutParams {
         card_width: CARD_WIDTH,
-        card_height: CARD_HEIGHT,
         column_gap: COLUMN_GAP,
         row_gap: ROW_GAP,
         padding_left: PADDING_LEFT,
@@ -962,7 +964,7 @@ pub fn update_rankings_content_size(
         padding_bottom: PADDING_BOTTOM,
     };
 
-    for (scroll_computed, mut content_info) in scroll_query.iter_mut() {
+    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
         let viewport_size = scroll_computed.size();
         let viewport_width = viewport_size.x / scale_factor;
         let viewport_height = viewport_size.y / scale_factor;
@@ -971,10 +973,14 @@ pub fn update_rankings_content_size(
             continue;
         }
 
-        let card_count = card_query.iter().count();
         content_info.viewport_height = viewport_height;
-        content_info.content_height =
-            calculate_grid_content_height(viewport_width, card_count, &layout_params);
+        content_info.content_height = measure_grid_content_height(
+            children,
+            &child_computed_query,
+            scale_factor,
+            viewport_width,
+            &layout_params,
+        );
     }
 }
 

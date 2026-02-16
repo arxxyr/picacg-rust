@@ -178,7 +178,6 @@ pub fn calculate_scroll_delta(event: &bevy::input::mouse::MouseWheel) -> f32 {
 /// 网格布局参数
 pub struct GridLayoutParams {
     pub card_width: f32,
-    pub card_height: f32,
     pub column_gap: f32,
     pub row_gap: f32,
     pub padding_left: f32,
@@ -187,28 +186,55 @@ pub struct GridLayoutParams {
     pub padding_bottom: f32,
 }
 
-/// 计算网格布局的内容高度
+/// 通过测量子节点的实际渲染高度计算 flex-wrap 网格的内容高度
+///
+/// 读取每个子节点的 `ComputedNode::size()` 获取实际渲染高度，
+/// 按行分组取最大值，避免因卡片高度不一致导致滚动条位置偏移。
 #[must_use]
-pub fn calculate_grid_content_height(
+pub fn measure_grid_content_height(
+    children: Option<&Children>,
+    child_computed_query: &Query<&ComputedNode>,
+    scale_factor: f32,
     viewport_width: f32,
-    card_count: usize,
     params: &GridLayoutParams,
 ) -> f32 {
-    if card_count == 0 {
+    let Some(children) = children else {
+        return 0.0;
+    };
+
+    // 收集所有子节点的实际渲染高度
+    let mut child_heights: Vec<f32> = Vec::new();
+    for child in children.iter() {
+        if let Ok(child_computed) = child_computed_query.get(child) {
+            let h = child_computed.size().y / scale_factor;
+            if h > 0.0 {
+                child_heights.push(h);
+            }
+        }
+    }
+
+    if child_heights.is_empty() {
         return 0.0;
     }
 
+    // 计算列数（与 Bevy flex-wrap 布局一致）
     let available_width = viewport_width - params.padding_left - params.padding_right;
     let card_with_gap = params.card_width + params.column_gap;
     let columns = ((available_width + params.column_gap) / card_with_gap)
         .floor()
         .max(1.0) as usize;
-    let rows = card_count.div_ceil(columns);
 
-    params.padding_top
-        + (rows as f32) * params.card_height
-        + ((rows.saturating_sub(1)) as f32) * params.row_gap
-        + params.padding_bottom
+    // 按行分组，每行取最大高度
+    let mut content_height = params.padding_top;
+    let mut row_count = 0usize;
+    for row in child_heights.chunks(columns) {
+        content_height += row.iter().copied().fold(0.0_f32, f32::max);
+        row_count += 1;
+    }
+    content_height += (row_count.saturating_sub(1) as f32) * params.row_gap;
+    content_height += params.padding_bottom;
+
+    content_height
 }
 
 // ==================== 文本工具 ====================

@@ -180,6 +180,8 @@ pub struct SearchComicsRequestEvent {
     pub keyword: String,
     pub page: i32,
     pub sort: String,
+    /// 分类过滤
+    pub categories: Vec<String>,
 }
 
 /// 搜索结果加载完成

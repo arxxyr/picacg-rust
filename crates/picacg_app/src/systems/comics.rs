@@ -10,8 +10,7 @@ use crate::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            GridLayoutParams, calculate_grid_content_height, calculate_scroll_delta,
-            spawn_scrollbar,
+            GridLayoutParams, calculate_scroll_delta, measure_grid_content_height, spawn_scrollbar,
         },
         waterfall::ComicsCardCreationState,
     },
@@ -21,9 +20,6 @@ use crate::{
 mod comic_layout {
     /// 卡片宽度
     pub const CARD_WIDTH: f32 = 180.0;
-    /// 卡片高度（封面 220px + 标题+作者约 50px + 分类+tags约 60px + padding
-    /// 16px）
-    pub const CARD_HEIGHT: f32 = 360.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -498,19 +494,30 @@ pub fn clamp_comics_scroll(
         }
 
         if let Some(content_info) = content_size_info {
-            let max_scroll = (content_info.content_height - content_info.viewport_height).max(0.0);
-            if scroll_position.y > max_scroll {
-                scroll_position.y = max_scroll;
+            // 内容尺寸尚未计算时（卡片还没创建），不做上限 clamp，
+            // 避免返回页面时滚动位置在卡片创建前被错误重置为 0
+            if content_info.content_height > 0.0 {
+                let max_scroll =
+                    (content_info.content_height - content_info.viewport_height).max(0.0);
+                if scroll_position.y > max_scroll {
+                    scroll_position.y = max_scroll;
+                }
             }
         }
     }
 }
 
 /// 更新漫画列表内容尺寸信息
+///
+/// 通过测量子节点的实际渲染高度来计算内容高度，
+/// 避免因卡片高度不一致导致滚动条位置偏移。
 pub fn update_comics_content_size(
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<ComicsScrollContainer>>,
-    card_query: Query<Entity, With<ComicCard>>,
+    mut scroll_query: Query<
+        (&ComputedNode, &mut ContentSizeInfo, Option<&Children>),
+        With<ComicsScrollContainer>,
+    >,
+    child_computed_query: Query<&ComputedNode>,
 ) {
     use comic_layout::*;
 
@@ -522,7 +529,6 @@ pub fn update_comics_content_size(
 
     let layout_params = GridLayoutParams {
         card_width: CARD_WIDTH,
-        card_height: CARD_HEIGHT,
         column_gap: COLUMN_GAP,
         row_gap: ROW_GAP,
         padding_left: PADDING_LEFT,
@@ -531,7 +537,7 @@ pub fn update_comics_content_size(
         padding_bottom: PADDING_BOTTOM,
     };
 
-    for (scroll_computed, mut content_size_info) in &mut scroll_query {
+    for (scroll_computed, mut content_size_info, children) in &mut scroll_query {
         let viewport_size = scroll_computed.size();
         let viewport_width = viewport_size.x / scale_factor;
         let viewport_height = viewport_size.y / scale_factor;
@@ -540,10 +546,14 @@ pub fn update_comics_content_size(
             continue;
         }
 
-        let card_count = card_query.iter().count();
         content_size_info.viewport_height = viewport_height;
-        content_size_info.content_height =
-            calculate_grid_content_height(viewport_width, card_count, &layout_params);
+        content_size_info.content_height = measure_grid_content_height(
+            children,
+            &child_computed_query,
+            scale_factor,
+            viewport_width,
+            &layout_params,
+        );
     }
 }
 

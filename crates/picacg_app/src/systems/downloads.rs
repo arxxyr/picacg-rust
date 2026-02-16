@@ -403,6 +403,40 @@ pub struct RetryDownloadButton {
     pub comic_id: String,
 }
 
+/// 删除已下载漫画按钮标记
+#[derive(Component)]
+pub struct DeleteCompletedDownloadButton {
+    pub comic_id: String,
+    pub path: String,
+}
+
+/// 删除确认面板标记
+#[derive(Component)]
+pub struct DeleteConfirmPanel {
+    pub comic_id: String,
+    pub path: String,
+}
+
+/// "同时删除磁盘文件" 勾选框标记
+#[derive(Component)]
+pub struct DeleteFilesCheckbox {
+    pub comic_id: String,
+    pub checked: bool,
+}
+
+/// 确认删除按钮标记
+#[derive(Component)]
+pub struct ConfirmDeleteButton {
+    pub comic_id: String,
+    pub path: String,
+}
+
+/// 取消删除按钮标记
+#[derive(Component)]
+pub struct CancelDeleteButton {
+    pub comic_id: String,
+}
+
 /// 下载任务独立设置按钮标记
 #[derive(Component)]
 pub struct DownloadTaskSettingsButton {
@@ -1733,6 +1767,38 @@ fn spawn_completed_download_item(
                                 ..default()
                             },
                             TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+                    });
+
+                    // 删除按钮
+                    let delete_color = Color::srgb(0.8, 0.3, 0.3);
+                    btns.spawn((
+                        DeleteCompletedDownloadButton {
+                            comic_id: download.comic_id.clone(),
+                            path: download.path.clone(),
+                        },
+                        Button,
+                        Node {
+                            width: Val::Px(28.0),
+                            height: Val::Px(28.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(delete_color.with_alpha(0.2)),
+                        BorderColor::all(delete_color),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("\u{F01B4}"), // 󰆴 nf-md-delete
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(delete_color),
                         ));
                     });
                 });
@@ -3575,6 +3641,7 @@ pub fn download_tag_interaction(
                     keyword: tag_btn.tag.clone(),
                     page: 1,
                     sort: search_state.sort.clone(),
+                    categories: search_state.selected_categories.clone(),
                 });
 
                 tracing::info!("点击下载标签搜索: {}", tag_btn.tag);
@@ -3919,6 +3986,346 @@ pub fn task_cbz_toggle_interaction(
         // 关闭并重新打开面板以刷新显示
         for (panel_entity, panel) in panel_query.iter() {
             if panel.comic_id == *comic_id {
+                commands.entity(panel_entity).despawn();
+            }
+        }
+    }
+}
+
+/// 删除已下载漫画按钮交互 — 弹出确认面板
+pub fn delete_completed_download_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &DeleteCompletedDownloadButton,
+        ),
+        Changed<Interaction>,
+    >,
+    panel_query: Query<(Entity, &DeleteConfirmPanel)>,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    asset_server: Res<AssetServer>,
+) {
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let delete_color = Color::srgb(0.8, 0.3, 0.3);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(delete_color.with_alpha(0.4));
+
+                let comic_id = &btn.comic_id;
+
+                // 已有面板则关闭
+                let existing = panel_query.iter().find(|(_, p)| p.comic_id == *comic_id);
+                if let Some((panel_entity, _)) = existing {
+                    commands.entity(panel_entity).despawn();
+                    continue;
+                }
+
+                // 找到父项 Entity
+                let Some(parent_entity) = completed_item_query
+                    .iter()
+                    .find(|(_, item)| item.comic_id == *comic_id)
+                    .map(|(e, _)| e)
+                else {
+                    continue;
+                };
+
+                let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+                // 创建确认面板
+                let panel_entity = commands
+                    .spawn((
+                        DeleteConfirmPanel {
+                            comic_id: comic_id.clone(),
+                            path: btn.path.clone(),
+                        },
+                        Node {
+                            width: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(10.0)),
+                            row_gap: Val::Px(8.0),
+                            border: UiRect::top(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.12, 0.06, 0.06)),
+                        BorderColor::all(Color::srgba(0.5, 0.2, 0.2, 0.5)),
+                    ))
+                    .with_children(|panel| {
+                        // 警告文本
+                        panel.spawn((
+                            Text::new("确认删除此下载记录？"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 12.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.9, 0.5, 0.5)),
+                        ));
+
+                        // 勾选框行：同时删除磁盘文件
+                        panel
+                            .spawn((Node {
+                                align_items: AlignItems::Center,
+                                column_gap: Val::Px(6.0),
+                                ..default()
+                            },))
+                            .with_children(|row| {
+                                // 勾选框按钮
+                                row.spawn((
+                                    DeleteFilesCheckbox {
+                                        comic_id: comic_id.clone(),
+                                        checked: false,
+                                    },
+                                    Button,
+                                    Interaction::default(),
+                                    Node {
+                                        width: Val::Px(18.0),
+                                        height: Val::Px(18.0),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        border: UiRect::all(Val::Px(1.5)),
+                                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
+                                    BorderColor::all(Color::srgb(0.5, 0.3, 0.3)),
+                                ))
+                                .with_children(|cb| {
+                                    // 初始状态：空（未勾选）
+                                    cb.spawn((
+                                        Text::new(""),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 13.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.9, 0.4, 0.4)),
+                                    ));
+                                });
+
+                                row.spawn((
+                                    Text::new("同时删除磁盘文件"),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 11.0,
+                                        ..default()
+                                    },
+                                    TextColor(Color::srgb(0.9, 0.6, 0.6)),
+                                ));
+                            });
+
+                        // 按钮行
+                        panel
+                            .spawn((Node {
+                                column_gap: Val::Px(8.0),
+                                margin: UiRect::top(Val::Px(4.0)),
+                                ..default()
+                            },))
+                            .with_children(|row| {
+                                // 确认删除按钮
+                                let confirm_color = Color::srgb(0.8, 0.3, 0.3);
+                                row.spawn((
+                                    ConfirmDeleteButton {
+                                        comic_id: comic_id.clone(),
+                                        path: btn.path.clone(),
+                                    },
+                                    Button,
+                                    Interaction::default(),
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(12.0),
+                                            Val::Px(12.0),
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                        ),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(confirm_color.with_alpha(0.3)),
+                                    BorderColor::all(confirm_color),
+                                ))
+                                .with_children(|btn| {
+                                    btn.spawn((
+                                        Text::new("\u{F01B4} 确认删除"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.9, 0.4, 0.4)),
+                                    ));
+                                });
+
+                                // 取消按钮
+                                row.spawn((
+                                    CancelDeleteButton {
+                                        comic_id: comic_id.clone(),
+                                    },
+                                    Button,
+                                    Interaction::default(),
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(12.0),
+                                            Val::Px(12.0),
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                        ),
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
+                                    BorderColor::all(AppColors::BORDER),
+                                ))
+                                .with_children(|btn| {
+                                    btn.spawn((
+                                        Text::new("取消"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 11.0,
+                                            ..default()
+                                        },
+                                        TextColor(AppColors::TEXT_SECONDARY),
+                                    ));
+                                });
+                            });
+                    })
+                    .id();
+
+                commands.entity(parent_entity).add_child(panel_entity);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(delete_color.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(delete_color.with_alpha(0.2));
+            }
+        }
+    }
+}
+
+/// "同时删除磁盘文件" 勾选框交互
+pub fn delete_files_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut DeleteFilesCheckbox, &Children),
+        Changed<Interaction>,
+    >,
+    mut text_query: Query<&mut Text>,
+) {
+    for (interaction, mut checkbox, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        checkbox.checked = !checkbox.checked;
+
+        // 更新勾选图标
+        for child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                **text = if checkbox.checked {
+                    "\u{F012C}".to_string() // 󰄬 nf-md-check
+                } else {
+                    String::new()
+                };
+            }
+        }
+    }
+}
+
+/// 确认删除按钮交互
+pub fn confirm_delete_button_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &ConfirmDeleteButton),
+        Changed<Interaction>,
+    >,
+    checkbox_query: Query<&DeleteFilesCheckbox>,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+) {
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let confirm_color = Color::srgb(0.8, 0.3, 0.3);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(confirm_color.with_alpha(0.5));
+
+                let comic_id = &btn.comic_id;
+
+                // 检查是否勾选了删除磁盘文件
+                let delete_files = checkbox_query
+                    .iter()
+                    .any(|cb| cb.comic_id == *comic_id && cb.checked);
+
+                // 从数据库中删除记录
+                {
+                    use picacg_db::{delete_download_task_async, get_pool, run_db_operation};
+                    let cid = comic_id.clone();
+                    let pool = get_pool();
+                    if let Err(e) = run_db_operation(async move {
+                        delete_download_task_async(&pool, &cid)
+                            .await
+                            .map_err(|e| format!("删除下载记录失败: {}", e))
+                    }) {
+                        tracing::error!("删除已下载记录失败: {}", e);
+                    }
+                }
+
+                // 删除磁盘文件（如果勾选）
+                if delete_files {
+                    let path = std::path::Path::new(&btn.path);
+                    if path.exists() {
+                        if let Err(e) = std::fs::remove_dir_all(path) {
+                            tracing::error!("删除磁盘文件失败: {} - {}", btn.path, e);
+                        } else {
+                            tracing::info!("已删除磁盘文件: {}", btn.path);
+                        }
+                    }
+                }
+
+                // 从 UI 中移除整个项
+                for (entity, item) in completed_item_query.iter() {
+                    if item.comic_id == *comic_id {
+                        commands.entity(entity).despawn();
+                        break;
+                    }
+                }
+
+                tracing::info!(
+                    "删除已下载记录: {} ({}){}",
+                    comic_id,
+                    btn.path,
+                    if delete_files {
+                        " [含磁盘文件]"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(confirm_color.with_alpha(0.4));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(confirm_color.with_alpha(0.3));
+            }
+        }
+    }
+}
+
+/// 取消删除按钮交互
+pub fn cancel_delete_button_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<(&Interaction, &CancelDeleteButton), Changed<Interaction>>,
+    panel_query: Query<(Entity, &DeleteConfirmPanel)>,
+) {
+    for (interaction, btn) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // 关闭确认面板
+        for (panel_entity, panel) in panel_query.iter() {
+            if panel.comic_id == btn.comic_id {
                 commands.entity(panel_entity).despawn();
             }
         }

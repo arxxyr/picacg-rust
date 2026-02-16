@@ -333,7 +333,11 @@ fn handle_load_comics(
     mut comics_state: ResMut<ComicsListState>,
 ) {
     for event in messages.read() {
-        comics_state.is_loading = true;
+        // 只有首次加载才设 is_loading，追加页使用 is_loading_more（由
+        // auto_load_more_comics 设置）
+        if event.page <= 1 {
+            comics_state.is_loading = true;
+        }
         comics_state.error = None;
 
         let client = api_client.0.clone();
@@ -382,15 +386,17 @@ fn handle_comics_response(
 ) {
     for event in loaded_messages.read() {
         comics_state.total_pages = event.total_pages;
+        let filtered = apply_block_filter(event.comics.clone());
 
         if event.page <= 1 {
             // 首次加载：替换数据
             comics_state.is_loading = false;
-            comics_state.comics = event.comics.clone();
+            comics_state.comics = filtered;
         } else {
             // 无限滚动追加：合并数据
+            comics_state.is_loading = false;
             comics_state.is_loading_more = false;
-            comics_state.comics.extend(event.comics.clone());
+            comics_state.comics.extend(filtered);
         }
 
         // 触发加载图片
@@ -1080,7 +1086,8 @@ fn handle_favorites_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
-        favorites_state.comics = event.comics.clone();
+        let filtered = apply_block_filter(event.comics.clone());
+        favorites_state.comics = filtered;
         favorites_state.total_pages = event.total_pages;
         favorites_state.is_loading = false;
         favorites_state.error = None;
@@ -1091,7 +1098,7 @@ fn handle_favorites_response(
         );
 
         // 触发加载封面图片
-        for comic in &event.comics {
+        for comic in &favorites_state.comics {
             image_messages.write(LoadImageRequest {
                 url: comic.thumb.url(),
             });
@@ -1159,13 +1166,14 @@ fn handle_recommendations_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
-        home_state.recommendations = event.comics.clone();
+        let filtered = apply_block_filter(event.comics.clone());
+        home_state.recommendations = filtered;
         home_state.is_loading = false;
         home_state.error = None;
         tracing::info!("推荐漫画加载完成: {} 个", home_state.recommendations.len());
 
         // 触发加载封面图片
-        for comic in &event.comics {
+        for comic in &home_state.recommendations {
             image_messages.write(LoadImageRequest {
                 url: comic.thumb.url(),
             });
@@ -1217,10 +1225,24 @@ fn get_cbz_output_path() -> std::path::PathBuf {
 }
 
 /// 清理文件名中的非法字符
+///
+/// 替换 Windows 文件系统禁止的字符以及可能导致兼容性问题的全角标点
 fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
+            // ASCII 非法文件名字符
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            // 全角标点（可能导致 ZIP 兼容性问题）
+            '\u{FF1A}' // ： 全角冒号
+            | '\u{FF0F}' // ／ 全角斜杠
+            | '\u{FF3C}' // ＼ 全角反斜杠
+            | '\u{FF1C}' // ＜ 全角小于号
+            | '\u{FF1E}' // ＞ 全角大于号
+            | '\u{FF5C}' // ｜ 全角竖线
+            | '\u{FF02}' // ＂ 全角双引号
+            | '\u{FF0A}' // ＊ 全角星号
+            | '\u{FF1F}' // ？ 全角问号
+            => '_',
             _ => c,
         })
         .collect()
@@ -2410,12 +2432,14 @@ fn handle_search_request(
         let keyword = event.keyword.clone();
         let page = event.page;
         let sort = event.sort.clone();
+        let categories = event.categories.clone();
 
         tracing::info!(
-            "搜索请求: keyword={}, page={}, sort={}",
+            "搜索请求: keyword={}, page={}, sort={}, categories={:?}",
             keyword,
             page,
-            sort
+            sort,
+            categories
         );
 
         runtime.spawn_background_task(move |mut ctx| async move {
@@ -2425,6 +2449,7 @@ fn handle_search_request(
                 keyword: keyword.clone(),
                 page,
                 sort,
+                categories,
             };
 
             match client.request(request).await {
@@ -2459,6 +2484,52 @@ fn handle_search_request(
     }
 }
 
+/// 判断漫画是否应该被屏蔽
+fn is_comic_blocked(
+    comic: &picacg_api::models::Comic,
+    filter: &picacg_config::FilterSettings,
+) -> bool {
+    if filter.blocked_keywords.is_empty() {
+        return false;
+    }
+    for keyword in &filter.blocked_keywords {
+        let kw = keyword.to_lowercase();
+        if filter.filter_by_category && comic.categories.iter().any(|c| c.to_lowercase() == kw) {
+            return true;
+        }
+        if filter.filter_by_tag && comic.tags.iter().any(|t| t.to_lowercase() == kw) {
+            return true;
+        }
+        if filter.filter_by_title && comic.title.to_lowercase().contains(&kw) {
+            return true;
+        }
+    }
+    false
+}
+
+/// 对漫画列表应用屏蔽过滤
+fn apply_block_filter(comics: Vec<picacg_api::models::Comic>) -> Vec<picacg_api::models::Comic> {
+    let filter = AppSettings::global().read().filter.clone();
+    if filter.blocked_keywords.is_empty() {
+        return comics;
+    }
+    let before = comics.len();
+    let filtered: Vec<_> = comics
+        .into_iter()
+        .filter(|c| !is_comic_blocked(c, &filter))
+        .collect();
+    let after = filtered.len();
+    if before != after {
+        tracing::debug!(
+            "屏蔽过滤: {} -> {} (过滤掉 {} 部)",
+            before,
+            after,
+            before - after
+        );
+    }
+    filtered
+}
+
 /// 处理搜索响应
 fn handle_search_response(
     mut loaded_messages: MessageReader<SearchResultsLoadedEvent>,
@@ -2469,12 +2540,13 @@ fn handle_search_response(
     for event in loaded_messages.read() {
         search_state.is_loading = false;
         search_state.has_searched = true;
-        search_state.results = event.comics.clone();
+        let filtered = apply_block_filter(event.comics.clone());
+        search_state.results = filtered;
         search_state.total_pages = event.total_pages;
         search_state.error = None;
 
         // 触发加载封面图片
-        for comic in &event.comics {
+        for comic in &search_state.results {
             image_messages.write(LoadImageRequest {
                 url: comic.thumb.url(),
             });
@@ -2549,10 +2621,11 @@ fn handle_rankings_response(
 ) {
     for event in loaded_messages.read() {
         rankings_state.is_loading = false;
-        rankings_state.set_comics(event.time_type, event.comics.clone());
+        let filtered = apply_block_filter(event.comics.clone());
+        rankings_state.set_comics(event.time_type, filtered);
 
         // 触发加载封面图片
-        for comic in &event.comics {
+        for comic in rankings_state.current_comics() {
             image_messages.write(LoadImageRequest {
                 url: comic.thumb.url(),
             });
@@ -2803,9 +2876,12 @@ fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, St
     let cbz_path = cbz_dir.join(&cbz_filename);
 
     // 收集所有图片文件
-    let mut entries = collect_image_files(source_dir).map_err(|e| e.to_string())?;
+    let mut entries = collect_image_files(source_dir).map_err(|e| {
+        tracing::error!("遍历目录失败: {} - {}", source_path, e);
+        e.to_string()
+    })?;
     if entries.is_empty() {
-        return Err("没有找到图片文件".to_string());
+        return Err(format!("没有找到图片文件（源目录: {}）", source_path));
     }
 
     // 按文件名排序（确保章节和页面顺序正确）

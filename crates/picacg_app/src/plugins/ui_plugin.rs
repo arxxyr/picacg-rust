@@ -243,7 +243,8 @@ impl Plugin for UiPlugin {
                     download_path_keyboard_input,
                     update_download_path_display,
                     clear_cache_button_interaction,
-                    save_settings_button_interaction,
+                    auto_save_settings,
+                    update_settings_save_status,
                     handle_settings_scroll,
                     clamp_settings_scroll,
                     update_settings_content_size,
@@ -269,6 +270,15 @@ impl Plugin for UiPlugin {
                     // CBZ 打包设置交互
                     auto_pack_cbz_checkbox_interaction,
                     delete_images_after_cbz_checkbox_interaction,
+                    // 内容过滤交互
+                    filter_by_category_checkbox_interaction,
+                    filter_by_tag_checkbox_interaction,
+                    filter_by_title_checkbox_interaction,
+                    remove_keyword_interaction,
+                    new_keyword_input_interaction,
+                    new_keyword_keyboard_input,
+                    new_keyword_ime_input,
+                    add_keyword_button_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,
@@ -326,6 +336,10 @@ impl Plugin for UiPlugin {
                     move_task_between_sections,
                     update_download_titles,
                     update_download_task_tags,
+                    delete_completed_download_interaction,
+                    delete_files_checkbox_interaction,
+                    confirm_delete_button_interaction,
+                    cancel_delete_button_interaction,
                     handle_downloads_scroll,
                     update_downloads_content_size,
                     // 浮动标题系统
@@ -387,6 +401,18 @@ impl Plugin for UiPlugin {
                     refresh_search_ui,
                     waterfall_create_search_cards,
                     unfocus_search_input,
+                )
+                    .run_if(in_state(AppRoute::Search)),
+            )
+            .add_systems(
+                Update,
+                (
+                    // 过滤工具栏交互
+                    sort_button_interaction,
+                    category_filter_toggle_interaction,
+                    category_checkbox_interaction,
+                    select_all_categories_interaction,
+                    clear_all_categories_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,

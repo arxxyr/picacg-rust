@@ -19,6 +19,14 @@ use crate::{
     },
 };
 
+/// 排序方式定义
+const SORT_OPTIONS: &[(&str, &str)] = &[
+    ("dd", "新到旧"),
+    ("da", "旧到新"),
+    ("ld", "点赞最多"),
+    ("vd", "浏览最多"),
+];
+
 /// 搜索布局常量
 mod search_layout {
     /// 卡片宽度（预留）
@@ -112,6 +120,34 @@ pub struct SearchErrorText;
 #[derive(Component)]
 pub struct SearchEmptyText;
 
+/// 排序按钮标记
+#[derive(Component)]
+pub struct SortButton {
+    pub sort: String,
+}
+
+/// 分类过滤展开/折叠按钮
+#[derive(Component)]
+pub struct CategoryFilterToggle;
+
+/// 分类过滤面板
+#[derive(Component)]
+pub struct CategoryFilterPanel;
+
+/// 分类复选框标记
+#[derive(Component)]
+pub struct CategoryCheckbox {
+    pub category: String,
+}
+
+/// 全选分类按钮
+#[derive(Component)]
+pub struct SelectAllCategoriesButton;
+
+/// 清空分类按钮
+#[derive(Component)]
+pub struct ClearAllCategoriesButton;
+
 // ==================== 系统函数 ====================
 
 /// 搜索页面 UI 构建参数
@@ -119,6 +155,8 @@ struct SearchUiBuildParams<'a> {
     font: &'a Handle<Font>,
     search_state: &'a SearchState,
     input_focused: bool,
+    /// 可用分类列表（从 CategoriesState 获取）
+    available_categories: Vec<String>,
 }
 
 /// 构建搜索页面 UI（内部函数，供 setup 和 refresh 共用）
@@ -127,6 +165,7 @@ fn build_search_ui(commands: &mut Commands, params: &SearchUiBuildParams) -> Ent
         font,
         search_state,
         input_focused,
+        available_categories,
     } = params;
 
     let input_border_color = if *input_focused {
@@ -150,6 +189,9 @@ fn build_search_ui(commands: &mut Commands, params: &SearchUiBuildParams) -> Ent
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）
             spawn_search_header(root, font, search_state, *input_focused, input_border_color);
+
+            // 过滤工具栏（排序 + 分类过滤）
+            spawn_filter_toolbar(root, font, search_state, available_categories);
 
             // 滚动区域包装器
             spawn_scroll_area(root, font, search_state);
@@ -264,6 +306,388 @@ fn spawn_search_header(
                 ));
             });
     });
+}
+
+/// 创建过滤工具栏（排序按钮组 + 分类过滤按钮）
+fn spawn_filter_toolbar(
+    root: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+    available_categories: &[String],
+) {
+    root.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        },
+        BorderColor::all(AppColors::BORDER),
+        Transform::default(),
+    ))
+    .with_children(|toolbar| {
+        // 排序按钮行
+        toolbar
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(8.0), Val::Px(8.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },
+                Transform::default(),
+            ))
+            .with_children(|row| {
+                // 排序标签
+                row.spawn((
+                    Text::new("排序:"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+
+                // 排序按钮组
+                for &(sort_key, sort_label) in SORT_OPTIONS {
+                    let is_active = search_state.sort == sort_key;
+                    let bg = if is_active {
+                        AppColors::PRIMARY
+                    } else {
+                        Color::srgb(0.15, 0.15, 0.2)
+                    };
+                    let border = if is_active {
+                        AppColors::PRIMARY
+                    } else {
+                        AppColors::BORDER
+                    };
+
+                    row.spawn((
+                        SortButton {
+                            sort: sort_key.to_string(),
+                        },
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(10.0),
+                                Val::Px(10.0),
+                                Val::Px(4.0),
+                                Val::Px(4.0),
+                            ),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        BackgroundColor(bg),
+                        BorderColor::all(border),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(sort_label),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 12.0,
+                                ..default()
+                            },
+                            TextColor(if is_active {
+                                AppColors::TEXT
+                            } else {
+                                AppColors::TEXT_SECONDARY
+                            }),
+                        ));
+                    });
+                }
+
+                // 分隔符
+                row.spawn((
+                    Node {
+                        width: Val::Px(1.0),
+                        height: Val::Px(20.0),
+                        margin: UiRect::horizontal(Val::Px(6.0)),
+                        ..default()
+                    },
+                    BackgroundColor(AppColors::BORDER),
+                ));
+
+                // 分类过滤按钮
+                let filter_text = if search_state.selected_categories.is_empty() {
+                    "分类过滤".to_string()
+                } else {
+                    format!("分类过滤 ({})", search_state.selected_categories.len())
+                };
+                row.spawn((
+                    CategoryFilterToggle,
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        padding: UiRect::new(
+                            Val::Px(10.0),
+                            Val::Px(10.0),
+                            Val::Px(4.0),
+                            Val::Px(4.0),
+                        ),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(4.0),
+                        ..default()
+                    },
+                    BackgroundColor(if search_state.show_category_filter {
+                        AppColors::PRIMARY
+                    } else {
+                        Color::srgb(0.15, 0.15, 0.2)
+                    }),
+                    BorderColor::all(if search_state.show_category_filter {
+                        AppColors::PRIMARY
+                    } else {
+                        AppColors::BORDER
+                    }),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new(filter_text),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(if search_state.show_category_filter {
+                            AppColors::TEXT
+                        } else {
+                            AppColors::TEXT_SECONDARY
+                        }),
+                    ));
+                    btn.spawn((
+                        Text::new(if search_state.show_category_filter {
+                            "\u{F0143}" // chevron_up
+                        } else {
+                            "\u{F0140}" // chevron_down
+                        }),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+            });
+
+        // 分类过滤面板（可折叠）
+        if search_state.show_category_filter {
+            spawn_category_filter_panel(toolbar, font, search_state, available_categories);
+        }
+    });
+}
+
+/// 创建分类过滤面板
+fn spawn_category_filter_panel(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    search_state: &SearchState,
+    available_categories: &[String],
+) {
+    parent
+        .spawn((
+            CategoryFilterPanel,
+            Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(4.0), Val::Px(10.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.1, 0.1, 0.14, 0.5)),
+            Transform::default(),
+        ))
+        .with_children(|panel| {
+            // 分类复选框网格
+            panel
+                .spawn((
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_wrap: FlexWrap::Wrap,
+                        column_gap: Val::Px(6.0),
+                        row_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
+                .with_children(|grid| {
+                    for category_name in available_categories {
+                        let is_checked = search_state.selected_categories.contains(category_name);
+                        spawn_category_checkbox(grid, font, category_name, is_checked);
+                    }
+                });
+
+            // 全选/清空按钮行
+            panel
+                .spawn((
+                    Node {
+                        column_gap: Val::Px(8.0),
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
+                .with_children(|btn_row| {
+                    // 全选按钮
+                    btn_row
+                        .spawn((
+                            SelectAllCategoriesButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(3.0),
+                                    Val::Px(3.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("全选"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        });
+
+                    // 清空按钮
+                    btn_row
+                        .spawn((
+                            ClearAllCategoriesButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(3.0),
+                                    Val::Px(3.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("清空"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 11.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        });
+
+                    // 已选计数
+                    let count_text = if search_state.selected_categories.is_empty() {
+                        "未选择分类（搜索所有分类）".to_string()
+                    } else {
+                        format!("已选 {} 个分类", search_state.selected_categories.len())
+                    };
+                    btn_row.spawn((
+                        Text::new(count_text),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+        });
+}
+
+/// 创建单个分类复选框
+fn spawn_category_checkbox(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    category: &str,
+    checked: bool,
+) {
+    let bg = if checked {
+        AppColors::PRIMARY
+    } else {
+        Color::srgb(0.15, 0.15, 0.2)
+    };
+    let border = if checked {
+        AppColors::PRIMARY
+    } else {
+        AppColors::BORDER
+    };
+
+    parent
+        .spawn((
+            CategoryCheckbox {
+                category: category.to_string(),
+            },
+            Button,
+            Interaction::default(),
+            Node {
+                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(3.0), Val::Px(3.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(4.0),
+                ..default()
+            },
+            BackgroundColor(bg),
+            BorderColor::all(border),
+        ))
+        .with_children(|cb| {
+            // 勾选图标
+            cb.spawn((
+                Text::new(if checked { "\u{F012C}" } else { "" }),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+                Node {
+                    width: Val::Px(12.0),
+                    ..default()
+                },
+            ));
+            // 分类名称
+            cb.spawn((
+                Text::new(category),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 11.0,
+                    ..default()
+                },
+                TextColor(if checked {
+                    AppColors::TEXT
+                } else {
+                    AppColors::TEXT_SECONDARY
+                }),
+            ));
+        });
 }
 
 /// 创建滚动区域
@@ -520,6 +944,7 @@ pub fn setup_search_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     search_state: Res<SearchState>,
+    categories_state: Res<CategoriesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<SearchCardCreationState>,
 ) {
@@ -528,10 +953,17 @@ pub fn setup_search_ui(
 
     creation_state.clear();
 
+    let available_categories: Vec<String> = categories_state
+        .categories
+        .iter()
+        .map(|c| c.title.clone())
+        .collect();
+
     let params = SearchUiBuildParams {
         font: &font,
         search_state: &search_state,
         input_focused: false,
+        available_categories,
     };
     let search_root = build_search_ui(&mut commands, &params);
 
@@ -857,6 +1289,7 @@ pub fn handle_search_keyboard_input(
                         keyword: search_state.keyword.clone(),
                         page: 1,
                         sort: search_state.sort.clone(),
+                        categories: search_state.selected_categories.clone(),
                     });
                     // 取消输入框焦点
                     for mut input in input_query.iter_mut() {
@@ -1002,6 +1435,7 @@ pub fn search_button_interaction(
                         keyword: search_state.keyword.clone(),
                         page: 1,
                         sort: search_state.sort.clone(),
+                        categories: search_state.selected_categories.clone(),
                     });
                 }
             }
@@ -1073,6 +1507,7 @@ pub fn search_pagination_interaction(
                         keyword: search_state.keyword.clone(),
                         page: search_state.page,
                         sort: search_state.sort.clone(),
+                        categories: search_state.selected_categories.clone(),
                     });
                 }
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
@@ -1103,6 +1538,7 @@ pub fn search_pagination_interaction(
                         keyword: search_state.keyword.clone(),
                         page: search_state.page,
                         sort: search_state.sort.clone(),
+                        categories: search_state.selected_categories.clone(),
                     });
                 }
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
@@ -1195,6 +1631,7 @@ pub fn update_search_images(
 pub fn refresh_search_ui(
     mut commands: Commands,
     search_state: Res<SearchState>,
+    categories_state: Res<CategoriesState>,
     search_root_query: Query<Entity, With<SearchRoot>>,
     asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
@@ -1220,10 +1657,17 @@ pub fn refresh_search_ui(
         return;
     };
 
+    let available_categories: Vec<String> = categories_state
+        .categories
+        .iter()
+        .map(|c| c.title.clone())
+        .collect();
+
     let params = SearchUiBuildParams {
         font: &font,
         search_state: &search_state,
         input_focused: was_focused,
+        available_categories,
     };
     let search_root = build_search_ui(&mut commands, &params);
 
@@ -1325,6 +1769,225 @@ pub fn unfocus_search_input(
                     window.ime_enabled = false;
                     tracing::info!("输入框失去焦点，禁用 IME");
                 }
+            }
+        }
+    }
+}
+
+// ==================== 过滤工具栏交互系统 ====================
+
+/// 排序按钮交互
+pub fn sort_button_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &SortButton,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Changed<Interaction>,
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    let mut new_sort: Option<String> = None;
+    for (interaction, btn, _, _) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed && search_state.sort != btn.sort {
+            new_sort = Some(btn.sort.clone());
+            break;
+        }
+    }
+
+    if let Some(sort) = new_sort {
+        tracing::info!("切换排序: {} -> {}", search_state.sort, sort);
+        search_state.sort = sort;
+
+        // 如果已经搜索过，自动重新搜索
+        if search_state.has_searched && !search_state.keyword.is_empty() {
+            search_state.page = 1;
+            search_state.is_loading = true;
+            search_messages.write(SearchComicsRequestEvent {
+                keyword: search_state.keyword.clone(),
+                page: 1,
+                sort: search_state.sort.clone(),
+                categories: search_state.selected_categories.clone(),
+            });
+        }
+    }
+
+    // 更新按钮外观
+    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        let is_active = search_state.sort == btn.sort;
+        if is_active {
+            *bg_color = BackgroundColor(AppColors::PRIMARY);
+            *border_color = BorderColor::all(AppColors::PRIMARY);
+        } else {
+            match *interaction {
+                Interaction::Hovered => {
+                    *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+                _ => {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+}
+
+/// 分类过滤面板展开/折叠交互
+pub fn category_filter_toggle_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<CategoryFilterToggle>),
+    >,
+    mut search_state: ResMut<SearchState>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                search_state.show_category_filter = !search_state.show_category_filter;
+                tracing::debug!(
+                    "分类过滤面板: {}",
+                    if search_state.show_category_filter {
+                        "展开"
+                    } else {
+                        "折叠"
+                    }
+                );
+            }
+            Interaction::Hovered => {
+                if !search_state.show_category_filter {
+                    *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+                }
+            }
+            Interaction::None => {
+                if !search_state.show_category_filter {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+        }
+    }
+}
+
+/// 分类复选框交互
+pub fn category_checkbox_interaction(
+    interaction_query: Query<(&Interaction, &CategoryCheckbox), Changed<Interaction>>,
+    mut search_state: ResMut<SearchState>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    let mut toggled_category: Option<String> = None;
+    for (interaction, cb) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            toggled_category = Some(cb.category.clone());
+            break;
+        }
+    }
+
+    if let Some(category) = toggled_category {
+        if let Some(pos) = search_state
+            .selected_categories
+            .iter()
+            .position(|c| c == &category)
+        {
+            search_state.selected_categories.remove(pos);
+        } else {
+            search_state.selected_categories.push(category);
+        }
+        tracing::debug!("选中分类: {:?}", search_state.selected_categories);
+
+        // 如果已经搜索过，自动重新搜索
+        if search_state.has_searched && !search_state.keyword.is_empty() {
+            search_state.page = 1;
+            search_state.is_loading = true;
+            search_messages.write(SearchComicsRequestEvent {
+                keyword: search_state.keyword.clone(),
+                page: 1,
+                sort: search_state.sort.clone(),
+                categories: search_state.selected_categories.clone(),
+            });
+        }
+    }
+}
+
+/// 全选分类按钮交互
+pub fn select_all_categories_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<SelectAllCategoriesButton>),
+    >,
+    categories_state: Res<CategoriesState>,
+    mut search_state: ResMut<SearchState>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
+                let all: Vec<String> = categories_state
+                    .categories
+                    .iter()
+                    .map(|c| c.title.clone())
+                    .collect();
+                search_state.selected_categories = all;
+
+                // 如果已搜索过，自动重新搜索
+                if search_state.has_searched && !search_state.keyword.is_empty() {
+                    search_state.page = 1;
+                    search_state.is_loading = true;
+                    search_messages.write(SearchComicsRequestEvent {
+                        keyword: search_state.keyword.clone(),
+                        page: 1,
+                        sort: search_state.sort.clone(),
+                        categories: search_state.selected_categories.clone(),
+                    });
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+/// 清空分类按钮交互
+pub fn clear_all_categories_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<ClearAllCategoriesButton>),
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
+                if !search_state.selected_categories.is_empty() {
+                    search_state.selected_categories.clear();
+
+                    // 如果已搜索过，自动重新搜索
+                    if search_state.has_searched && !search_state.keyword.is_empty() {
+                        search_state.page = 1;
+                        search_state.is_loading = true;
+                        search_messages.write(SearchComicsRequestEvent {
+                            keyword: search_state.keyword.clone(),
+                            page: 1,
+                            sort: search_state.sort.clone(),
+                            categories: search_state.selected_categories.clone(),
+                        });
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
             }
         }
     }

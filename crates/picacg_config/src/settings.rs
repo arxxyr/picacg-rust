@@ -165,6 +165,23 @@ impl LogLevel {
     }
 }
 
+/// 内容过滤设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilterSettings {
+    /// 屏蔽词列表
+    #[serde(default)]
+    pub blocked_keywords: Vec<String>,
+    /// 是否按分类屏蔽
+    #[serde(default)]
+    pub filter_by_category: bool,
+    /// 是否按标签屏蔽
+    #[serde(default)]
+    pub filter_by_tag: bool,
+    /// 是否按标题屏蔽
+    #[serde(default)]
+    pub filter_by_title: bool,
+}
+
 /// 应用设置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -200,6 +217,9 @@ pub struct AppSettings {
     /// 打包 CBZ 后删除原图文件夹
     #[serde(default)]
     pub delete_images_after_cbz: bool,
+    /// 内容过滤设置
+    #[serde(default)]
+    pub filter: FilterSettings,
 }
 
 fn default_max_concurrent_downloads() -> usize {
@@ -221,6 +241,7 @@ impl Default for AppSettings {
             max_concurrent_downloads: 3,
             auto_pack_cbz: false,
             delete_images_after_cbz: false,
+            filter: FilterSettings::default(),
         }
     }
 }

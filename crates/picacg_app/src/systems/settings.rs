@@ -2,8 +2,8 @@
 //!
 //! 实现应用设置页面
 
-use bevy::{prelude::*, ui::FocusPolicy};
-use picacg_config::{AppSettings, LogLevel, ProxyType, update_log_level};
+use bevy::{prelude::*, time::Timer, ui::FocusPolicy};
+use picacg_config::{AppSettings, FilterSettings, LogLevel, ProxyType, update_log_level};
 
 use crate::{
     components::{
@@ -52,9 +52,33 @@ impl Default for DownloadPathInputState {
 #[derive(Component)]
 pub struct ClearCacheButton;
 
-/// 保存设置按钮标记
+/// 设置保存状态提示
+#[derive(Resource)]
+pub struct SettingsSaveStatus {
+    pub visible: bool,
+    pub timer: Timer,
+    pub message: String,
+    pub is_error: bool,
+}
+
+impl Default for SettingsSaveStatus {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            timer: Timer::from_seconds(2.0, TimerMode::Once),
+            message: String::new(),
+            is_error: false,
+        }
+    }
+}
+
+/// 底部状态栏文本标记
 #[derive(Component)]
-pub struct SaveSettingsButton;
+pub struct SettingsStatusText;
+
+/// 底部状态栏容器标记
+#[derive(Component)]
+pub struct SettingsStatusBar;
 
 // ==================== 代理设置组件 ====================
 
@@ -175,6 +199,67 @@ pub struct CbzPackageSettingsState {
     pub delete_images_after_cbz: bool,
 }
 
+// ==================== 内容过滤设置组件 ====================
+
+/// 按分类屏蔽复选框
+#[derive(Component)]
+pub struct FilterByCategoryCheckbox;
+
+/// 按标签屏蔽复选框
+#[derive(Component)]
+pub struct FilterByTagCheckbox;
+
+/// 按标题屏蔽复选框
+#[derive(Component)]
+pub struct FilterByTitleCheckbox;
+
+/// 屏蔽词列表项
+#[derive(Component)]
+pub struct BlockedKeywordItem {
+    pub keyword: String,
+}
+
+/// 删除屏蔽词按钮
+#[derive(Component)]
+pub struct RemoveKeywordButton {
+    pub keyword: String,
+}
+
+/// 新增屏蔽词输入框
+#[derive(Component)]
+pub struct NewKeywordInput {
+    pub focused: bool,
+}
+
+/// 添加屏蔽词按钮
+#[derive(Component)]
+pub struct AddKeywordButton;
+
+/// 内容过滤设置状态
+#[derive(Resource)]
+pub struct FilterSettingsState {
+    pub blocked_keywords: Vec<String>,
+    pub filter_by_category: bool,
+    pub filter_by_tag: bool,
+    pub filter_by_title: bool,
+    pub new_keyword: String,
+    pub input_focused: bool,
+}
+
+impl Default for FilterSettingsState {
+    fn default() -> Self {
+        let settings = AppSettings::global().read();
+        Self {
+            blocked_keywords: settings.filter.blocked_keywords.clone(),
+            filter_by_category: settings.filter.filter_by_category,
+            filter_by_tag: settings.filter.filter_by_tag,
+            filter_by_title: settings.filter.filter_by_title,
+            new_keyword: String::new(),
+            input_focused: false,
+        }
+    }
+}
+
 /// 创建设置页面 UI
 pub fn setup_settings_ui(
     mut commands: Commands,
@@ -229,6 +314,19 @@ pub fn setup_settings_ui(
         auto_pack_cbz: settings.auto_pack_cbz,
         delete_images_after_cbz: settings.delete_images_after_cbz,
     });
+
+    // 初始化内容过滤设置状态
+    commands.insert_resource(FilterSettingsState {
+        blocked_keywords: settings.filter.blocked_keywords.clone(),
+        filter_by_category: settings.filter.filter_by_category,
+        filter_by_tag: settings.filter.filter_by_tag,
+        filter_by_title: settings.filter.filter_by_title,
+        new_keyword: String::new(),
+        input_focused: false,
+    });
+
+    // 初始化保存状态提示
+    commands.insert_resource(SettingsSaveStatus::default());
 
     // 在内容区域下创建设置页面
     commands.entity(content_area).with_children(|parent| {
@@ -315,6 +413,11 @@ pub fn setup_settings_ui(
                                 );
                             });
 
+                            // 内容过滤分组
+                            spawn_settings_section(scroll, &font, "内容过滤", |section| {
+                                spawn_filter_settings(section, &font, &settings.filter);
+                            });
+
                             // 缓存设置分组
                             spawn_settings_section(scroll, &font, "缓存设置", |section| {
                                 spawn_cache_setting(section, &font);
@@ -343,8 +446,8 @@ pub fn setup_settings_ui(
                     spawn_settings_scrollbar(content_wrapper, scroll_container);
                 });
 
-                // 底部保存按钮栏（固定在页面底部，不随滚动）
-                spawn_save_button_bar(root, &font);
+                // 底部状态栏（固定在页面底部，显示保存状态提示）
+                spawn_status_bar(root, &font);
             });
     });
 
@@ -892,6 +995,322 @@ fn spawn_delete_images_after_cbz_setting(
         });
 }
 
+/// 创建内容过滤设置
+fn spawn_filter_settings(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    filter: &FilterSettings,
+) {
+    // 屏蔽模式复选框行
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            spawn_filter_mode_checkbox(
+                row,
+                font,
+                "按分类屏蔽",
+                filter.filter_by_category,
+                FilterCheckboxType::Category,
+            );
+            spawn_filter_mode_checkbox(
+                row,
+                font,
+                "按标签屏蔽",
+                filter.filter_by_tag,
+                FilterCheckboxType::Tag,
+            );
+            spawn_filter_mode_checkbox(
+                row,
+                font,
+                "按标题屏蔽",
+                filter.filter_by_title,
+                FilterCheckboxType::Title,
+            );
+        });
+
+    // 屏蔽词列表标签
+    parent.spawn((
+        Text::new("屏蔽词列表:"),
+        TextFont {
+            font: font.clone(),
+            font_size: 13.0,
+            ..default()
+        },
+        TextColor(AppColors::TEXT_SECONDARY),
+        Node {
+            margin: UiRect::top(Val::Px(12.0)),
+            ..default()
+        },
+    ));
+
+    // 屏蔽词列表
+    if filter.blocked_keywords.is_empty() {
+        parent.spawn((
+            Text::new("暂无屏蔽词"),
+            TextFont {
+                font: font.clone(),
+                font_size: 12.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+            Node {
+                margin: UiRect::top(Val::Px(4.0)),
+                ..default()
+            },
+        ));
+    } else {
+        parent
+            .spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                    margin: UiRect::top(Val::Px(6.0)),
+                    ..default()
+                },
+                Transform::default(),
+            ))
+            .with_children(|list| {
+                for keyword in &filter.blocked_keywords {
+                    // 每个屏蔽词是一个标签 + 删除按钮
+                    list.spawn((
+                        BlockedKeywordItem {
+                            keyword: keyword.clone(),
+                        },
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(8.0),
+                                Val::Px(4.0),
+                                Val::Px(3.0),
+                                Val::Px(3.0),
+                            ),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(6.0),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5)),
+                        BorderColor::all(AppColors::BORDER),
+                    ))
+                    .with_children(|tag| {
+                        tag.spawn((
+                            Text::new(keyword),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 12.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                        // 删除按钮
+                        tag.spawn((
+                            RemoveKeywordButton {
+                                keyword: keyword.clone(),
+                            },
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                width: Val::Px(16.0),
+                                height: Val::Px(16.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border_radius: BorderRadius::all(Val::Px(8.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5)),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new("\u{F0156}"), // nf-md-close
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 10.0,
+                                    ..default()
+                                },
+                                TextColor(Color::srgb(0.9, 0.5, 0.5)),
+                            ));
+                        });
+                    });
+                }
+            });
+    }
+
+    // 新增屏蔽词输入行
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                margin: UiRect::top(Val::Px(10.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 输入框
+            row.spawn((
+                NewKeywordInput { focused: false },
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(250.0),
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(10.0)),
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(AppColors::CARD_BG),
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
+            .with_children(|input| {
+                input.spawn((
+                    Text::new("输入新屏蔽词..."),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+            });
+
+            // 添加按钮
+            row.spawn((
+                AddKeywordButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(AppColors::PRIMARY),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("添加"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 12.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
+        });
+}
+
+/// 过滤复选框类型（内部使用）
+enum FilterCheckboxType {
+    Category,
+    Tag,
+    Title,
+}
+
+/// 创建过滤模式复选框
+fn spawn_filter_mode_checkbox(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    checked: bool,
+    checkbox_type: FilterCheckboxType,
+) {
+    let bg = if checked {
+        AppColors::PRIMARY
+    } else {
+        Color::srgb(0.12, 0.12, 0.16)
+    };
+    let border = if checked {
+        AppColors::PRIMARY
+    } else {
+        AppColors::BORDER
+    };
+
+    parent
+        .spawn((
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|row| {
+            // 复选框
+            let mut checkbox_entity = row.spawn((
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(20.0),
+                    height: Val::Px(20.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(bg),
+                BorderColor::all(border),
+            ));
+
+            // 添加对应的组件标记
+            match checkbox_type {
+                FilterCheckboxType::Category => {
+                    checkbox_entity.insert(FilterByCategoryCheckbox);
+                }
+                FilterCheckboxType::Tag => {
+                    checkbox_entity.insert(FilterByTagCheckbox);
+                }
+                FilterCheckboxType::Title => {
+                    checkbox_entity.insert(FilterByTitleCheckbox);
+                }
+            }
+
+            checkbox_entity.with_children(|cb| {
+                cb.spawn((
+                    Text::new(if checked { "\u{F012C}" } else { "" }),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                ));
+            });
+
+            // 标签文本
+            row.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+        });
+}
+
 /// 创建缓存设置
 fn spawn_cache_setting(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
@@ -1361,52 +1780,35 @@ fn spawn_log_level_setting(
         });
 }
 
-/// 创建底部保存按钮栏（固定在页面底部）
-fn spawn_save_button_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
+/// 创建底部状态栏（显示自动保存提示）
+fn spawn_status_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
         .spawn((
+            SettingsStatusBar,
             Node {
                 width: Val::Percent(100.0),
-                height: Val::Px(60.0),
-                padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(10.0), Val::Px(10.0)),
-                justify_content: JustifyContent::FlexEnd,
+                height: Val::Px(40.0),
+                padding: UiRect::horizontal(Val::Px(20.0)),
+                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::top(Val::Px(1.0)),
+                display: Display::None, // 初始隐藏
                 ..default()
             },
             BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
             BorderColor::all(AppColors::BORDER),
         ))
-        .with_children(|row| {
-            row.spawn((
-                SaveSettingsButton,
-                Button,
-                Interaction::default(), // 必须添加，否则按钮无法响应点击
-                Node {
-                    padding: UiRect::new(
-                        Val::Px(24.0),
-                        Val::Px(24.0),
-                        Val::Px(10.0),
-                        Val::Px(10.0),
-                    ),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
+        .with_children(|bar| {
+            bar.spawn((
+                SettingsStatusText,
+                Text::new(""),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
                     ..default()
                 },
-                BackgroundColor(AppColors::PRIMARY),
-                BorderColor::all(AppColors::PRIMARY),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("保存设置"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
+                TextColor(Color::srgb(0.4, 0.8, 0.5)), // 绿色成功提示
+            ));
         });
 }
 
@@ -1486,6 +1888,8 @@ pub fn cleanup_settings_ui(mut commands: Commands, query: Query<Entity, With<Set
     commands.remove_resource::<LogLevelInputState>();
     commands.remove_resource::<AutoResumeDownloadsState>();
     commands.remove_resource::<MaxConcurrentDownloadsState>();
+    commands.remove_resource::<CbzPackageSettingsState>();
+    commands.remove_resource::<SettingsSaveStatus>();
 }
 
 /// 下载路径输入框交互
@@ -1626,61 +2030,126 @@ pub fn clear_cache_button_interaction(
     }
 }
 
-/// 保存设置按钮交互
-pub fn save_settings_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SaveSettingsButton>),
-    >,
+/// 将所有设置状态写入 AppSettings 并保存到磁盘
+fn save_all_settings(
+    input_state: &DownloadPathInputState,
+    proxy_state: &ProxySettingsInputState,
+    log_state: &LogLevelInputState,
+    auto_resume_state: &AutoResumeDownloadsState,
+    max_concurrent_state: &MaxConcurrentDownloadsState,
+    cbz_state: &CbzPackageSettingsState,
+    filter_state: &FilterSettingsState,
+) -> Result<(), String> {
+    let mut settings = AppSettings::global().write();
+    settings.download_path = input_state.value.clone();
+    settings.proxy.enabled = proxy_state.enabled;
+    settings.proxy.proxy_type = proxy_state.proxy_type;
+    settings.proxy.host = proxy_state.host.clone();
+    settings.proxy.port = proxy_state.port.parse().unwrap_or(7890);
+    settings.log_level = log_state.level;
+    settings.auto_resume_downloads = auto_resume_state.enabled;
+    settings.max_concurrent_downloads = max_concurrent_state.value;
+    settings.auto_pack_cbz = cbz_state.auto_pack_cbz;
+    settings.delete_images_after_cbz = cbz_state.delete_images_after_cbz;
+    settings.filter = FilterSettings {
+        blocked_keywords: filter_state.blocked_keywords.clone(),
+        filter_by_category: filter_state.filter_by_category,
+        filter_by_tag: filter_state.filter_by_tag,
+        filter_by_title: filter_state.filter_by_title,
+    };
+    settings.save().map_err(|e| e.to_string())?;
+    update_log_level(log_state.level);
+    Ok(())
+}
+
+/// 自动保存设置：监听所有设置状态变化，有变化时自动保存
+pub fn auto_save_settings(
     input_state: Res<DownloadPathInputState>,
     proxy_state: Res<ProxySettingsInputState>,
     log_state: Res<LogLevelInputState>,
     auto_resume_state: Res<AutoResumeDownloadsState>,
     max_concurrent_state: Res<MaxConcurrentDownloadsState>,
     cbz_state: Res<CbzPackageSettingsState>,
+    filter_state: Res<FilterSettingsState>,
+    mut save_status: ResMut<SettingsSaveStatus>,
+    mut initialized: Local<bool>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
+    let any_changed = input_state.is_changed()
+        || proxy_state.is_changed()
+        || log_state.is_changed()
+        || auto_resume_state.is_changed()
+        || max_concurrent_state.is_changed()
+        || cbz_state.is_changed()
+        || filter_state.is_changed();
 
-                // 保存设置
-                let mut settings = AppSettings::global().write();
-                settings.download_path = input_state.value.clone();
+    if !any_changed {
+        return;
+    }
 
-                // 保存代理设置
-                settings.proxy.enabled = proxy_state.enabled;
-                settings.proxy.proxy_type = proxy_state.proxy_type;
-                settings.proxy.host = proxy_state.host.clone();
-                settings.proxy.port = proxy_state.port.parse().unwrap_or(7890);
+    // 跳过进入设置页面后的第一帧（setup_settings_ui 插入资源会触发 is_changed）
+    if !*initialized {
+        *initialized = true;
+        return;
+    }
 
-                // 保存日志等级
-                settings.log_level = log_state.level;
+    match save_all_settings(
+        &input_state,
+        &proxy_state,
+        &log_state,
+        &auto_resume_state,
+        &max_concurrent_state,
+        &cbz_state,
+        &filter_state,
+    ) {
+        Ok(()) => {
+            save_status.visible = true;
+            save_status.message = "设置已保存".to_string();
+            save_status.is_error = false;
+            save_status.timer.reset();
+            tracing::debug!("设置已自动保存");
+        }
+        Err(e) => {
+            save_status.visible = true;
+            save_status.message = format!("保存失败: {}", e);
+            save_status.is_error = true;
+            save_status.timer.reset();
+            tracing::error!("自动保存设置失败: {}", e);
+        }
+    }
+}
 
-                // 保存自动恢复下载设置
-                settings.auto_resume_downloads = auto_resume_state.enabled;
+/// 更新底部状态栏显示（倒计时结束后自动隐藏）
+pub fn update_settings_save_status(
+    time: Res<Time>,
+    mut save_status: ResMut<SettingsSaveStatus>,
+    mut text_query: Query<(&mut Text, &mut TextColor), With<SettingsStatusText>>,
+    mut bar_query: Query<&mut Node, With<SettingsStatusBar>>,
+) {
+    if !save_status.visible {
+        return;
+    }
 
-                // 保存最大并发下载数
-                settings.max_concurrent_downloads = max_concurrent_state.value;
+    save_status.timer.tick(time.delta());
 
-                // 保存 CBZ 打包设置
-                settings.auto_pack_cbz = cbz_state.auto_pack_cbz;
-                settings.delete_images_after_cbz = cbz_state.delete_images_after_cbz;
+    // 更新文本内容和颜色
+    for (mut text, mut color) in text_query.iter_mut() {
+        **text = save_status.message.clone();
+        *color = if save_status.is_error {
+            TextColor(Color::srgb(0.9, 0.3, 0.3)) // 红色错误提示
+        } else {
+            TextColor(Color::srgb(0.4, 0.8, 0.5)) // 绿色成功提示
+        };
+    }
 
-                if let Err(e) = settings.save() {
-                    tracing::error!("保存设置失败: {}", e);
-                } else {
-                    tracing::info!("设置已保存");
-                    // 动态更新日志等级
-                    picacg_config::update_log_level(log_state.level);
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_HOVER);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-            }
+    // 显示状态栏
+    for mut node in bar_query.iter_mut() {
+        node.display = Display::Flex;
+    }
+
+    if save_status.timer.just_finished() {
+        save_status.visible = false;
+        for mut node in bar_query.iter_mut() {
+            node.display = Display::None;
         }
     }
 }
@@ -2305,6 +2774,338 @@ pub fn delete_images_after_cbz_checkbox_interaction(
                 if !cbz_state.delete_images_after_cbz {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                 }
+            }
+        }
+    }
+}
+
+// ==================== 内容过滤交互系统 ====================
+
+/// 通用过滤模式复选框交互逻辑
+fn toggle_filter_checkbox(
+    bg_color: &mut BackgroundColor,
+    border_color: &mut BorderColor,
+    children: &Children,
+    text_query: &mut Query<&mut Text>,
+    is_enabled: bool,
+) {
+    if is_enabled {
+        *bg_color = BackgroundColor(AppColors::PRIMARY);
+        *border_color = BorderColor::all(AppColors::PRIMARY);
+    } else {
+        *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+        *border_color = BorderColor::all(AppColors::BORDER);
+    }
+    for child in children.iter() {
+        if let Ok(mut text) = text_query.get_mut(child) {
+            **text = if is_enabled {
+                "\u{F012C}".to_string()
+            } else {
+                String::new()
+            };
+        }
+    }
+}
+
+/// 按分类屏蔽复选框交互
+pub fn filter_by_category_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<FilterByCategoryCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                filter_state.filter_by_category = !filter_state.filter_by_category;
+                toggle_filter_checkbox(
+                    &mut bg_color,
+                    &mut border_color,
+                    children,
+                    &mut text_query,
+                    filter_state.filter_by_category,
+                );
+            }
+            Interaction::Hovered => {
+                if !filter_state.filter_by_category {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !filter_state.filter_by_category {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 按标签屏蔽复选框交互
+pub fn filter_by_tag_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<FilterByTagCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                filter_state.filter_by_tag = !filter_state.filter_by_tag;
+                toggle_filter_checkbox(
+                    &mut bg_color,
+                    &mut border_color,
+                    children,
+                    &mut text_query,
+                    filter_state.filter_by_tag,
+                );
+            }
+            Interaction::Hovered => {
+                if !filter_state.filter_by_tag {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !filter_state.filter_by_tag {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 按标题屏蔽复选框交互
+pub fn filter_by_title_checkbox_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &Children,
+        ),
+        (Changed<Interaction>, With<FilterByTitleCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                filter_state.filter_by_title = !filter_state.filter_by_title;
+                toggle_filter_checkbox(
+                    &mut bg_color,
+                    &mut border_color,
+                    children,
+                    &mut text_query,
+                    filter_state.filter_by_title,
+                );
+            }
+            Interaction::Hovered => {
+                if !filter_state.filter_by_title {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if !filter_state.filter_by_title {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 删除屏蔽词按钮交互
+pub fn remove_keyword_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &RemoveKeywordButton, &mut BackgroundColor),
+        Changed<Interaction>,
+    >,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    let mut keyword_to_remove: Option<String> = None;
+    for (interaction, btn, _) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            keyword_to_remove = Some(btn.keyword.clone());
+            break;
+        }
+    }
+
+    if let Some(keyword) = keyword_to_remove {
+        filter_state.blocked_keywords.retain(|k| k != &keyword);
+        tracing::info!("删除屏蔽词: {}", keyword);
+    }
+
+    // 更新悬停样式
+    for (interaction, _, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgba(0.7, 0.2, 0.2, 0.7));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 新增屏蔽词输入框交互
+pub fn new_keyword_input_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (Changed<Interaction>, With<NewKeywordInput>),
+    >,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                filter_state.input_focused = true;
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                *border_color = BorderColor::all(AppColors::PRIMARY);
+            }
+            Interaction::Hovered => {
+                if !filter_state.input_focused {
+                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
+                }
+            }
+            Interaction::None => {
+                if !filter_state.input_focused {
+                    *bg_color = BackgroundColor(AppColors::CARD_BG);
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+}
+
+/// 新增屏蔽词键盘输入
+pub fn new_keyword_keyboard_input(
+    mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut filter_state: ResMut<FilterSettingsState>,
+    input_query: Query<&Children, With<NewKeywordInput>>,
+    mut text_query: Query<&mut Text>,
+) {
+    if !filter_state.input_focused {
+        return;
+    }
+
+    use bevy::input::{ButtonState, keyboard::Key};
+
+    for event in keyboard_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+
+        match &event.logical_key {
+            Key::Backspace => {
+                filter_state.new_keyword.pop();
+            }
+            Key::Escape => {
+                filter_state.input_focused = false;
+            }
+            Key::Enter => {
+                // 回车添加屏蔽词
+                let keyword = filter_state.new_keyword.trim().to_string();
+                if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                    tracing::info!("添加屏蔽词: {}", keyword);
+                    filter_state.blocked_keywords.push(keyword);
+                    filter_state.new_keyword.clear();
+                }
+            }
+            Key::Character(input) => {
+                for c in input.chars() {
+                    if !c.is_control() {
+                        filter_state.new_keyword.push(c);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 更新显示文本
+    for children in input_query.iter() {
+        for child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                if filter_state.new_keyword.is_empty() {
+                    **text = "输入新屏蔽词...".to_string();
+                } else {
+                    **text = filter_state.new_keyword.clone();
+                }
+            }
+        }
+    }
+}
+
+/// 新增屏蔽词 IME 输入
+pub fn new_keyword_ime_input(
+    mut ime_events: MessageReader<bevy::window::Ime>,
+    mut filter_state: ResMut<FilterSettingsState>,
+    input_query: Query<&Children, With<NewKeywordInput>>,
+    mut text_query: Query<&mut Text>,
+) {
+    if !filter_state.input_focused {
+        return;
+    }
+
+    for event in ime_events.read() {
+        if let bevy::window::Ime::Commit { value, .. } = event {
+            filter_state.new_keyword.push_str(value);
+        }
+    }
+
+    // 更新显示文本
+    for children in input_query.iter() {
+        for child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                if filter_state.new_keyword.is_empty() {
+                    **text = "输入新屏蔽词...".to_string();
+                } else {
+                    **text = filter_state.new_keyword.clone();
+                }
+            }
+        }
+    }
+}
+
+/// 添加屏蔽词按钮交互
+pub fn add_keyword_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<AddKeywordButton>),
+    >,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
+                let keyword = filter_state.new_keyword.trim().to_string();
+                if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                    tracing::info!("添加屏蔽词: {}", keyword);
+                    filter_state.blocked_keywords.push(keyword);
+                    filter_state.new_keyword.clear();
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.9));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY);
             }
         }
     }

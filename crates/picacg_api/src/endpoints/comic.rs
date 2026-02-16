@@ -229,6 +229,9 @@ pub struct SearchComicsRequest {
     pub page: i32,
     #[serde(skip_serializing)]
     pub sort: String,
+    /// 分类过滤（空列表表示不过滤）
+    #[serde(skip_serializing)]
+    pub categories: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,8 +258,12 @@ impl ApiRequest for SearchComicsRequest {
     }
 
     fn body(&self) -> Option<serde_json::Value> {
-        Some(serde_json::json!({
+        let mut body = serde_json::json!({
             "keyword": self.keyword,
-        }))
+        });
+        if !self.categories.is_empty() {
+            body["categories"] = serde_json::json!(self.categories);
+        }
+        Some(body)
     }
 }

@@ -222,6 +222,10 @@ pub struct SearchState {
     pub has_searched: bool,
     /// 错误信息
     pub error: Option<String>,
+    /// 选中的分类过滤列表
+    pub selected_categories: Vec<String>,
+    /// 是否展开分类过滤面板
+    pub show_category_filter: bool,
 }
 
 impl Default for SearchState {
@@ -235,6 +239,8 @@ impl Default for SearchState {
             is_loading: false,
             has_searched: false,
             error: None,
+            selected_categories: Vec::new(),
+            show_category_filter: false,
         }
     }
 }

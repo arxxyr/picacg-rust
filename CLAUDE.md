@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2025-12-08
+> 最后更新: 2026-02-16
 
 ## 其他
  - git commit 带emoji
@@ -787,12 +787,12 @@ pub fn refresh_search_ui(
 
 **问题场景：** 按钮添加了 `Button` 组件，但点击没有任何响应。
 
-**典型案例：保存按钮/日志等级按钮无响应**
+**典型案例：日志等级按钮无响应**
 
 ```rust
 // ❌ 错误：缺少 Interaction 组件
 row.spawn((
-    SaveSettingsButton,
+    MyButton,
     Button,
     Node { ... },
     BackgroundColor(AppColors::PRIMARY),
@@ -812,7 +812,7 @@ row.spawn((
 ```rust
 // ✅ 正确：显式添加 Interaction 组件
 row.spawn((
-    SaveSettingsButton,
+    MyButton,
     Button,
     Interaction::default(),  // 必须添加！
     Node { ... },
@@ -972,9 +972,9 @@ pub fn reader_mouse_wheel_control(
 
 ### 固定底部栏与滚动容器布局
 
-**问题场景：** 页面需要固定底部栏（如保存按钮），同时中间内容可滚动。
+**问题场景：** 页面需要固定底部栏（如状态提示栏），同时中间内容可滚动。
 
-**典型案例：设置页面底部保存按钮**
+**典型案例：设置页面底部状态栏**
 
 **正确布局结构：**
 ```
@@ -986,7 +986,7 @@ PageRoot (Column, 100% height)
 │   │   ├── 内容2
 │   │   └── 底部间距 (height: 30px)  ← 确保最后内容可滚动到可见区域
 │   └── Scrollbar (Absolute 定位)
-└── BottomBar (固定高度，如 60px)
+└── BottomBar (固定高度，初始 display: None，按需显示)
 ```
 
 **关键点：**
@@ -1137,6 +1137,65 @@ pub fn refresh_pagination_ui(
 
 ---
 
+## 设置页面自动保存模式
+
+设置页面采用**自动保存**机制，修改即生效，无需手动点击保存按钮。
+
+### 架构设计
+
+| 组件 / 系统 | 职责 |
+|-------------|------|
+| `SettingsSaveStatus` | 资源：保存状态（visible、timer、message、is_error） |
+| `SettingsStatusBar` / `SettingsStatusText` | 组件：底部状态栏 UI 标记 |
+| `auto_save_settings` | 系统：监听所有设置状态 `is_changed()`，有变化时自动保存 |
+| `update_settings_save_status` | 系统：控制状态栏显示/隐藏，2 秒后自动消失 |
+| `save_all_settings()` | 辅助函数：从各状态资源读取值写入 `AppSettings` 并保存到磁盘 |
+
+### 关键实现细节
+
+**1. 跳过初始化帧：**
+
+`setup_settings_ui` 插入资源时会触发 `is_changed() = true`，需要用 `Local<bool>` 跳过第一帧：
+
+```rust
+pub fn auto_save_settings(
+    // ...各种 Res<XxxState>
+    mut initialized: Local<bool>,
+) {
+    if !any_changed { return; }
+    if !*initialized {
+        *initialized = true;
+        return; // 跳过初始化帧
+    }
+    // 执行保存...
+}
+```
+
+**2. 状态栏显示/隐藏：**
+
+使用 `Display::None` / `Display::Flex` 控制底部状态栏的显示。`Timer` 倒计时 2 秒后自动隐藏：
+
+```rust
+// 显示
+node.display = Display::Flex;
+
+// Timer 到期后隐藏
+if save_status.timer.just_finished() {
+    save_status.visible = false;
+    node.display = Display::None;
+}
+```
+
+**3. 错误/成功区分：**
+
+`SettingsSaveStatus.is_error` 控制文本颜色（绿色成功 / 红色失败）。
+
+### 影响文件
+- `src/systems/settings.rs` — 自动保存逻辑、状态栏 UI
+- `src/plugins/ui_plugin.rs` — 系统注册
+
+---
+
 ## 登录状态与异步操作
 
 ### 问题：启动时自动下载报错"未登录"
@@ -1236,6 +1295,10 @@ fn auto_resume_downloads_on_startup(
 - [x] 完善漫画详情页面（返回按钮、汉化组、更新时间、评论数、分类/标签点击跳转）
 - [x] 下载列表标题/分类/标签点击跳转
 - [x] 删除下载任务后 UI 立即更新
+- [x] 设置页面自动保存（移除保存按钮，修改即生效，底部状态栏提示）
+- [x] 搜索分类过滤（排序选择器 + 分类复选框面板）
+- [x] 关键词屏蔽（按分类/标签/标题屏蔽，设置页面管理，配置持久化）
+- [x] 修复 sanitize_filename 未清理全角特殊字符导致 CBZ 打包兼容性问题
 
 ### 已完成：Workspace 重构与模块拆分
 

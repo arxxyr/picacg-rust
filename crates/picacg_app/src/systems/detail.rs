@@ -1607,6 +1607,7 @@ pub fn tag_button_interaction(
                     keyword: tag_btn.tag.clone(),
                     page: 1,
                     sort: search_state.sort.clone(),
+                    categories: search_state.selected_categories.clone(),
                 });
 
                 tracing::info!("点击标签搜索: {}", tag_btn.tag);

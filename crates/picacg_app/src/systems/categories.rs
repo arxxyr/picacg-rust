@@ -10,8 +10,7 @@ use crate::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            GridLayoutParams, calculate_grid_content_height, calculate_scroll_delta,
-            spawn_scrollbar,
+            GridLayoutParams, calculate_scroll_delta, measure_grid_content_height, spawn_scrollbar,
         },
         waterfall::CategoriesCardCreationState,
     },
@@ -21,8 +20,6 @@ use crate::{
 mod category_layout {
     /// 卡片宽度
     pub const CARD_WIDTH: f32 = 150.0;
-    /// 卡片高度
-    pub const CARD_HEIGHT: f32 = 180.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -502,8 +499,11 @@ pub fn clamp_categories_scroll(
 /// 更新分类页面内容尺寸信息
 pub fn update_categories_content_size(
     windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut scroll_query: Query<(&ComputedNode, &mut ContentSizeInfo), With<CategoriesScrollContainer>>,
-    card_query: Query<Entity, With<CategoryCard>>,
+    mut scroll_query: Query<
+        (&ComputedNode, &mut ContentSizeInfo, Option<&Children>),
+        With<CategoriesScrollContainer>,
+    >,
+    child_computed_query: Query<&ComputedNode>,
 ) {
     use category_layout::*;
 
@@ -515,7 +515,6 @@ pub fn update_categories_content_size(
 
     let layout_params = GridLayoutParams {
         card_width: CARD_WIDTH,
-        card_height: CARD_HEIGHT,
         column_gap: COLUMN_GAP,
         row_gap: ROW_GAP,
         padding_left: PADDING_LEFT,
@@ -524,7 +523,7 @@ pub fn update_categories_content_size(
         padding_bottom: PADDING_BOTTOM,
     };
 
-    for (scroll_computed, mut content_size_info) in &mut scroll_query {
+    for (scroll_computed, mut content_size_info, children) in &mut scroll_query {
         let viewport_size = scroll_computed.size();
         let viewport_width = viewport_size.x / scale_factor;
         let viewport_height = viewport_size.y / scale_factor;
@@ -533,10 +532,14 @@ pub fn update_categories_content_size(
             continue;
         }
 
-        let card_count = card_query.iter().count();
         content_size_info.viewport_height = viewport_height;
-        content_size_info.content_height =
-            calculate_grid_content_height(viewport_width, card_count, &layout_params);
+        content_size_info.content_height = measure_grid_content_height(
+            children,
+            &child_computed_query,
+            scale_factor,
+            viewport_width,
+            &layout_params,
+        );
     }
 }
 
