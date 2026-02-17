@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2026-02-16
+> 最后更新: 2026-02-17
 
 ## 其他
  - git commit 带emoji
@@ -14,6 +14,9 @@ picacg-rust/
 ├── Cargo.toml                    # 纯 Workspace 配置（无 [package]）
 ├── assets/                       # 静态资源（字体、图片）
 ├── docs/                         # 文档
+├── scripts/                      # 部署脚本
+│   ├── deploy.sh                 # Bash 部署脚本
+│   └── deploy-windows.ps1        # PowerShell 部署脚本
 └── crates/
     ├── picacg_app/               # 主应用 (picacg)
     │   └── src/
@@ -77,7 +80,7 @@ picacg (主应用)      ← 依赖以上所有 crate
 ```toml
 # 根 Cargo.toml
 [workspace.dependencies]
-bevy = { version = "0.17", default-features = true }
+bevy = { version = "0.18", default-features = true }
 reqwest = { version = "0.12", features = ["json", "cookies", "stream", "rustls-tls", "socks"] }
 serde = { version = "1.0", features = ["derive"] }
 # ... 更多依赖
@@ -96,9 +99,9 @@ serde.workspace = true
 
 ## 框架概述
 
-**当前框架**: **Bevy 0.17.3** (ECS 架构)
+**当前框架**: **Bevy 0.18.0** (ECS 架构)
 
-### Bevy 0.17 API 速查
+### Bevy 0.18 API 速查
 
 | API | 说明 |
 |-----|------|
@@ -110,7 +113,7 @@ serde.workspace = true
 | `despawn()` | 删除实体（自动递归删除子实体） |
 | `KeyboardInput` + `logical_key` | 键盘输入处理 |
 
-### 键盘输入新 API (Bevy 0.17)
+### 键盘输入新 API (Bevy 0.18)
 
 ```rust
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -137,7 +140,7 @@ fn keyboard_input(
 }
 ```
 
-### IME 输入法支持 (Bevy 0.17)
+### IME 输入法支持 (Bevy 0.18)
 
 **重要：** `KeyboardInput` 只能处理英文直接输入，中文输入法需要使用 `Ime` 事件。
 
@@ -173,7 +176,7 @@ fn handle_ime_input(
 
 
 
-Bevy 0.17 IME（输入法）支持要点
+Bevy 0.18 IME（输入法）支持要点
 
 1. 启用 IME 的必要条件：
 - 在输入框获取焦点时设置 window.ime_enabled = true
@@ -246,7 +249,7 @@ btn.spawn((
 
 ---
 
-### Bevy 0.17 DPI 缩放处理
+### Bevy 0.18 DPI 缩放处理
 
 **核心原则：** Bevy UI 使用逻辑像素，但 `ComputedNode::size()` 返回物理像素。
 
@@ -527,7 +530,7 @@ pub fn update_your_content_size(
 ### 注意事项
 
 1. **Transform 组件必须添加**：轨道和滑块需要 `Transform::default()`，否则 `GlobalTransform` 不可用，导致点击/拖拽不响应
-2. **ScrollPosition 使用 `.y` 字段**：Bevy 0.17 的 `ScrollPosition` 有 `x` 和 `y` 字段
+2. **ScrollPosition 使用 `.y` 字段**：Bevy 0.18 的 `ScrollPosition` 有 `x` 和 `y` 字段
 3. **ContentSizeInfo 需手动更新**：在每帧的 Update 系统中更新 `content_height` 和 `viewport_height`
 4. **滚动容器需要 `overflow: Overflow::scroll_y()`**：启用 Bevy 内置的滚动裁剪
 
@@ -1059,6 +1062,83 @@ root.spawn(Node {
 
 ---
 
+### needs_rebuild 模式：避免输入时全量 UI 重建
+
+**问题场景：** 资源状态（如 `SearchState`）在输入文字时被修改，`is_changed()` 触发 `refresh_xxx_ui` 重建整个页面，导致输入卡顿和焦点丢失。
+
+**解决方案：** 添加 `needs_rebuild` 标志，只在结构性变化时触发重建。
+
+```rust
+pub struct SearchState {
+    pub keyword: String,
+    // ... 其他字段
+    /// 是否需要重建 UI（仅在搜索结果/排序/分类/翻页/错误变化时设置）
+    pub needs_rebuild: bool,
+}
+
+pub fn refresh_search_ui(
+    mut search_state: ResMut<SearchState>,  // 需要 ResMut 来重置标志
+    // ...
+) {
+    if !search_state.is_changed() || !search_state.needs_rebuild {
+        return;
+    }
+    search_state.needs_rebuild = false;
+    // ... 重建 UI
+}
+```
+
+**设置 `needs_rebuild = true` 的场景：**
+- 搜索结果返回（成功/失败）
+- 切换排序方式
+- 切换分类过滤
+- 翻页
+- 按下 Enter 搜索
+
+**不设置的场景：**
+- 键盘输入修改 keyword（通过 `update_input_text` 原地更新文本节点）
+- IME 输入修改 keyword
+
+**影响文件：**
+- `src/resources/app_state.rs` - `SearchState` 添加 `needs_rebuild` 字段
+- `src/systems/search.rs` - `refresh_search_ui` + 各触发点
+- `src/plugins/api_plugin.rs` - 搜索响应处理
+
+---
+
+### 设置页面屏蔽词输入系统
+
+**组件架构：**
+
+| 组件 | 用途 |
+|------|------|
+| `NewKeywordInput` | 输入框标记（焦点状态由 `FilterSettingsState.input_focused` 管理） |
+| `NewKeywordInputText` | 输入框内文本节点标记（用于原地更新文本） |
+| `BlockedKeywordsListContainer` | 屏蔽词列表容器标记（用于局部刷新） |
+| `KeywordSuggestionPanel` | 分类建议下拉面板容器 |
+| `KeywordSuggestionItem` | 建议项按钮（存储分类名） |
+| `KeywordSuggestionToggle` | 展开/折叠建议面板按钮 |
+
+**系统函数：**
+
+| 系统 | 职责 |
+|------|------|
+| `new_keyword_input_interaction` | 输入框点击交互，启用 IME |
+| `new_keyword_keyboard_input` | 键盘输入（含 Ctrl+V 粘贴） |
+| `new_keyword_ime_input` | IME 中文输入提交 |
+| `unfocus_keyword_input` | 点击外部失焦，关闭 IME |
+| `refresh_blocked_keywords_ui` | 监听 `FilterSettingsState` 变化，局部刷新屏蔽词列表 |
+| `keyword_suggestion_toggle_interaction` | 展开/折叠分类建议面板 |
+| `keyword_suggestion_item_interaction` | 点击建议项添加屏蔽词 |
+
+**关键设计：**
+- 焦点状态统一由 `FilterSettingsState.input_focused` 管理，不在组件上存储
+- 文本更新使用 `update_keyword_input_text()` 辅助函数，处理占位符/实际文本颜色切换
+- 建议面板数据来源：`CategoriesState.categories` 中的分类标题
+- 已存在于屏蔽词列表中的分类显示为灰色禁用状态
+
+---
+
 ## 通用分页组件
 
 实现了泛型分页组件模块 `src/systems/pagination.rs`，支持多个页面复用。
@@ -1272,6 +1352,44 @@ fn auto_resume_downloads_on_startup(
 
 ---
 
+## 部署与 CI/CD
+
+### 本地部署脚本
+
+```bash
+# Linux / macOS
+./scripts/deploy.sh [release|debug]
+
+# Windows (PowerShell)
+.\scripts\deploy-windows.ps1 [-Profile release|debug]
+```
+
+脚本流程：清理旧 bin → 创建目录 → 复制可执行文件 → 复制字体 → 创建版本压缩包。
+产物位于 `bin/` 目录，压缩包命名格式 `picacg-v{版本号}.zip`。
+
+### GitHub Actions CI/CD
+
+**工作流文件：** `.github/workflows/ci.yml`
+
+| Job | 触发条件 | 说明 |
+|-----|---------|------|
+| `fmt` | push/PR | `cargo fmt --all -- --check` |
+| `clippy` | push/PR | `cargo clippy --all --all-targets` |
+| `build` | clippy 通过后 | Linux x64 + Windows x64 矩阵构建 |
+| `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
+| `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |
+
+**版本号格式：**
+- Release（标签触发）：`v{版本号}+{commit短哈希}`
+- Dev（分支推送）：`v{版本号}+{日期}.{commit短哈希}`
+
+**构建优化：**
+- `Swatinem/rust-cache@v2` 缓存 Cargo 依赖
+- UPX `--best --lzma` 压缩二进制
+- 产物保留 30 天
+
+---
+
 ## 待办事项
 
 ### 当前功能开发
@@ -1299,6 +1417,10 @@ fn auto_resume_downloads_on_startup(
 - [x] 搜索分类过滤（排序选择器 + 分类复选框面板）
 - [x] 关键词屏蔽（按分类/标签/标题屏蔽，设置页面管理，配置持久化）
 - [x] 修复 sanitize_filename 未清理全角特殊字符导致 CBZ 打包兼容性问题
+- [x] 屏蔽词输入 IME 中文支持 + 分类建议面板 + 列表动态刷新
+- [x] 搜索页面 needs_rebuild 优化（输入不触发全量 UI 重建）
+- [x] 部署脚本（deploy.sh + deploy-windows.ps1）
+- [x] CI/CD 流水线（GitHub Actions：fmt/clippy/build/release）
 
 ### 已完成：Workspace 重构与模块拆分
 
@@ -1318,7 +1440,7 @@ fn auto_resume_downloads_on_startup(
 
 ## 参考资料
 
-- [Bevy 0.17 发布说明](https://bevy.org/news/bevy-0-17/)
+- [Bevy 0.18 发布说明](https://bevy.org/news/bevy-0-17/)
 - [Bevy 官方文档](https://docs.rs/bevy/latest/bevy/)
 - [Tokio 官方文档](https://tokio.rs/)
 - [PicACG API 文档](../docs/)
