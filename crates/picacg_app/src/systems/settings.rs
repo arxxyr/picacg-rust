@@ -2,7 +2,7 @@
 //!
 //! 实现应用设置页面
 
-use bevy::{prelude::*, time::Timer, ui::FocusPolicy};
+use bevy::{prelude::*, time::Timer, ui::FocusPolicy, window::PrimaryWindow};
 use picacg_config::{AppSettings, FilterSettings, LogLevel, ProxyType, update_log_level};
 
 use crate::{
@@ -213,11 +213,9 @@ pub struct FilterByTagCheckbox;
 #[derive(Component)]
 pub struct FilterByTitleCheckbox;
 
-/// 屏蔽词列表项
+/// 屏蔽词列表项标记
 #[derive(Component)]
-pub struct BlockedKeywordItem {
-    pub keyword: String,
-}
+pub struct BlockedKeywordItem;
 
 /// 删除屏蔽词按钮
 #[derive(Component)]
@@ -225,15 +223,35 @@ pub struct RemoveKeywordButton {
     pub keyword: String,
 }
 
-/// 新增屏蔽词输入框
+/// 新增屏蔽词输入框标记
 #[derive(Component)]
-pub struct NewKeywordInput {
-    pub focused: bool,
-}
+pub struct NewKeywordInput;
 
 /// 添加屏蔽词按钮
 #[derive(Component)]
 pub struct AddKeywordButton;
+
+/// 屏蔽词输入框文本标记
+#[derive(Component)]
+pub struct NewKeywordInputText;
+
+/// 下拉建议面板容器
+#[derive(Component)]
+pub struct KeywordSuggestionPanel;
+
+/// 建议项按钮
+#[derive(Component)]
+pub struct KeywordSuggestionItem {
+    pub keyword: String,
+}
+
+/// 展开/折叠下拉按钮
+#[derive(Component)]
+pub struct KeywordSuggestionToggle;
+
+/// 屏蔽词列表容器标记
+#[derive(Component)]
+pub struct BlockedKeywordsListContainer;
 
 /// 内容过滤设置状态
 #[derive(Resource)]
@@ -244,6 +262,8 @@ pub struct FilterSettingsState {
     pub filter_by_title: bool,
     pub new_keyword: String,
     pub input_focused: bool,
+    /// 是否展开分类建议面板
+    pub show_suggestions: bool,
 }
 
 impl Default for FilterSettingsState {
@@ -256,6 +276,7 @@ impl Default for FilterSettingsState {
             filter_by_title: settings.filter.filter_by_title,
             new_keyword: String::new(),
             input_focused: false,
+            show_suggestions: false,
         }
     }
 }
@@ -265,6 +286,7 @@ pub fn setup_settings_ui(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
+    categories_state: Res<crate::resources::CategoriesState>,
 ) {
     let font: Handle<Font> = asset_server.load(FONT_PATH);
     let settings = AppSettings::global().read();
@@ -323,6 +345,7 @@ pub fn setup_settings_ui(
         filter_by_title: settings.filter.filter_by_title,
         new_keyword: String::new(),
         input_focused: false,
+        show_suggestions: false,
     });
 
     // 初始化保存状态提示
@@ -414,8 +437,18 @@ pub fn setup_settings_ui(
                             });
 
                             // 内容过滤分组
+                            let category_titles: Vec<String> = categories_state
+                                .categories
+                                .iter()
+                                .map(|c| c.title.clone())
+                                .collect();
                             spawn_settings_section(scroll, &font, "内容过滤", |section| {
-                                spawn_filter_settings(section, &font, &settings.filter);
+                                spawn_filter_settings(
+                                    section,
+                                    &font,
+                                    &settings.filter,
+                                    &category_titles,
+                                );
                             });
 
                             // 缓存设置分组
@@ -1000,6 +1033,7 @@ fn spawn_filter_settings(
     parent: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
     filter: &FilterSettings,
+    category_titles: &[String],
 ) {
     // 屏蔽模式复选框行
     parent
@@ -1054,99 +1088,23 @@ fn spawn_filter_settings(
         },
     ));
 
-    // 屏蔽词列表
-    if filter.blocked_keywords.is_empty() {
-        parent.spawn((
-            Text::new("暂无屏蔽词"),
-            TextFont {
-                font: font.clone(),
-                font_size: 12.0,
-                ..default()
-            },
-            TextColor(AppColors::TEXT_SECONDARY),
+    // 屏蔽词列表容器
+    parent
+        .spawn((
+            BlockedKeywordsListContainer,
             Node {
-                margin: UiRect::top(Val::Px(4.0)),
+                width: Val::Percent(100.0),
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(6.0),
+                row_gap: Val::Px(6.0),
+                margin: UiRect::top(Val::Px(6.0)),
                 ..default()
             },
-        ));
-    } else {
-        parent
-            .spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(6.0),
-                    row_gap: Val::Px(6.0),
-                    margin: UiRect::top(Val::Px(6.0)),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|list| {
-                for keyword in &filter.blocked_keywords {
-                    // 每个屏蔽词是一个标签 + 删除按钮
-                    list.spawn((
-                        BlockedKeywordItem {
-                            keyword: keyword.clone(),
-                        },
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(8.0),
-                                Val::Px(4.0),
-                                Val::Px(3.0),
-                                Val::Px(3.0),
-                            ),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5)),
-                        BorderColor::all(AppColors::BORDER),
-                    ))
-                    .with_children(|tag| {
-                        tag.spawn((
-                            Text::new(keyword),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                        // 删除按钮
-                        tag.spawn((
-                            RemoveKeywordButton {
-                                keyword: keyword.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Px(16.0),
-                                height: Val::Px(16.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border_radius: BorderRadius::all(Val::Px(8.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("\u{F0156}"), // nf-md-close
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.9, 0.5, 0.5)),
-                            ));
-                        });
-                    });
-                }
-            });
-    }
+            Transform::default(),
+        ))
+        .with_children(|list| {
+            spawn_blocked_keyword_tags(list, font, &filter.blocked_keywords);
+        });
 
     // 新增屏蔽词输入行
     parent
@@ -1163,7 +1121,7 @@ fn spawn_filter_settings(
         .with_children(|row| {
             // 输入框
             row.spawn((
-                NewKeywordInput { focused: false },
+                NewKeywordInput,
                 Button,
                 Interaction::default(),
                 Node {
@@ -1181,6 +1139,7 @@ fn spawn_filter_settings(
             ))
             .with_children(|input| {
                 input.spawn((
+                    NewKeywordInputText,
                     Text::new("输入新屏蔽词..."),
                     TextFont {
                         font: font.clone(),
@@ -1217,7 +1176,254 @@ fn spawn_filter_settings(
                     TextColor(AppColors::TEXT),
                 ));
             });
+
+            // "选择分类" 展开/折叠按钮
+            if !category_titles.is_empty() {
+                row.spawn((
+                    KeywordSuggestionToggle,
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(12.0)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                    BorderColor::all(AppColors::BORDER),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("选择分类 \u{F0140}"), // nf-md-chevron_down
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+            }
         });
+
+    // 分类建议面板（初始隐藏）
+    if !category_titles.is_empty() {
+        parent
+            .spawn((
+                KeywordSuggestionPanel,
+                Node {
+                    width: Val::Percent(100.0),
+                    margin: UiRect::top(Val::Px(6.0)),
+                    padding: UiRect::all(Val::Px(8.0)),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    display: Display::None, // 初始隐藏
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.12, 0.12, 0.18, 0.9)),
+                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
+            ))
+            .with_children(|panel| {
+                for title in category_titles {
+                    let already_blocked = filter.blocked_keywords.contains(title);
+                    let bg = if already_blocked {
+                        Color::srgba(0.2, 0.2, 0.25, 0.4)
+                    } else {
+                        Color::srgba(0.2, 0.2, 0.3, 0.7)
+                    };
+                    let text_color = if already_blocked {
+                        AppColors::TEXT_SECONDARY
+                    } else {
+                        AppColors::TEXT
+                    };
+
+                    panel
+                        .spawn((
+                            KeywordSuggestionItem {
+                                keyword: title.clone(),
+                            },
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(10.0),
+                                    Val::Px(10.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(3.0)),
+                                ..default()
+                            },
+                            BackgroundColor(bg),
+                            BorderColor::all(if already_blocked {
+                                Color::srgba(0.3, 0.3, 0.35, 0.3)
+                            } else {
+                                AppColors::BORDER
+                            }),
+                        ))
+                        .with_children(|item| {
+                            item.spawn((
+                                Text::new(title),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 12.0,
+                                    ..default()
+                                },
+                                TextColor(text_color),
+                            ));
+                        });
+                }
+            });
+    }
+}
+
+/// 创建屏蔽词标签列表（可复用）
+fn spawn_blocked_keyword_tags(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    keywords: &[String],
+) {
+    if keywords.is_empty() {
+        parent.spawn((
+            Text::new("暂无屏蔽词"),
+            TextFont {
+                font: font.clone(),
+                font_size: 12.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT_SECONDARY),
+        ));
+    } else {
+        for keyword in keywords {
+            parent
+                .spawn((
+                    BlockedKeywordItem,
+                    Node {
+                        padding: UiRect::new(
+                            Val::Px(8.0),
+                            Val::Px(4.0),
+                            Val::Px(3.0),
+                            Val::Px(3.0),
+                        ),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(6.0),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5)),
+                    BorderColor::all(AppColors::BORDER),
+                ))
+                .with_children(|tag| {
+                    tag.spawn((
+                        Text::new(keyword),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 12.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+                    // 删除按钮
+                    tag.spawn((
+                        RemoveKeywordButton {
+                            keyword: keyword.clone(),
+                        },
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(16.0),
+                            height: Val::Px(16.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5)),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("\u{F0156}"), // nf-md-close
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 10.0,
+                                ..default()
+                            },
+                            TextColor(Color::srgb(0.9, 0.5, 0.5)),
+                        ));
+                    });
+                });
+        }
+    }
+}
+
+/// 屏蔽词列表动态刷新系统：添加/删除屏蔽词后立即更新 UI
+pub fn refresh_blocked_keywords_ui(
+    mut commands: Commands,
+    filter_state: Res<FilterSettingsState>,
+    list_query: Query<(Entity, Option<&Children>), With<BlockedKeywordsListContainer>>,
+    asset_server: Res<AssetServer>,
+    // 同时更新建议面板的禁用状态
+    mut suggestion_query: Query<(
+        &KeywordSuggestionItem,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &Children,
+    )>,
+    mut text_color_query: Query<&mut TextColor>,
+) {
+    if !filter_state.is_changed() {
+        return;
+    }
+
+    let font: Handle<Font> = asset_server.load(FONT_PATH);
+
+    // 重建屏蔽词列表
+    for (entity, children) in list_query.iter() {
+        // 清除旧子节点
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut entity_cmd) = commands.get_entity(child) {
+                    entity_cmd.despawn();
+                }
+            }
+        }
+
+        // 重新创建屏蔽词标签
+        commands.entity(entity).with_children(|list| {
+            spawn_blocked_keyword_tags(list, &font, &filter_state.blocked_keywords);
+        });
+    }
+
+    // 更新建议面板中已屏蔽项的禁用外观
+    for (item, mut bg, mut border, children) in suggestion_query.iter_mut() {
+        let already_blocked = filter_state.blocked_keywords.contains(&item.keyword);
+        if already_blocked {
+            *bg = BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.4));
+            *border = BorderColor::all(Color::srgba(0.3, 0.3, 0.35, 0.3));
+        } else {
+            *bg = BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7));
+            *border = BorderColor::all(AppColors::BORDER);
+        }
+        // 更新文本颜色
+        for child in children.iter() {
+            if let Ok(mut color) = text_color_query.get_mut(child) {
+                *color = if already_blocked {
+                    TextColor(AppColors::TEXT_SECONDARY)
+                } else {
+                    TextColor(AppColors::TEXT)
+                };
+            }
+        }
+    }
 }
 
 /// 过滤复选框类型（内部使用）
@@ -2962,20 +3168,37 @@ pub fn remove_keyword_interaction(
     }
 }
 
-/// 新增屏蔽词输入框交互
+/// 新增屏蔽词输入框交互（含 IME 启用）
 pub fn new_keyword_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &ComputedNode,
+        ),
         (Changed<Interaction>, With<NewKeywordInput>),
     >,
     mut filter_state: ResMut<FilterSettingsState>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, computed) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 filter_state.input_focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
+
+                // 启用 IME 并设置候选框位置
+                if let Ok(mut window) = window_query.single_mut() {
+                    window.ime_enabled = true;
+                    if let Some(cursor_pos) = window.cursor_position() {
+                        let scale_factor = window.scale_factor();
+                        let input_height = computed.size().y / scale_factor;
+                        window.ime_position =
+                            bevy::math::Vec2::new(cursor_pos.x, cursor_pos.y + input_height / 2.0 + 5.0);
+                    }
+                }
             }
             Interaction::Hovered => {
                 if !filter_state.input_focused {
@@ -2992,18 +3215,38 @@ pub fn new_keyword_input_interaction(
     }
 }
 
-/// 新增屏蔽词键盘输入
+/// 更新屏蔽词输入框文本显示
+fn update_keyword_input_text(
+    keyword: &str,
+    text_query: &mut Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
+) {
+    for (mut text, mut color) in text_query.iter_mut() {
+        if keyword.is_empty() {
+            **text = "输入新屏蔽词...".to_string();
+            *color = TextColor(AppColors::TEXT_SECONDARY);
+        } else {
+            **text = keyword.to_string();
+            *color = TextColor(AppColors::TEXT);
+        }
+    }
+}
+
+/// 新增屏蔽词键盘输入（含 Ctrl+V/C/X/A 快捷键）
 pub fn new_keyword_keyboard_input(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut filter_state: ResMut<FilterSettingsState>,
-    input_query: Query<&Children, With<NewKeywordInput>>,
-    mut text_query: Query<&mut Text>,
+    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
+    key_input: Res<ButtonInput<KeyCode>>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if !filter_state.input_focused {
         return;
     }
 
     use bevy::input::{ButtonState, keyboard::Key};
+
+    let ctrl_pressed =
+        key_input.pressed(KeyCode::ControlLeft) || key_input.pressed(KeyCode::ControlRight);
 
     for event in keyboard_events.read() {
         if event.state != ButtonState::Pressed {
@@ -3013,9 +3256,14 @@ pub fn new_keyword_keyboard_input(
         match &event.logical_key {
             Key::Backspace => {
                 filter_state.new_keyword.pop();
+                update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
             }
             Key::Escape => {
                 filter_state.input_focused = false;
+                // 禁用 IME
+                if let Ok(mut window) = window_query.single_mut() {
+                    window.ime_enabled = false;
+                }
             }
             Key::Enter => {
                 // 回车添加屏蔽词
@@ -3024,29 +3272,63 @@ pub fn new_keyword_keyboard_input(
                     tracing::info!("添加屏蔽词: {}", keyword);
                     filter_state.blocked_keywords.push(keyword);
                     filter_state.new_keyword.clear();
+                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
                 }
             }
             Key::Character(input) => {
-                for c in input.chars() {
-                    if !c.is_control() {
-                        filter_state.new_keyword.push(c);
+                if ctrl_pressed {
+                    match input.as_str() {
+                        "v" | "V" => {
+                            // Ctrl+V 粘贴
+                            if let Ok(mut clipboard) = arboard::Clipboard::new()
+                                && let Ok(text) = clipboard.get_text()
+                            {
+                                let filtered: String =
+                                    text.chars().filter(|c| !c.is_control()).collect();
+                                filter_state.new_keyword.push_str(&filtered);
+                                update_keyword_input_text(
+                                    &filter_state.new_keyword,
+                                    &mut text_query,
+                                );
+                            }
+                        }
+                        "c" | "C" => {
+                            // Ctrl+C 复制
+                            if !filter_state.new_keyword.is_empty()
+                                && let Ok(mut clipboard) = arboard::Clipboard::new()
+                            {
+                                let _ = clipboard.set_text(&filter_state.new_keyword);
+                            }
+                        }
+                        "x" | "X" => {
+                            // Ctrl+X 剪切
+                            if !filter_state.new_keyword.is_empty() {
+                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                    let _ = clipboard.set_text(&filter_state.new_keyword);
+                                }
+                                filter_state.new_keyword.clear();
+                                update_keyword_input_text(
+                                    &filter_state.new_keyword,
+                                    &mut text_query,
+                                );
+                            }
+                        }
+                        "a" | "A" => {
+                            // Ctrl+A 全选（防止 'a' 被输入）
+                        }
+                        _ => {}
                     }
+                } else {
+                    // 普通字符输入
+                    for c in input.chars() {
+                        if !c.is_control() {
+                            filter_state.new_keyword.push(c);
+                        }
+                    }
+                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
                 }
             }
             _ => {}
-        }
-    }
-
-    // 更新显示文本
-    for children in input_query.iter() {
-        for child in children.iter() {
-            if let Ok(mut text) = text_query.get_mut(child) {
-                if filter_state.new_keyword.is_empty() {
-                    **text = "输入新屏蔽词...".to_string();
-                } else {
-                    **text = filter_state.new_keyword.clone();
-                }
-            }
         }
     }
 }
@@ -3055,8 +3337,7 @@ pub fn new_keyword_keyboard_input(
 pub fn new_keyword_ime_input(
     mut ime_events: MessageReader<bevy::window::Ime>,
     mut filter_state: ResMut<FilterSettingsState>,
-    input_query: Query<&Children, With<NewKeywordInput>>,
-    mut text_query: Query<&mut Text>,
+    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
 ) {
     if !filter_state.input_focused {
         return;
@@ -3065,19 +3346,7 @@ pub fn new_keyword_ime_input(
     for event in ime_events.read() {
         if let bevy::window::Ime::Commit { value, .. } = event {
             filter_state.new_keyword.push_str(value);
-        }
-    }
-
-    // 更新显示文本
-    for children in input_query.iter() {
-        for child in children.iter() {
-            if let Ok(mut text) = text_query.get_mut(child) {
-                if filter_state.new_keyword.is_empty() {
-                    **text = "输入新屏蔽词...".to_string();
-                } else {
-                    **text = filter_state.new_keyword.clone();
-                }
-            }
+            update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
         }
     }
 }
@@ -3089,6 +3358,7 @@ pub fn add_keyword_button_interaction(
         (Changed<Interaction>, With<AddKeywordButton>),
     >,
     mut filter_state: ResMut<FilterSettingsState>,
+    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
@@ -3099,6 +3369,7 @@ pub fn add_keyword_button_interaction(
                     tracing::info!("添加屏蔽词: {}", keyword);
                     filter_state.blocked_keywords.push(keyword);
                     filter_state.new_keyword.clear();
+                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
                 }
             }
             Interaction::Hovered => {
@@ -3107,6 +3378,124 @@ pub fn add_keyword_button_interaction(
             Interaction::None => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY);
             }
+        }
+    }
+}
+
+/// 点击输入框外部取消焦点
+pub fn unfocus_keyword_input(
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    mut input_query: Query<(&Interaction, &mut BorderColor), With<NewKeywordInput>>,
+    mut filter_state: ResMut<FilterSettingsState>,
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
+) {
+    if mouse_button.just_pressed(MouseButton::Left) {
+        for (interaction, mut border) in input_query.iter_mut() {
+            if *interaction == Interaction::None && filter_state.input_focused {
+                filter_state.input_focused = false;
+                *border = BorderColor::all(AppColors::BORDER);
+
+                // 禁用 IME
+                if let Ok(mut window) = window_query.single_mut() {
+                    window.ime_enabled = false;
+                }
+            }
+        }
+    }
+}
+
+/// 建议面板展开/折叠交互
+pub fn keyword_suggestion_toggle_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (Changed<Interaction>, With<KeywordSuggestionToggle>),
+    >,
+    mut filter_state: ResMut<FilterSettingsState>,
+    mut panel_query: Query<&mut Node, With<KeywordSuggestionPanel>>,
+) {
+    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                filter_state.show_suggestions = !filter_state.show_suggestions;
+                let display = if filter_state.show_suggestions {
+                    Display::Flex
+                } else {
+                    Display::None
+                };
+                for mut node in panel_query.iter_mut() {
+                    node.display = display;
+                }
+                // 按下状态高亮
+                if filter_state.show_suggestions {
+                    *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.3));
+                    *border_color = BorderColor::all(AppColors::PRIMARY);
+                } else {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+            Interaction::Hovered => {
+                if !filter_state.show_suggestions {
+                    *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
+                }
+            }
+            Interaction::None => {
+                if !filter_state.show_suggestions {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+}
+
+/// 建议项点击添加屏蔽词
+pub fn keyword_suggestion_item_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &KeywordSuggestionItem,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Changed<Interaction>,
+    >,
+    mut filter_state: ResMut<FilterSettingsState>,
+) {
+    let mut keyword_to_add: Option<String> = None;
+    for (interaction, item, _, _) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed
+            && !filter_state.blocked_keywords.contains(&item.keyword)
+        {
+            keyword_to_add = Some(item.keyword.clone());
+            break;
+        }
+    }
+
+    if let Some(keyword) = keyword_to_add {
+        tracing::info!("从建议面板添加屏蔽词: {}", keyword);
+        filter_state.blocked_keywords.push(keyword);
+    }
+
+    // 更新悬停样式
+    for (interaction, item, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        let already_blocked = filter_state.blocked_keywords.contains(&item.keyword);
+        match *interaction {
+            Interaction::Hovered => {
+                if !already_blocked {
+                    *bg_color = BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 0.8));
+                }
+            }
+            Interaction::None => {
+                if already_blocked {
+                    *bg_color = BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.4));
+                    *border_color = BorderColor::all(Color::srgba(0.3, 0.3, 0.35, 0.3));
+                } else {
+                    *bg_color = BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+            _ => {}
         }
     }
 }

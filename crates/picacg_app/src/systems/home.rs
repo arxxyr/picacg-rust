@@ -11,6 +11,7 @@ use crate::{
     systems::{
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::*,
+        ui_common::spawn_comic_time_info,
     },
 };
 
@@ -430,6 +431,14 @@ fn spawn_home_card(
                     }
                 });
             }
+
+            // 创建/更新时间
+            spawn_comic_time_info(
+                card,
+                font,
+                comic.created_at.as_deref(),
+                comic.updated_at.as_deref(),
+            );
         })
         .id()
 }

@@ -14,7 +14,7 @@ use crate::{
         downloads::ScrollContainer,
         login::{AppColors, FONT_PATH},
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{calculate_scroll_delta, spawn_scrollbar},
+        ui_common::{calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar},
         waterfall::SearchCardCreationState,
     },
 };
@@ -1176,6 +1176,14 @@ fn spawn_search_result_card(
                     }
                 });
             }
+
+            // 创建/更新时间
+            spawn_comic_time_info(
+                card,
+                font,
+                comic.created_at.as_deref(),
+                comic.updated_at.as_deref(),
+            );
         })
         .id()
 }
@@ -1284,6 +1292,7 @@ pub fn handle_search_keyboard_input(
             Key::Enter => {
                 if !search_state.keyword.is_empty() {
                     search_state.is_loading = true;
+                    search_state.needs_rebuild = true;
                     search_state.page = 1;
                     search_messages.write(SearchComicsRequestEvent {
                         keyword: search_state.keyword.clone(),
@@ -1430,6 +1439,7 @@ pub fn search_button_interaction(
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
                 if !search_state.keyword.is_empty() && !search_state.is_loading {
                     search_state.is_loading = true;
+                    search_state.needs_rebuild = true;
                     search_state.page = 1;
                     search_messages.write(SearchComicsRequestEvent {
                         keyword: search_state.keyword.clone(),
@@ -1503,6 +1513,7 @@ pub fn search_pagination_interaction(
                 if search_state.page > 1 && !search_state.is_loading {
                     search_state.page -= 1;
                     search_state.is_loading = true;
+                    search_state.needs_rebuild = true;
                     search_messages.write(SearchComicsRequestEvent {
                         keyword: search_state.keyword.clone(),
                         page: search_state.page,
@@ -1534,6 +1545,7 @@ pub fn search_pagination_interaction(
                 if search_state.page < search_state.total_pages && !search_state.is_loading {
                     search_state.page += 1;
                     search_state.is_loading = true;
+                    search_state.needs_rebuild = true;
                     search_messages.write(SearchComicsRequestEvent {
                         keyword: search_state.keyword.clone(),
                         page: search_state.page,
@@ -1630,7 +1642,7 @@ pub fn update_search_images(
 /// 刷新搜索 UI（响应状态变化）
 pub fn refresh_search_ui(
     mut commands: Commands,
-    search_state: Res<SearchState>,
+    mut search_state: ResMut<SearchState>,
     categories_state: Res<CategoriesState>,
     search_root_query: Query<Entity, With<SearchRoot>>,
     asset_server: Res<AssetServer>,
@@ -1638,9 +1650,12 @@ pub fn refresh_search_ui(
     input_query: Query<&SearchInputField>,
     mut creation_state: ResMut<SearchCardCreationState>,
 ) {
-    if !search_state.is_changed() {
+    if !search_state.is_changed() || !search_state.needs_rebuild {
         return;
     }
+
+    // 重建前重置标志
+    search_state.needs_rebuild = false;
 
     // 保存输入框焦点状态
     let was_focused = input_query.iter().any(|input| input.focused);
@@ -1801,6 +1816,7 @@ pub fn sort_button_interaction(
     if let Some(sort) = new_sort {
         tracing::info!("切换排序: {} -> {}", search_state.sort, sort);
         search_state.sort = sort;
+        search_state.needs_rebuild = true;
 
         // 如果已经搜索过，自动重新搜索
         if search_state.has_searched && !search_state.keyword.is_empty() {
@@ -1848,6 +1864,7 @@ pub fn category_filter_toggle_interaction(
         match *interaction {
             Interaction::Pressed => {
                 search_state.show_category_filter = !search_state.show_category_filter;
+                search_state.needs_rebuild = true;
                 tracing::debug!(
                     "分类过滤面板: {}",
                     if search_state.show_category_filter {
@@ -1895,6 +1912,7 @@ pub fn category_checkbox_interaction(
         } else {
             search_state.selected_categories.push(category);
         }
+        search_state.needs_rebuild = true;
         tracing::debug!("选中分类: {:?}", search_state.selected_categories);
 
         // 如果已经搜索过，自动重新搜索
@@ -1931,6 +1949,7 @@ pub fn select_all_categories_interaction(
                     .map(|c| c.title.clone())
                     .collect();
                 search_state.selected_categories = all;
+                search_state.needs_rebuild = true;
 
                 // 如果已搜索过，自动重新搜索
                 if search_state.has_searched && !search_state.keyword.is_empty() {
@@ -1969,6 +1988,7 @@ pub fn clear_all_categories_interaction(
                 *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
                 if !search_state.selected_categories.is_empty() {
                     search_state.selected_categories.clear();
+                    search_state.needs_rebuild = true;
 
                     // 如果已搜索过，自动重新搜索
                     if search_state.has_searched && !search_state.keyword.is_empty() {

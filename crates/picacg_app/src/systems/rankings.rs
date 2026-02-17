@@ -12,7 +12,8 @@ use crate::{
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
             GridLayoutParams, TagColor, calculate_scroll_delta, format_number,
-            measure_grid_content_height, spawn_scrollbar, spawn_tag_badge_truncated, truncate_text,
+            measure_grid_content_height, spawn_comic_time_info, spawn_scrollbar,
+            spawn_tag_badge_truncated, truncate_text,
         },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
@@ -850,6 +851,14 @@ fn spawn_comic_card(
                         }
                     });
                 }
+
+                // 创建/更新时间
+                spawn_comic_time_info(
+                    info,
+                    font,
+                    comic.created_at.as_deref(),
+                    comic.updated_at.as_deref(),
+                );
             });
         })
         .id()

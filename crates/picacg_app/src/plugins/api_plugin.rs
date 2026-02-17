@@ -2544,6 +2544,7 @@ fn handle_search_response(
         search_state.results = filtered;
         search_state.total_pages = event.total_pages;
         search_state.error = None;
+        search_state.needs_rebuild = true;
 
         // 触发加载封面图片
         for comic in &search_state.results {
@@ -2557,6 +2558,7 @@ fn handle_search_response(
         search_state.is_loading = false;
         search_state.has_searched = true;
         search_state.error = Some(event.error.clone());
+        search_state.needs_rebuild = true;
     }
 }
 

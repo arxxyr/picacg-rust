@@ -260,3 +260,58 @@ pub fn format_number(n: i64) -> String {
         n.to_string()
     }
 }
+
+/// 格式化 API 返回的 ISO 8601 时间字符串为日期
+///
+/// `"2023-01-01T12:00:00.000Z"` → `"2023-01-01"`
+#[must_use]
+pub fn format_api_date(iso_str: &str) -> &str {
+    iso_str.split('T').next().unwrap_or(iso_str)
+}
+
+/// 在漫画卡片中显示创建/更新时间
+pub fn spawn_comic_time_info(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    created_at: Option<&str>,
+    updated_at: Option<&str>,
+) {
+    if created_at.is_none() && updated_at.is_none() {
+        return;
+    }
+
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            margin: UiRect::top(Val::Px(2.0)),
+            max_width: Val::Px(164.0),
+            overflow: Overflow::clip(),
+            ..default()
+        })
+        .with_children(|container| {
+            if let Some(updated) = updated_at {
+                let date = format_api_date(updated);
+                container.spawn((
+                    Text::new(format!("更新 {date}")),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 9.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+            }
+            if let Some(created) = created_at {
+                let date = format_api_date(created);
+                container.spawn((
+                    Text::new(format!("创建 {date}")),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 9.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
+                ));
+            }
+        });
+}

@@ -15,7 +15,10 @@ use crate::{
             check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
         },
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{TagColor, calculate_scroll_delta, spawn_scrollbar, spawn_tag_badge},
+        ui_common::{
+            TagColor, calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar,
+            spawn_tag_badge,
+        },
     },
 };
 
@@ -371,6 +374,14 @@ fn spawn_favorite_card(
                     }
                 });
             }
+
+            // 创建/更新时间
+            spawn_comic_time_info(
+                card,
+                font,
+                comic.created_at.as_deref(),
+                comic.updated_at.as_deref(),
+            );
         })
         .id()
 }

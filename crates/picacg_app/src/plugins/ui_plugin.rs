@@ -288,6 +288,16 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
+            .add_systems(
+                Update,
+                (
+                    unfocus_keyword_input,
+                    refresh_blocked_keywords_ui,
+                    keyword_suggestion_toggle_interaction,
+                    keyword_suggestion_item_interaction,
+                )
+                    .run_if(in_state(AppRoute::Settings)),
+            )
             // 下载管理页面
             .add_systems(
                 OnEnter(AppRoute::Downloads),
