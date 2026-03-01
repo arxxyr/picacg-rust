@@ -6,13 +6,11 @@
 
 use bevy::prelude::*;
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     resources::*,
-    systems::{
-        login::{AppColors, FONT_PATH},
-        navigation::NavigationHistory,
-    },
+    systems::{login::AppColors, navigation::NavigationHistory},
 };
 
 /// 侧边栏宽度
@@ -83,8 +81,8 @@ const SIDEBAR_BUTTONS: &[SidebarButtonConfig] = &[
 ];
 
 /// 创建主布局
-pub fn setup_main_layout(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+pub fn setup_main_layout(mut commands: Commands, _asset_server: Res<AssetServer>) {
+    let font: Handle<Font> = get_font();
 
     // 主布局根节点：横向排列（侧边栏 + 内容区域）
     commands

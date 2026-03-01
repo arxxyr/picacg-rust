@@ -5,14 +5,12 @@
 use bevy::{prelude::*, time::Timer, ui::FocusPolicy, window::PrimaryWindow};
 use picacg_config::{AppSettings, FilterSettings, LogLevel, ProxyType, update_log_level};
 
+use super::font_loader::get_font;
 use crate::{
     components::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
     },
-    systems::{
-        login::{AppColors, FONT_PATH},
-        scrollbar::scrollbar_config::*,
-    },
+    systems::{login::AppColors, scrollbar::scrollbar_config::*},
 };
 
 /// 设置滚动容器组件（本地定义）
@@ -284,11 +282,11 @@ impl Default for FilterSettingsState {
 /// 创建设置页面 UI
 pub fn setup_settings_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     categories_state: Res<crate::resources::CategoriesState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
     let settings = AppSettings::global().read();
 
     // 查找内容区域
@@ -1370,7 +1368,7 @@ pub fn refresh_blocked_keywords_ui(
     mut commands: Commands,
     filter_state: Res<FilterSettingsState>,
     list_query: Query<(Entity, Option<&Children>), With<BlockedKeywordsListContainer>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     // 同时更新建议面板的禁用状态
     mut suggestion_query: Query<(
         &KeywordSuggestionItem,
@@ -1384,7 +1382,7 @@ pub fn refresh_blocked_keywords_ui(
         return;
     }
 
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 重建屏蔽词列表
     for (entity, children) in list_query.iter() {
@@ -3302,18 +3300,13 @@ pub fn new_keyword_keyboard_input(
                                 let _ = clipboard.set_text(&filter_state.new_keyword);
                             }
                         }
-                        "x" | "X" => {
+                        "x" | "X" if !filter_state.new_keyword.is_empty() => {
                             // Ctrl+X 剪切
-                            if !filter_state.new_keyword.is_empty() {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(&filter_state.new_keyword);
-                                }
-                                filter_state.new_keyword.clear();
-                                update_keyword_input_text(
-                                    &filter_state.new_keyword,
-                                    &mut text_query,
-                                );
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(&filter_state.new_keyword);
                             }
+                            filter_state.new_keyword.clear();
+                            update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
                         }
                         "a" | "A" => {
                             // Ctrl+A 全选（防止 'a' 被输入）
@@ -3483,10 +3476,8 @@ pub fn keyword_suggestion_item_interaction(
     for (interaction, item, mut bg_color, mut border_color) in interaction_query.iter_mut() {
         let already_blocked = filter_state.blocked_keywords.contains(&item.keyword);
         match *interaction {
-            Interaction::Hovered => {
-                if !already_blocked {
-                    *bg_color = BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 0.8));
-                }
+            Interaction::Hovered if !already_blocked => {
+                *bg_color = BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 0.8));
             }
             Interaction::None => {
                 if already_blocked {

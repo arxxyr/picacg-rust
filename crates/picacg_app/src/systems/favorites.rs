@@ -4,12 +4,13 @@
 
 use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
-        login::{AppColors, FONT_PATH},
+        login::AppColors,
         pagination::{
             PaginationNextButton, PaginationPageText, PaginationPrevButton,
             check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
@@ -108,13 +109,13 @@ impl FavoritesCardCreationState {
 /// 创建收藏列表界面
 pub fn setup_favorites_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     favorites_state: Res<FavoritesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<FavoritesCardCreationState>,
     mut load_favorites_messages: MessageWriter<LoadFavoritesRequest>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
     creation_state.clear();
@@ -525,7 +526,7 @@ pub fn waterfall_create_favorite_cards(
     loading_query: Query<Entity, With<LoadingIndicator>>,
     empty_hint_query: Query<Entity, With<FavoritesEmptyHint>>,
     image_cache: Res<ImageCache>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 如果没有滚动容器，退出
     let Ok((scroll_entity, children)) = scroll_container_query.single() else {
@@ -550,7 +551,7 @@ pub fn waterfall_create_favorite_cards(
                 commands.entity(entity).despawn();
             }
 
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             creation_state.start_precreate(favorites_state.comics.len(), font);
         }
     }

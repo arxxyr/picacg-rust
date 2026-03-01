@@ -7,15 +7,12 @@
 use bevy::prelude::*;
 use picacg_api::models::Episode;
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
-    systems::{
-        login::{AppColors, FONT_PATH},
-        navigation::NavigationHistory,
-        scrollbar::scrollbar_config::*,
-    },
+    systems::{login::AppColors, navigation::NavigationHistory, scrollbar::scrollbar_config::*},
 };
 
 /// 滚动条宽度
@@ -72,12 +69,12 @@ pub struct TagButton {
 /// 创建漫画详情界面
 pub fn setup_detail_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     detail_state: Res<ComicDetailState>,
     image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     let detail_root = commands
@@ -658,7 +655,7 @@ pub fn cleanup_detail_ui(mut commands: Commands, root_query: Query<Entity, With<
 /// 刷新详情页 UI（当状态变化时）
 pub fn refresh_detail_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     detail_state: Res<ComicDetailState>,
     image_cache: Res<ImageCache>,
     root_query: Query<Entity, With<ComicDetailRoot>>,
@@ -680,7 +677,7 @@ pub fn refresh_detail_ui(
     }
 
     // 重新创建 UI
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     // 调用 setup_detail_ui 的逻辑（内联）

@@ -3,12 +3,13 @@
 use bevy::{prelude::*, window::PrimaryWindow};
 use picacg_api::endpoints::RankTimeType;
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
-        login::{AppColors, FONT_PATH},
+        login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
             GridLayoutParams, TagColor, calculate_scroll_delta, format_number,
@@ -86,11 +87,11 @@ mod layout {
 /// 创建排行榜 UI
 pub fn setup_rankings_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     rankings_state: Res<RankingsState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     let content_area = match content_area_query.iter().next() {
         Some(entity) => entity,
@@ -375,7 +376,7 @@ pub fn rankings_card_interaction(
 pub fn refresh_rankings_ui(
     mut commands: Commands,
     rankings_state: Res<RankingsState>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     scroll_container_query: Query<(Entity, Option<&Children>), With<RankingsScrollContainer>>,
     tab_query: Query<(Entity, &RankingsTabButton)>,
     card_query: Query<&RankingsComicCard>,
@@ -387,7 +388,7 @@ pub fn refresh_rankings_ui(
     let start = std::time::Instant::now();
     tracing::debug!("refresh_rankings_ui 开始");
 
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 更新 Tab 按钮状态
     for (entity, tab) in tab_query.iter() {
@@ -449,7 +450,7 @@ pub fn waterfall_create_cards(
     card_query: Query<&RankingsComicCard>,
     loading_query: Query<Entity, With<RankingsLoadingIndicator>>,
     time: Res<Time>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     // （解决系统执行顺序导致 is_changed() 检测失败的问题）
@@ -497,7 +498,7 @@ pub fn waterfall_create_cards(
                             entity_commands.despawn();
                         }
                     }
-                    let font: Handle<Font> = asset_server.load(FONT_PATH);
+                    let font: Handle<Font> = get_font();
                     let context = RankingsContext {
                         current_type: Some(rankings_state.current_type),
                     };

@@ -6,10 +6,11 @@ use std::path::PathBuf;
 
 use bevy::{input::mouse::MouseWheel, prelude::*};
 
+use super::font_loader::get_font;
 use crate::{
     events::*,
     resources::{ComicDetailState, ImageCache, ReadMode, ReaderState},
-    systems::{downloads::get_download_base_path, login::FONT_PATH},
+    systems::downloads::get_download_base_path,
 };
 
 // ==================== 组件定义 ====================
@@ -176,10 +177,10 @@ fn try_get_local_image_path(
 /// 创建阅读器 UI
 pub fn setup_reader_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     reader_state: Res<ReaderState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 根节点 - 全屏黑色背景，使用层叠布局
     commands
@@ -554,7 +555,7 @@ pub fn handle_pictures_loaded(
             }
             ReadMode::Webtoon => {
                 // Webtoon 模式：创建滚动容器显示所有图片
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let font: Handle<Font> = get_font();
                 commands.entity(container).with_children(|parent| {
                     parent
                         .spawn((
@@ -644,7 +645,7 @@ pub fn handle_pictures_load_failed(
     mut error_events: MessageReader<PicturesLoadFailedEvent>,
     loading_query: Query<Entity, With<ReaderLoadingIndicator>>,
     container_query: Query<Entity, With<ReaderImageContainer>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     for event in error_events.read() {
         tracing::error!("图片加载失败: {}", event.error);
@@ -659,7 +660,7 @@ pub fn handle_pictures_load_failed(
 
         // 显示错误信息
         if let Ok(container) = container_query.single() {
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             commands.entity(container).with_children(|parent| {
                 parent.spawn((
                     ReaderErrorText,
@@ -965,7 +966,7 @@ fn update_current_image(
                     url: image_url.clone(),
                 });
 
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let font: Handle<Font> = get_font();
                 commands.entity(container).with_children(|parent| {
                     parent.spawn((
                         ReaderImageLoading {
@@ -1317,7 +1318,7 @@ pub fn handle_read_mode_change(
             }
 
             // 创建 Webtoon 滚动容器
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             commands.entity(container).with_children(|parent| {
                 parent
                     .spawn((
@@ -1452,7 +1453,7 @@ fn spawn_single_page_image(
             url: image_url.to_string(),
         });
 
-        let font: Handle<Font> = asset_server.load(FONT_PATH);
+        let font: Handle<Font> = get_font();
         commands.entity(container).with_children(|parent| {
             parent.spawn((
                 ReaderImageLoading {

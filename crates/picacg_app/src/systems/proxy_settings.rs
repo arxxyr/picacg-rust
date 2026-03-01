@@ -9,11 +9,8 @@ use bevy::{
 };
 use picacg_config::{AppSettings, ProxyType};
 
-use crate::{
-    components::*,
-    resources::*,
-    systems::login::{AppColors, FONT_PATH},
-};
+use super::font_loader::get_font;
+use crate::{components::*, resources::*, systems::login::AppColors};
 
 /// 代理设置页面根组件
 #[derive(Component)]
@@ -58,10 +55,10 @@ pub struct ProxyInputFocus {
 /// 创建代理设置界面
 pub fn setup_proxy_settings_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     proxy_state: Res<ProxySettingsState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     commands
         .spawn((

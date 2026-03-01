@@ -7,6 +7,7 @@
 use bevy::{prelude::*, ui::FocusPolicy};
 use picacg_config::AppSettings;
 
+use super::font_loader::get_font;
 use crate::{
     components::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
@@ -16,10 +17,7 @@ use crate::{
         RedownloadRequest, ResumeDownloadRequest, SearchComicsRequestEvent,
     },
     resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, SearchState},
-    systems::{
-        login::{AppColors, FONT_PATH},
-        navigation::NavigationHistory,
-    },
+    systems::{login::AppColors, navigation::NavigationHistory},
 };
 
 /// 下载滚动容器组件（本地定义）
@@ -469,12 +467,12 @@ pub fn load_incomplete_downloads(mut download_state: ResMut<DownloadManagerState
 /// 创建下载页面 UI
 pub fn setup_downloads_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     download_state: Res<DownloadManagerState>,
     collapse_state: Res<DownloadSectionCollapseState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 查找内容区域
     let content_area = match content_area_query.iter().next() {
@@ -2127,7 +2125,7 @@ pub fn add_new_task_ui(
     waiting_list_query: Query<Entity, With<WaitingTaskList>>,
     stopped_list_query: Query<Entity, With<StoppedTaskList>>,
     existing_items_query: Query<&DownloadTaskItem>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 只在状态变化时检查
     if !download_state.is_changed() {
@@ -2161,7 +2159,7 @@ pub fn add_new_task_ui(
         return;
     }
 
-    let font: Handle<Font> = asset_server.load(crate::systems::login::FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 为每个新任务添加 UI
     for task in new_tasks {
@@ -3366,7 +3364,7 @@ pub fn handle_download_completed_ui(
     task_item_query: Query<(Entity, &DownloadTaskItem)>,
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
     completed_list_query: Query<Entity, With<CompletedDownloadList>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     for event in messages.read() {
         let comic_id = &event.comic_id;
@@ -3422,7 +3420,7 @@ pub fn handle_download_completed_ui(
 
         // 4. 添加到已下载列表
         if let Ok(list_entity) = completed_list_query.single() {
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             let download = CompletedDownload {
                 comic_id: comic_id.clone(),
                 folder_name: comic_title,
@@ -3498,14 +3496,14 @@ pub fn update_download_task_tags(
     mut commands: Commands,
     download_state: Res<DownloadManagerState>,
     tags_container_query: Query<(Entity, &DownloadTaskTagsContainer, Option<&Children>)>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 只有当下载状态发生变化时才检查
     if !download_state.is_changed() {
         return;
     }
 
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     for (container_entity, tags_container, children) in tags_container_query.iter() {
         // 查找对应的任务
@@ -3664,7 +3662,7 @@ pub fn task_settings_button_interaction(
     mut interaction_query: Query<(&Interaction, &DownloadTaskSettingsButton), Changed<Interaction>>,
     panel_query: Query<(Entity, &DownloadTaskSettingsPanel)>,
     download_state: Res<DownloadManagerState>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     task_item_query: Query<(Entity, &DownloadTaskItem)>,
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
 ) {
@@ -3706,7 +3704,7 @@ pub fn task_settings_button_interaction(
         let custom_path = task.and_then(|t| t.meta.custom_download_path.clone());
         let custom_cbz = task.and_then(|t| t.meta.custom_auto_pack_cbz);
 
-        let font: Handle<Font> = asset_server.load(FONT_PATH);
+        let font: Handle<Font> = get_font();
 
         // 创建设置面板
         let panel_entity = commands
@@ -4005,7 +4003,7 @@ pub fn delete_completed_download_interaction(
     >,
     panel_query: Query<(Entity, &DeleteConfirmPanel)>,
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
         let delete_color = Color::srgb(0.8, 0.3, 0.3);
@@ -4031,7 +4029,7 @@ pub fn delete_completed_download_interaction(
                     continue;
                 };
 
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let font: Handle<Font> = get_font();
 
                 // 创建确认面板
                 let panel_entity = commands

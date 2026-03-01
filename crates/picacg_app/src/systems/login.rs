@@ -9,10 +9,8 @@ use bevy::{
 };
 use picacg_config::AppSettings;
 
+use super::font_loader::get_font;
 use crate::{components::*, events::*, resources::*};
-
-/// 字体路径常量
-pub const FONT_PATH: &str = "fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf";
 
 /// 应用颜色常量
 pub struct AppColors;
@@ -58,11 +56,11 @@ pub struct LoginInputFocus {
 /// 创建登录界面
 pub fn setup_login_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     login_state: Res<LoginFormState>,
 ) {
     // 直接加载字体（和参考项目一样）
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     commands
         .spawn((

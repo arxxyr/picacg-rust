@@ -2,12 +2,13 @@
 
 use bevy::{input::mouse::MouseWheel, prelude::*};
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
-        login::{AppColors, FONT_PATH},
+        login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
             GridLayoutParams, calculate_scroll_delta, measure_grid_content_height, spawn_scrollbar,
@@ -37,12 +38,12 @@ mod category_layout {
 /// 创建分类界面（在 ContentArea 内部）
 pub fn setup_categories_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<CategoriesCardCreationState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
     creation_state.clear();
@@ -266,7 +267,7 @@ pub fn cleanup_categories_ui(
 /// UI，否则会覆盖瀑布式系统创建的卡片。 它只在出现错误时重建 UI 显示错误信息。
 pub fn refresh_categories_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
     scroll_container_query: Query<(Entity, Option<&Children>), With<CategoriesScrollContainer>>,
     error_query: Query<Entity, With<ErrorMessage>>,
@@ -282,7 +283,7 @@ pub fn refresh_categories_ui(
         if error_query.is_empty()
             && let Ok((container_entity, _)) = scroll_container_query.single()
         {
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             let error_entity = commands
                 .spawn((
                     ErrorMessage,
@@ -314,7 +315,7 @@ pub fn waterfall_create_category_cards(
     card_query: Query<&CategoryCard>,
     loading_query: Query<Entity, With<LoadingIndicator>>,
     time: Res<Time>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     // （解决系统执行顺序导致 is_changed() 检测失败的问题）
@@ -336,7 +337,7 @@ pub fn waterfall_create_category_cards(
                         entity_commands.despawn();
                     }
                 }
-                let font: Handle<Font> = asset_server.load(FONT_PATH);
+                let font: Handle<Font> = get_font();
                 creation_state.start_precreate(categories_state.categories.len(), font);
                 tracing::debug!(
                     "自动启动分类卡片预创建: {} 个",

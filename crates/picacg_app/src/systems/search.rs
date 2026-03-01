@@ -6,13 +6,14 @@ use bevy::{
     window::{Ime, PrimaryWindow},
 };
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         downloads::ScrollContainer,
-        login::{AppColors, FONT_PATH},
+        login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar},
         waterfall::SearchCardCreationState,
@@ -942,13 +943,13 @@ fn spawn_pagination_controls(
 /// 创建搜索界面
 pub fn setup_search_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     search_state: Res<SearchState>,
     categories_state: Res<CategoriesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<SearchCardCreationState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     creation_state.clear();
@@ -1289,21 +1290,19 @@ pub fn handle_search_keyboard_input(
                 search_state.keyword.pop();
                 update_input_text(&search_state.keyword, &mut text_query);
             }
-            Key::Enter => {
-                if !search_state.keyword.is_empty() {
-                    search_state.is_loading = true;
-                    search_state.needs_rebuild = true;
-                    search_state.page = 1;
-                    search_messages.write(SearchComicsRequestEvent {
-                        keyword: search_state.keyword.clone(),
-                        page: 1,
-                        sort: search_state.sort.clone(),
-                        categories: search_state.selected_categories.clone(),
-                    });
-                    // 取消输入框焦点
-                    for mut input in input_query.iter_mut() {
-                        input.focused = false;
-                    }
+            Key::Enter if !search_state.keyword.is_empty() => {
+                search_state.is_loading = true;
+                search_state.needs_rebuild = true;
+                search_state.page = 1;
+                search_messages.write(SearchComicsRequestEvent {
+                    keyword: search_state.keyword.clone(),
+                    page: 1,
+                    sort: search_state.sort.clone(),
+                    categories: search_state.selected_categories.clone(),
+                });
+                // 取消输入框焦点
+                for mut input in input_query.iter_mut() {
+                    input.focused = false;
                 }
             }
             Key::Escape => {
@@ -1341,16 +1340,14 @@ pub fn handle_search_keyboard_input(
                                 tracing::info!("复制内容: {:?}", search_state.keyword);
                             }
                         }
-                        "x" | "X" => {
+                        "x" | "X" if !search_state.keyword.is_empty() => {
                             // Ctrl+X 剪切（复制并清空）
-                            if !search_state.keyword.is_empty() {
-                                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                    let _ = clipboard.set_text(&search_state.keyword);
-                                    tracing::info!("剪切内容: {:?}", search_state.keyword);
-                                }
-                                search_state.keyword.clear();
-                                update_input_text(&search_state.keyword, &mut text_query);
+                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                let _ = clipboard.set_text(&search_state.keyword);
+                                tracing::info!("剪切内容: {:?}", search_state.keyword);
                             }
+                            search_state.keyword.clear();
+                            update_input_text(&search_state.keyword, &mut text_query);
                         }
                         _ => {}
                     }
@@ -1645,7 +1642,7 @@ pub fn refresh_search_ui(
     mut search_state: ResMut<SearchState>,
     categories_state: Res<CategoriesState>,
     search_root_query: Query<Entity, With<SearchRoot>>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     input_query: Query<&SearchInputField>,
     mut creation_state: ResMut<SearchCardCreationState>,
@@ -1667,7 +1664,7 @@ pub fn refresh_search_ui(
 
     creation_state.clear();
 
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
     let Some(content_entity) = content_area_query.single().ok() else {
         return;
     };

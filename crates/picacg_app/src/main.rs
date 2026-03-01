@@ -2,6 +2,8 @@
 //!
 //! 使用 Bevy 0.18 ECS 架构重写
 
+#![windows_subsystem = "windows"]
+
 mod components;
 mod error;
 mod events;
@@ -63,8 +65,9 @@ fn main() {
         }
     });
 
-    // 配置 assets 路径 (确保能找到字体)
-    // 注意：在 workspace 结构中，assets 在项目根目录
+    // 配置 assets 路径
+    // 注意：在 workspace 结构中，assets
+    // 在项目根目录（字体已改用系统字体，此路径主要用于图片等资源）
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let assets_path = std::path::Path::new(manifest_dir)
         .parent()

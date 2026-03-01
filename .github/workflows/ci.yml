@@ -218,15 +218,13 @@ jobs:
           echo "=== 压缩后 ==="
           ls -lh "$EXE"
 
-      # 打包产物 (Linux)
+      # 打包产物 (Linux/macOS)
       - name: Package artifacts (Unix)
         if: runner.os != 'Windows'
         run: |
-          mkdir -p package/assets/fonts
+          mkdir -p package
 
           cp target/${{ matrix.target }}/release/picacg package/
-          cp assets/fonts/SarasaTermSCNerd-Regular.ttf package/assets/fonts/ || true
-
           echo "${{ steps.version.outputs.full_version }}" > package/VERSION
 
           cd package
@@ -238,11 +236,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path package/assets/fonts
+          New-Item -ItemType Directory -Force -Path package
 
           Copy-Item target/${{ matrix.target }}/release/picacg.exe package/
-          Copy-Item assets/fonts/SarasaTermSCNerd-Regular.ttf package/assets/fonts/ -ErrorAction SilentlyContinue
-
           "${{ steps.version.outputs.full_version }}" | Out-File -FilePath package/VERSION -Encoding UTF8
 
           Compress-Archive -Path package/* -DestinationPath "${{ steps.version.outputs.package_name }}.zip"

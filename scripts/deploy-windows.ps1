@@ -25,30 +25,20 @@ Write-Host "版本号: v$Version" -ForegroundColor Green
 
 # 目录定义
 $BinDir = Join-Path $RootDir "bin"
-$BinAssetsDir = Join-Path $BinDir "assets"
-$BinFontsDir = Join-Path $BinAssetsDir "fonts"
 $TargetDir = Join-Path $RootDir "target\$Profile"
-$AssetsDir = Join-Path $RootDir "assets"
 
 # Step 1: 清理旧的 bin 目录
 Write-Host ""
-Write-Host "[1/5] 清理旧的 bin 目录..." -ForegroundColor Yellow
+Write-Host "[1/3] 清理旧的 bin 目录..." -ForegroundColor Yellow
 if (Test-Path $BinDir) {
     Remove-Item -Recurse -Force $BinDir
     Write-Host "  已删除旧目录: $BinDir" -ForegroundColor Gray
 }
 
-# Step 2: 创建目录结构
+# Step 2: 复制可执行文件
 Write-Host ""
-Write-Host "[2/5] 创建目录结构..." -ForegroundColor Yellow
+Write-Host "[2/3] 复制可执行文件..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-New-Item -ItemType Directory -Force -Path $BinFontsDir | Out-Null
-Write-Host "  已创建: bin/" -ForegroundColor Gray
-Write-Host "  已创建: bin/assets/fonts/" -ForegroundColor Gray
-
-# Step 3: 复制可执行文件
-Write-Host ""
-Write-Host "[3/5] 复制可执行文件..." -ForegroundColor Yellow
 $ExeName = "picacg.exe"
 $ExePath = Join-Path $TargetDir $ExeName
 if (Test-Path $ExePath) {
@@ -60,37 +50,19 @@ if (Test-Path $ExePath) {
     exit 1
 }
 
-# Step 4: 复制字体文件
-Write-Host ""
-Write-Host "[4/5] 复制字体文件..." -ForegroundColor Yellow
-$FontsSourceDir = Join-Path $AssetsDir "fonts"
-if (Test-Path $FontsSourceDir) {
-    # 只复制 Regular 字体（运行时必须）
-    $FontFile = Join-Path $FontsSourceDir "SarasaTermSCNerd-Regular.ttf"
-    if (Test-Path $FontFile) {
-        Copy-Item $FontFile -Destination $BinFontsDir
-        Write-Host "  已复制: SarasaTermSCNerd-Regular.ttf" -ForegroundColor Green
-    } else {
-        Write-Host "  警告: 未找到字体文件" -ForegroundColor DarkYellow
-    }
-} else {
-    Write-Host "  警告: 字体目录不存在 $FontsSourceDir" -ForegroundColor DarkYellow
-}
-
 # 部署完成提示
 Write-Host ""
 Write-Host "=== 部署完成 ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "目录结构:" -ForegroundColor Green
 Write-Host "bin/"
-Write-Host "├── $ExeName"
-Write-Host "└── assets/"
-Write-Host "    └── fonts/"
-Write-Host "        └── SarasaTermSCNerd-Regular.ttf"
-
-# Step 5: 创建版本压缩包
+Write-Host "└── $ExeName"
 Write-Host ""
-Write-Host "[5/5] 创建版本压缩包..." -ForegroundColor Yellow
+Write-Host "注：字体使用系统字体，无需捆绑" -ForegroundColor Gray
+
+# Step 3: 创建版本压缩包
+Write-Host ""
+Write-Host "[3/3] 创建版本压缩包..." -ForegroundColor Yellow
 $ZipName = "picacg-v$Version.zip"
 $ZipPath = Join-Path $BinDir $ZipName
 

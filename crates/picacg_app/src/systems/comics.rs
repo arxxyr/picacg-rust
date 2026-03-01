@@ -2,12 +2,13 @@
 
 use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
-        login::{AppColors, FONT_PATH},
+        login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
             GridLayoutParams, calculate_scroll_delta, measure_grid_content_height,
@@ -38,12 +39,12 @@ mod comic_layout {
 /// 创建漫画列表界面（在 ContentArea 内部）
 pub fn setup_comics_list_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     comics_state: Res<ComicsListState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<ComicsCardCreationState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
     creation_state.clear();
@@ -572,7 +573,7 @@ pub fn update_comics_content_size(
 /// UI，否则会覆盖瀑布式系统创建的卡片。 它只在出现错误时处理错误显示。
 pub fn refresh_comics_list_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     comics_state: Res<ComicsListState>,
     scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
     error_query: Query<Entity, With<ErrorMessage>>,
@@ -588,7 +589,7 @@ pub fn refresh_comics_list_ui(
         if error_query.is_empty()
             && let Ok((container_entity, _)) = scroll_container_query.single()
         {
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             let error_entity = commands
                 .spawn((
                     ErrorMessage,
@@ -620,7 +621,7 @@ pub fn waterfall_create_comic_cards(
     card_query: Query<&ComicCard>,
     loading_query: Query<Entity, With<LoadingIndicator>>,
     time: Res<Time>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     if !creation_state.is_creating
@@ -646,13 +647,13 @@ pub fn waterfall_create_comic_cards(
                     entity_commands.despawn();
                 }
             }
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             creation_state.start_precreate(total_comics, font);
             tracing::debug!("自动启动漫画卡片预创建: {} 个", total_comics);
         } else if existing_card_count < total_comics && existing_card_count > 0 {
             // 无限滚动追加：有新数据追加，增量创建新卡片
             let new_count = total_comics - existing_card_count;
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             creation_state.start_precreate(new_count, font);
             tracing::debug!(
                 "无限滚动追加卡片: 已有 {}，新增 {}",

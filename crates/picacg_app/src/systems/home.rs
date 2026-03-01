@@ -4,15 +4,12 @@
 
 use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy, window::PrimaryWindow};
 
+use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
-    systems::{
-        login::{AppColors, FONT_PATH},
-        scrollbar::scrollbar_config::*,
-        ui_common::spawn_comic_time_info,
-    },
+    systems::{login::AppColors, scrollbar::scrollbar_config::*, ui_common::spawn_comic_time_info},
 };
 
 /// 首页卡片布局常量
@@ -102,13 +99,13 @@ impl HomeCardCreationState {
 /// 创建首页界面
 pub fn setup_home_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     home_state: Res<HomeState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<HomeCardCreationState>,
     mut load_recommendations: MessageWriter<LoadRecommendationsRequest>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
     creation_state.clear();
@@ -610,7 +607,7 @@ pub fn waterfall_create_home_cards(
     card_query: Query<&HomeComicCard>,
     loading_query: Query<Entity, With<HomeLoadingIndicator>>,
     image_cache: Res<ImageCache>,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
 ) {
     // 如果没有滚动容器，退出
     let Ok((scroll_entity, children)) = scroll_container_query.single() else {
@@ -632,7 +629,7 @@ pub fn waterfall_create_home_cards(
                 commands.entity(entity).despawn();
             }
 
-            let font: Handle<Font> = asset_server.load(FONT_PATH);
+            let font: Handle<Font> = get_font();
             creation_state.start_precreate(home_state.recommendations.len(), font);
         }
     }

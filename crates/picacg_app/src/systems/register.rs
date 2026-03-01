@@ -9,12 +9,8 @@ use bevy::{
     window::{Ime, PrimaryWindow},
 };
 
-use crate::{
-    components::*,
-    events::*,
-    resources::*,
-    systems::login::{AppColors, FONT_PATH},
-};
+use super::font_loader::get_font;
+use crate::{components::*, events::*, resources::*, systems::login::AppColors};
 
 /// 当前注册页面焦点
 #[derive(Resource, Default)]
@@ -25,10 +21,10 @@ pub struct RegisterInputFocus {
 /// 创建注册界面
 pub fn setup_register_ui(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    _asset_server: Res<AssetServer>,
     register_state: Res<RegisterFormState>,
 ) {
-    let font: Handle<Font> = asset_server.load(FONT_PATH);
+    let font: Handle<Font> = get_font();
 
     commands
         .spawn((
