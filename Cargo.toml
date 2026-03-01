@@ -47,7 +47,7 @@ sha2 = "0.10"
 hex = "0.4"
 
 # === 工具库 ===
-uuid = { version = "1.19.0", features = ["v4"] }
+uuid = { version = "1.21.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 urlencoding = "2.1"
 parking_lot = "0.12"
@@ -69,7 +69,7 @@ open = "5.3.3"
 rfd = "0.17.2"
 
 # === 压缩 ===
-zip = { version = "2", default-features = false }
+zip = { version = "8.1.0", default-features = false }
 
 # === 编译配置 ===
 [profile.dev]
