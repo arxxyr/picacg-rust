@@ -3195,8 +3195,10 @@ pub fn new_keyword_input_interaction(
                     if let Some(cursor_pos) = window.cursor_position() {
                         let scale_factor = window.scale_factor();
                         let input_height = computed.size().y / scale_factor;
-                        window.ime_position =
-                            bevy::math::Vec2::new(cursor_pos.x, cursor_pos.y + input_height / 2.0 + 5.0);
+                        window.ime_position = bevy::math::Vec2::new(
+                            cursor_pos.x,
+                            cursor_pos.y + input_height / 2.0 + 5.0,
+                        );
                     }
                 }
             }

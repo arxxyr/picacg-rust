@@ -226,7 +226,8 @@ pub struct SearchState {
     pub selected_categories: Vec<String>,
     /// 是否展开分类过滤面板
     pub show_category_filter: bool,
-    /// 是否需要重建 UI（仅在搜索结果/排序/分类/翻页/错误变化时设置，输入文字不触发）
+    /// 是否需要重建 UI（仅在搜索结果/排序/分类/翻页/错误变化时设置，
+    /// 输入文字不触发）
     pub needs_rebuild: bool,
 }
 

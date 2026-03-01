@@ -1375,7 +1375,8 @@ fn auto_resume_downloads_on_startup(
 |-----|---------|------|
 | `fmt` | push/PR | `cargo fmt --all -- --check` |
 | `clippy` | push/PR | `cargo clippy --all --all-targets` |
-| `build` | clippy 通过后 | Linux x64 + Windows x64 矩阵构建 |
+| `test` | clippy 通过后 | `cargo test --all --release` |
+| `build` | test 通过后 | Linux x64 + Windows x64 + macOS ARM64 矩阵构建 |
 | `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
 | `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |
 
@@ -1383,10 +1384,28 @@ fn auto_resume_downloads_on_startup(
 - Release（标签触发）：`v{版本号}+{commit短哈希}`
 - Dev（分支推送）：`v{版本号}+{日期}.{commit短哈希}`
 
+**构建平台：**
+- Linux x64（Ubuntu 22.04 LTS，glibc 2.35）
+- Windows x64（MSVC）
+- macOS ARM64（Apple Silicon）
+
 **构建优化：**
 - `Swatinem/rust-cache@v2` 缓存 Cargo 依赖
-- UPX `--best --lzma` 压缩二进制
+- UPX `--best --lzma` 压缩二进制（macOS 跳过）
+- Linux 构建验证 ELF 完整性
 - 产物保留 30 天
+
+### GitLab CI/CD
+
+**工作流文件：** `.gitlab-ci.yml`
+
+| Job | 阶段 | 说明 |
+|-----|------|------|
+| `fmt` | check | 代码格式检查 |
+| `clippy` | check | 静态分析 |
+| `test` | test | 单元测试（依赖 fmt + clippy） |
+| `build-release` | build | Release 构建（main/master/tags/MR） |
+| `build-debug` | build | Debug 构建（feature 分支快速验证） |
 
 ---
 
