@@ -213,29 +213,34 @@ App::new()
     )
 ```
 
-### Nerd Font 图标使用
+### UI 图标使用
 
-项目使用 **SarasaTermSCNerd** 字体，内置 Nerd Font 图标。在 UI 按钮中使用图标代替 emoji（emoji 可能显示为乱码）。
+项目使用系统字体，UI 图标使用 **Unicode 通用符号**（不依赖 Nerd Font）。
 
-**常用图标码：**
+**常用图标：**
 
-| 功能 | Unicode | 图标 | Nerd Font 名称 |
-|-----|---------|------|---------------|
-| 暂停 | `\u{F03E4}` | 󰏤 | nf-md-pause |
-| 播放 | `\u{F040A}` | 󰐊 | nf-md-play |
-| 刷新 | `\u{F0453}` | 󰑓 | nf-md-refresh |
-| 删除 | `\u{F01B4}` | 󰆴 | nf-md-delete |
-| 同步 | `\u{F04E6}` | 󰓦 | nf-md-sync |
-| 文件夹 | `\u{F0770}` | 󰝰 | nf-md-folder_open |
-| 下载 | `\u{F01DA}` | 󰇚 | nf-md-download |
-| 搜索 | `\u{F0349}` | 󰍉 | nf-md-magnify |
-| 设置 | `\u{F0493}` | 󰒓 | nf-md-cog |
-| 首页 | `\u{F02DC}` | 󰋜 | nf-md-home |
+| 功能 | 符号 | 说明 |
+|-----|------|------|
+| 暂停 | `⏸` | U+23F8 |
+| 播放 | `▶` | U+25B6 |
+| 刷新 | `↻` | U+21BB |
+| 删除/关闭 | `✕` | U+2715 |
+| 同步 | `⟳` | U+27F3 |
+| 文件夹 | `📂` | U+1F4C2 |
+| 下载 | `⬇` | U+2B07 |
+| 等待 | `⏳` | U+23F3 |
+| 停止 | `⏹` | U+23F9 |
+| 勾选 | `✓` | U+2713 |
+| 设置 | `⚙` | U+2699 |
+| 左箭头 | `◀` | U+25C0 |
+| 右箭头/展开 | `▶` | U+25B6 |
+| 下箭头/折叠 | `▼` | U+25BC |
+| 上箭头 | `▲` | U+25B2 |
 
 **使用示例：**
 ```rust
 btn.spawn((
-    Text::new("\u{F03E4}"),  // 󰏤 nf-md-pause
+    Text::new("⏸"),  // 暂停按钮
     TextFont {
         font: font.clone(),
         font_size: 14.0,
@@ -244,8 +249,6 @@ btn.spawn((
     TextColor(Color::WHITE),
 ));
 ```
-
-**查找更多图标：** https://www.nerdfonts.com/cheat-sheet
 
 ---
 

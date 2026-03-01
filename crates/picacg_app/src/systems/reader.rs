@@ -250,7 +250,7 @@ fn spawn_toolbar(
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("\u{F0141}"), // nf-md-arrow_left
+                        Text::new("◀"), // nf-md-arrow_left
                         TextFont {
                             font: font.clone(),
                             font_size: 24.0,
@@ -398,7 +398,7 @@ fn spawn_bottom_bar(
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("\u{F0141} 上一页"), // nf-md-arrow_left
+                    Text::new("◀ 上一页"), // nf-md-arrow_left
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -436,7 +436,7 @@ fn spawn_bottom_bar(
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("下一页 \u{F0142}"), // nf-md-arrow_right
+                    Text::new("下一页 ▶"), // nf-md-arrow_right
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,

@@ -468,9 +468,9 @@ fn spawn_filter_toolbar(
                     ));
                     btn.spawn((
                         Text::new(if search_state.show_category_filter {
-                            "\u{F0143}" // chevron_up
+                            "▲" // chevron_up
                         } else {
-                            "\u{F0140}" // chevron_down
+                            "▼" // chevron_down
                         }),
                         TextFont {
                             font: font.clone(),
@@ -662,7 +662,7 @@ fn spawn_category_checkbox(
         .with_children(|cb| {
             // 勾选图标
             cb.spawn((
-                Text::new(if checked { "\u{F012C}" } else { "" }),
+                Text::new(if checked { "✓" } else { "" }),
                 TextFont {
                     font: font.clone(),
                     font_size: 11.0,

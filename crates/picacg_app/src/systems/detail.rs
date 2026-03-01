@@ -118,7 +118,7 @@ pub fn setup_detail_ui(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("\u{F0141}"), // nf-md-arrow_left
+                            Text::new("◀"), // nf-md-arrow_left
                             TextFont {
                                 font: font.clone(),
                                 font_size: 20.0,
@@ -736,7 +736,7 @@ fn create_detail_ui_internal(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("\u{F0141}"), // nf-md-arrow_left
+                            Text::new("◀"), // nf-md-arrow_left
                             TextFont {
                                 font: font.clone(),
                                 font_size: 20.0,

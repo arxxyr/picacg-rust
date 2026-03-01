@@ -844,7 +844,7 @@ fn spawn_auto_resume_downloads_setting(
             .with_children(|checkbox| {
                 // 勾选标记（使用 Nerd Font 图标）
                 checkbox.spawn((
-                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -929,7 +929,7 @@ fn spawn_auto_pack_cbz_setting(
             ))
             .with_children(|checkbox| {
                 checkbox.spawn((
-                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -1014,7 +1014,7 @@ fn spawn_delete_images_after_cbz_setting(
             ))
             .with_children(|checkbox| {
                 checkbox.spawn((
-                    Text::new(if is_enabled { "\u{F012C}" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -1195,7 +1195,7 @@ fn spawn_filter_settings(
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("选择分类 \u{F0140}"), // nf-md-chevron_down
+                        Text::new("选择分类 ▼"), // nf-md-chevron_down
                         TextFont {
                             font: font.clone(),
                             font_size: 12.0,
@@ -1349,7 +1349,7 @@ fn spawn_blocked_keyword_tags(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("\u{F0156}"), // nf-md-close
+                            Text::new("✕"), // nf-md-close
                             TextFont {
                                 font: font.clone(),
                                 font_size: 10.0,
@@ -1492,7 +1492,7 @@ fn spawn_filter_mode_checkbox(
 
             checkbox_entity.with_children(|cb| {
                 cb.spawn((
-                    Text::new(if checked { "\u{F012C}" } else { "" }),
+                    Text::new(if checked { "✓" } else { "" }),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -2769,7 +2769,7 @@ pub fn auto_resume_downloads_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "\u{F012C}".to_string()
+                            "✓".to_string()
                         } else {
                             String::new()
                         };
@@ -2902,7 +2902,7 @@ pub fn auto_pack_cbz_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "\u{F012C}".to_string()
+                            "✓".to_string()
                         } else {
                             String::new()
                         };
@@ -2962,7 +2962,7 @@ pub fn delete_images_after_cbz_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "\u{F012C}".to_string()
+                            "✓".to_string()
                         } else {
                             String::new()
                         };
@@ -3003,7 +3003,7 @@ fn toggle_filter_checkbox(
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
             **text = if is_enabled {
-                "\u{F012C}".to_string()
+                "✓".to_string()
             } else {
                 String::new()
             };

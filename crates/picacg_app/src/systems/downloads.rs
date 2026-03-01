@@ -612,9 +612,9 @@ pub fn setup_downloads_ui(
                                         .with_children(|header| {
                                             // 折叠图标
                                             let icon = if downloading_collapsed {
-                                                "\u{F0142}" // ▶ nf-md-chevron_right
+                                                "▶" // ▶ nf-md-chevron_right
                                             } else {
-                                                "\u{F0140}" // ▼ nf-md-chevron_down
+                                                "▼" // ▼ nf-md-chevron_down
                                             };
                                             header.spawn((
                                                 CollapseIcon {
@@ -633,7 +633,7 @@ pub fn setup_downloads_ui(
                                             header.spawn((
                                                 DownloadingTitleText,
                                                 Text::new(format!(
-                                                    "\u{F01DA} 下载中 ({})", // 󰇚 nf-md-download
+                                                    "⬇ 下载中 ({})", // 󰇚 nf-md-download
                                                     downloading_tasks.len()
                                                 )),
                                                 TextFont {
@@ -712,9 +712,9 @@ pub fn setup_downloads_ui(
                                         .with_children(|header| {
                                             // 折叠图标
                                             let icon = if waiting_collapsed {
-                                                "\u{F0142}" // ▶ nf-md-chevron_right
+                                                "▶" // ▶ nf-md-chevron_right
                                             } else {
-                                                "\u{F0140}" // ▼ nf-md-chevron_down
+                                                "▼" // ▼ nf-md-chevron_down
                                             };
                                             header.spawn((
                                                 CollapseIcon {
@@ -733,7 +733,7 @@ pub fn setup_downloads_ui(
                                             header.spawn((
                                                 WaitingTitleText,
                                                 Text::new(format!(
-                                                    "\u{F0520} 等待中 ({})", // 󰔠 nf-md-timer_sand
+                                                    "⏳ 等待中 ({})", // 󰔠 nf-md-timer_sand
                                                     waiting_tasks.len()
                                                 )),
                                                 TextFont {
@@ -827,9 +827,9 @@ pub fn setup_downloads_ui(
                                                 .with_children(|header| {
                                                     // 折叠图标
                                                     let icon = if stopped_collapsed {
-                                                        "\u{F0142}" // ▶ nf-md-chevron_right
+                                                        "▶" // ▶ nf-md-chevron_right
                                                     } else {
-                                                        "\u{F0140}" // ▼ nf-md-chevron_down
+                                                        "▼" // ▼ nf-md-chevron_down
                                                     };
                                                     header.spawn((
                                                         CollapseIcon {
@@ -848,7 +848,7 @@ pub fn setup_downloads_ui(
                                                     header.spawn((
                                                         StoppedTitleText,
                                                         Text::new(format!(
-                                                            "\u{F04DB} 已停止 ({})", // 󰓛 nf-md-stop_circle
+                                                            "⏹ 已停止 ({})", // 󰓛 nf-md-stop_circle
                                                             stopped_tasks.len()
                                                         )),
                                                         TextFont {
@@ -884,7 +884,7 @@ pub fn setup_downloads_ui(
                                                 ))
                                                 .with_children(|btn| {
                                                     btn.spawn((
-                                                        Text::new("\u{F040A} 全部开始"), // 󰐊 nf-md-play
+                                                        Text::new("▶ 全部开始"), // 󰐊 nf-md-play
                                                         TextFont {
                                                             font: font.clone(),
                                                             font_size: 13.0,
@@ -962,9 +962,9 @@ pub fn setup_downloads_ui(
                                         .with_children(|header| {
                                             // 折叠图标
                                             let icon = if completed_collapsed {
-                                                "\u{F0142}" // ▶ nf-md-chevron_right
+                                                "▶" // ▶ nf-md-chevron_right
                                             } else {
-                                                "\u{F0140}" // ▼ nf-md-chevron_down
+                                                "▼" // ▼ nf-md-chevron_down
                                             };
                                             header.spawn((
                                                 CollapseIcon {
@@ -983,7 +983,7 @@ pub fn setup_downloads_ui(
                                             header.spawn((
                                                 CompletedTitleText,
                                                 Text::new(format!(
-                                                    "\u{F012C} 已下载 ({})", // 󰄬 nf-md-check
+                                                    "✓ 已下载 ({})", // 󰄬 nf-md-check
                                                     completed_downloads.len()
                                                 )),
                                                 TextFont {
@@ -1090,7 +1090,7 @@ fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                     // 折叠图标
                     btn.spawn((
                         FloatingHeaderIcon,
-                        Text::new("\u{F0140}"), // ▼ nf-md-chevron_down
+                        Text::new("▼"), // ▼ nf-md-chevron_down
                         TextFont {
                             font: font.clone(),
                             font_size: 14.0,
@@ -1173,7 +1173,7 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F0770} 原图"), // 󰝰 nf-md-folder_open
+                                Text::new("📂 原图"), // 󰝰 nf-md-folder_open
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 13.0,
@@ -1205,7 +1205,7 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F0770} CBZ"), // 󰝰 nf-md-folder_open
+                                Text::new("📂 CBZ"), // 󰝰 nf-md-folder_open
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 13.0,
@@ -1454,7 +1454,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "\u{F03E4}", // 󰏤 nf-md-pause
+                                "⏸", // 󰏤 nf-md-pause
                                 PauseDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1466,7 +1466,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "\u{F040A}", // 󰐊 nf-md-play
+                                "▶", // 󰐊 nf-md-play
                                 ResumeDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1478,7 +1478,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "\u{F0453}", // 󰑓 nf-md-refresh
+                                "↻", // 󰑓 nf-md-refresh
                                 RetryDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1490,7 +1490,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "\u{F01B4}", // 󰆴 nf-md-delete
+                                "✕", // 󰆴 nf-md-delete
                                 DeleteDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1502,7 +1502,7 @@ fn spawn_download_task_item(
                             spawn_control_button_with_display(
                                 btns,
                                 font,
-                                "\u{F0493}", // 󰒓 nf-md-cog
+                                "⚙", // 󰒓 nf-md-cog
                                 DownloadTaskSettingsButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1522,7 +1522,7 @@ fn spawn_download_task_item(
                     settings_parts.push(format!("CBZ: {}", if cbz { "开" } else { "关" }));
                 }
                 item.spawn((
-                    Text::new(format!("\u{F0493} {}", settings_parts.join(" | "))),
+                    Text::new(format!("⚙ {}", settings_parts.join(" | "))),
                     TextFont {
                         font: font.clone(),
                         font_size: 10.0,
@@ -1713,7 +1713,7 @@ fn spawn_completed_download_item(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F04E6}"), // 󰓦 nf-md-sync
+                                Text::new("⟳"), // 󰓦 nf-md-sync
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -1729,7 +1729,7 @@ fn spawn_completed_download_item(
                         spawn_control_button_with_display(
                             btns,
                             font,
-                            "\u{F0493}", // 󰒓 nf-md-cog
+                            "⚙", // 󰒓 nf-md-cog
                             DownloadTaskSettingsButton {
                                 comic_id: download.comic_id.clone(),
                             },
@@ -1758,7 +1758,7 @@ fn spawn_completed_download_item(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("\u{F0770}"), // 󰝰 nf-md-folder_open
+                            Text::new("📂"), // 󰝰 nf-md-folder_open
                             TextFont {
                                 font: font.clone(),
                                 font_size: 14.0,
@@ -1790,7 +1790,7 @@ fn spawn_completed_download_item(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("\u{F01B4}"), // 󰆴 nf-md-delete
+                            Text::new("✕"), // 󰆴 nf-md-delete
                             TextFont {
                                 font: font.clone(),
                                 font_size: 14.0,
@@ -2244,7 +2244,7 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F03E4}"), // 󰏤 nf-md-pause
+                                Text::new("⏸"), // 󰏤 nf-md-pause
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -2273,7 +2273,7 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F040A}"), // 󰐊 nf-md-play
+                                Text::new("▶"), // 󰐊 nf-md-play
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -2302,7 +2302,7 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F0453}"), // 󰑓 nf-md-refresh
+                                Text::new("↻"), // 󰑓 nf-md-refresh
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -2331,7 +2331,7 @@ pub fn add_new_task_ui(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F01B4}"), // 󰆴 nf-md-delete
+                                Text::new("✕"), // 󰆴 nf-md-delete
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
@@ -2599,7 +2599,7 @@ pub fn update_download_titles(
 
     // 更新下载中标题和区域显示状态
     if let Ok(mut title) = downloading_title_query.single_mut() {
-        let new_text = format!("\u{F01DA} 下载中 ({})", downloading_count); // 󰇚 nf-md-download
+        let new_text = format!("⬇ 下载中 ({})", downloading_count); // 󰇚 nf-md-download
         if **title != new_text {
             **title = new_text;
         }
@@ -2617,7 +2617,7 @@ pub fn update_download_titles(
 
     // 更新等待中标题和区域显示状态
     if let Ok(mut title) = waiting_title_query.single_mut() {
-        let new_text = format!("\u{F0520} 等待中 ({})", waiting_count); // 󰔠 nf-md-timer_sand
+        let new_text = format!("⏳ 等待中 ({})", waiting_count); // 󰔠 nf-md-timer_sand
         if **title != new_text {
             **title = new_text;
         }
@@ -2635,7 +2635,7 @@ pub fn update_download_titles(
 
     // 更新已停止标题和区域显示状态
     if let Ok(mut title) = stopped_title_query.single_mut() {
-        let new_text = format!("\u{F04DB} 已停止 ({})", stopped_count); // 󰓛 nf-md-stop_circle
+        let new_text = format!("⏹ 已停止 ({})", stopped_count); // 󰓛 nf-md-stop_circle
         if **title != new_text {
             **title = new_text;
         }
@@ -2653,7 +2653,7 @@ pub fn update_download_titles(
 
     // 更新已下载标题和区域显示状态
     if let Ok(mut title) = completed_title_query.single_mut() {
-        let new_text = format!("\u{F012C} 已下载 ({})", completed_count); // 󰄬 nf-md-check
+        let new_text = format!("✓ 已下载 ({})", completed_count); // 󰄬 nf-md-check
         if **title != new_text {
             **title = new_text;
         }
@@ -2803,9 +2803,9 @@ pub fn section_header_collapse_interaction(
 
             // 更新图标
             let icon = if is_collapsed {
-                "\u{F0142}" // ▶ nf-md-chevron_right
+                "▶" // ▶ nf-md-chevron_right
             } else {
-                "\u{F0140}" // ▼ nf-md-chevron_down
+                "▼" // ▼ nf-md-chevron_down
             };
             for (collapse_icon, mut text) in icon_query.iter_mut() {
                 if collapse_icon.section_type == header.section_type {
@@ -3008,24 +3008,24 @@ pub fn update_floating_header(
             // 更新标题文本
             let (icon, text, _color) = match section_type {
                 SectionType::Downloading => (
-                    "\u{F01DA}", // 󰇚 nf-md-download
+                    "⬇", // 󰇚 nf-md-download
                     format!("下载中 ({})", downloading_count),
                     AppColors::TEXT,
                 ),
                 SectionType::Waiting => (
-                    "\u{F0520}", // 󰔠 nf-md-timer_sand
+                    "⏳", // 󰔠 nf-md-timer_sand
                     format!("等待中 ({})", waiting_count),
                     AppColors::TEXT,
                 ),
                 SectionType::Stopped => (
-                    "\u{F04DB}", // 󰓛 nf-md-stop_circle
+                    "⏹", // 󰓛 nf-md-stop_circle
                     format!("已停止 ({})", stopped_count),
                     Color::srgb(0.8, 0.6, 0.2),
                 ),
                 SectionType::Completed => {
                     // 需要从数据库获取已完成数量，这里简化处理
                     (
-                        "\u{F012C}", // 󰄬 nf-md-check
+                        "✓", // 󰄬 nf-md-check
                         "已下载".to_string(),
                         Color::srgb(0.3, 0.8, 0.3),
                     )
@@ -3038,7 +3038,7 @@ pub fn update_floating_header(
 
             // 图标始终显示向下箭头（点击跳转到该区域）
             if let Ok(mut icon_component) = floating_icon_query.single_mut() {
-                *icon_component = Text::new("\u{F0140}"); // ▼ nf-md-chevron_down
+                *icon_component = Text::new("▼"); // ▼ nf-md-chevron_down
             }
         } else {
             floating_node.display = Display::None;
@@ -3792,7 +3792,7 @@ pub fn task_settings_button_interaction(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("\u{F0770} 选择"), // 󰝰
+                                Text::new("📂 选择"), // 󰝰
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 11.0,
@@ -4149,7 +4149,7 @@ pub fn delete_completed_download_interaction(
                                 ))
                                 .with_children(|btn| {
                                     btn.spawn((
-                                        Text::new("\u{F01B4} 确认删除"),
+                                        Text::new("✕ 确认删除"),
                                         TextFont {
                                             font: font.clone(),
                                             font_size: 11.0,
@@ -4226,7 +4226,7 @@ pub fn delete_files_checkbox_interaction(
         for child in children.iter() {
             if let Ok(mut text) = text_query.get_mut(child) {
                 **text = if checkbox.checked {
-                    "\u{F012C}".to_string() // 󰄬 nf-md-check
+                    "✓".to_string() // 󰄬 nf-md-check
                 } else {
                     String::new()
                 };
