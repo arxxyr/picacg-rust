@@ -191,6 +191,8 @@ mod tests {
             .set_image_url("img2".to_string(), "url2".to_string())
             .await;
 
+        // Moka 的 entry_count() 是惰性更新的，需要先同步待处理任务
+        cache.image_url_cache.run_pending_tasks().await;
         let stats = cache.stats().await;
         assert_eq!(stats.image_url_count, 2);
     }
