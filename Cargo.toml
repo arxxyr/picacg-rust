@@ -5,6 +5,7 @@ members = [
     "crates/picacg_db",
     "crates/picacg_config",
     "crates/picacg_app",
+    "crates/bevy_ui_toolkit",
 ]
 resolver = "2"
 
@@ -17,7 +18,7 @@ license = "Apache-2.0"
 # === Bevy 核心 ===
 bevy = { version = "0.18.0", default-features = true, features = ["bevy_debug_stepping"] }
 # bevy-tokio-tasks 已内嵌在 picacg_app/src/utils/tokio_tasks.rs
-bevy_ui_toolkit = { git = "https://git.yang.cafe:30080/loosqk/bevy_ui_toolkit.git" }
+bevy_ui_toolkit = { path = "crates/bevy_ui_toolkit" }
 
 # === 异步运行时 ===
 tokio = { version = "1.36", features = ["full"] }
