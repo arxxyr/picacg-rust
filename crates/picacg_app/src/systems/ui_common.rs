@@ -18,8 +18,6 @@ pub enum TagColor {
     Category,
     /// 标签（绿色）- 用于收藏和排行榜
     Tag,
-    /// 标签（紫色）- 用于漫画列表和搜索
-    TagPurple,
 }
 
 impl TagColor {
@@ -29,7 +27,6 @@ impl TagColor {
         match self {
             Self::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
             Self::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
-            Self::TagPurple => (Color::srgba(0.6, 0.3, 0.6, 0.3), Color::srgb(0.9, 0.7, 0.9)),
         }
     }
 }

@@ -63,11 +63,11 @@ fn detect_system_font_path() -> Option<String> {
     }
     #[cfg(target_os = "linux")]
     {
-        return detect_linux_font();
+        detect_linux_font()
     }
     #[cfg(target_os = "macos")]
     {
-        return detect_macos_font();
+        detect_macos_font()
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     {
