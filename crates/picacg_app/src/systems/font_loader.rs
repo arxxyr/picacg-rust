@@ -2,30 +2,44 @@
 //!
 //! 跨平台检测系统中文字体，避免捆绑字体文件。
 //! 优先使用中文字体，回退到英文字体。
+//!
+//! 字体字节在模块首次访问时同步加载（`OnceLock`），
+//! 保证任何 Bevy 系统调用 `get_font()` 时句柄已就绪。
 
 use std::sync::OnceLock;
 
 use bevy::{prelude::*, text::Font};
 
-/// 全局字体句柄（setup_fonts 初始化后可用）
+/// 全局字体句柄（`setup_fonts` 初始化后可用）
 static FONT_HANDLE: OnceLock<Handle<Font>> = OnceLock::new();
+
+/// 预加载的字体字节（同步初始化，不依赖 Bevy）
+static FONT_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
 
 /// 获取全局字体句柄，供所有 UI 系统使用
 ///
-/// # Panics
-///
-/// 在 `setup_fonts` 完成之前调用会 panic
+/// 如果 `setup_fonts` 尚未运行（理论上不应该），返回默认句柄而非 panic
 pub fn get_font() -> Handle<Font> {
-    FONT_HANDLE
-        .get()
-        .expect("字体未初始化，setup_fonts 必须先执行")
-        .clone()
+    FONT_HANDLE.get().cloned().unwrap_or_default()
 }
 
-/// Bevy 启动系统：检测系统字体并初始化全局句柄
+/// 预加载系统字体字节（同步，可在 App 构建阶段调用）
+///
+/// 仅加载字节到内存，不依赖 Bevy 资产系统
+pub fn preload_font_bytes() {
+    FONT_BYTES.get_or_init(load_system_font_bytes);
+}
+
+/// Bevy 启动系统：将预加载的字体注册到 Bevy 资产系统
 pub fn setup_fonts(mut fonts: ResMut<Assets<Font>>, mut app_font: ResMut<AppFont>) {
-    let bytes = load_system_font_bytes();
-    match Font::try_from_bytes(bytes) {
+    // 确保字节已加载
+    let bytes = FONT_BYTES.get_or_init(load_system_font_bytes);
+    if bytes.is_empty() {
+        tracing::error!("字体字节为空，UI 文字将无法显示");
+        return;
+    }
+
+    match Font::try_from_bytes(bytes.clone()) {
         Ok(font) => {
             let handle = fonts.add(font);
             app_font.0 = handle.clone();

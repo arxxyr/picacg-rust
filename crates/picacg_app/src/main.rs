@@ -65,6 +65,9 @@ fn main() {
         }
     });
 
+    // 预加载系统字体字节（同步，确保 Bevy 启动前完成）
+    systems::font_loader::preload_font_bytes();
+
     // 配置 assets 路径
     // 注意：在 workspace 结构中，assets
     // 在项目根目录（字体已改用系统字体，此路径主要用于图片等资源）
