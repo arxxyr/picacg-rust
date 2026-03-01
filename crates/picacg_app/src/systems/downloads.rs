@@ -3898,25 +3898,28 @@ pub fn task_path_select_interaction(
 
         let old_path = fsm.meta.save_path.clone();
 
-        // 更新路径
-        fsm.meta.custom_download_path = Some(new_path.clone());
+        // 从旧 save_path 提取漫画文件夹名（最后一级目录）
+        let folder_name = std::path::Path::new(&old_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| fsm.meta.comic_title.clone());
 
-        // 如果旧路径存在，尝试移动文件
+        // 计算新的完整路径：新基础目录/漫画文件夹名
+        let new_dir = std::path::Path::new(&new_path);
+        let target_dir = new_dir.join(&folder_name);
+        let new_full_path = target_dir.to_string_lossy().to_string();
+
+        // 更新路径（无论旧目录是否存在都要更新）
+        fsm.meta.custom_download_path = Some(new_path.clone());
+        fsm.meta.save_path = new_full_path.clone();
+
+        // 如果旧路径存在，尝试移动文件到新位置
         let old_dir = std::path::Path::new(&old_path);
-        if old_dir.exists() && old_dir.is_dir() {
-            let new_dir = std::path::Path::new(&new_path);
-            // 获取旧路径的文件夹名
-            if let Some(folder_name) = old_dir.file_name() {
-                let target_dir = new_dir.join(folder_name);
-                if !target_dir.exists() {
-                    if let Err(e) = move_dir_recursive(old_dir, &target_dir) {
-                        tracing::error!("移动下载文件失败: {}", e);
-                    } else {
-                        // 更新 save_path 为新目标
-                        fsm.meta.save_path = target_dir.to_string_lossy().to_string();
-                        tracing::info!("已移动下载文件: {} -> {}", old_path, fsm.meta.save_path);
-                    }
-                }
+        if old_dir.exists() && old_dir.is_dir() && !target_dir.exists() {
+            if let Err(e) = move_dir_recursive(old_dir, &target_dir) {
+                tracing::error!("移动下载文件失败: {}", e);
+            } else {
+                tracing::info!("已移动下载文件: {} -> {}", old_path, new_full_path);
             }
         }
 

@@ -2140,7 +2140,7 @@ fn handle_resume_download(
             episode_orders.sort();
             (
                 fsm.meta.comic_title.clone(),
-                fsm.meta.save_path.clone(),
+                fsm.meta.effective_download_path().to_string(),
                 episode_orders,
                 fsm.meta.total_episodes,
             )
@@ -2232,7 +2232,7 @@ fn handle_redownload(
             continue;
         };
 
-        let save_path = old_meta.save_path.clone();
+        let save_path = old_meta.effective_download_path().to_string();
         let comic_title = old_meta.comic_title.clone();
         let old_categories = old_meta.categories.clone();
         let old_tags = old_meta.tags.clone();
