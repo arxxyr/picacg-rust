@@ -2749,7 +2749,7 @@ pub fn clamp_settings_scroll(
 /// 更新设置页面内容尺寸
 pub fn update_settings_content_size(
     mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
+        (&ComputedNode, &Node, &mut ContentSizeInfo, &Children),
         With<SettingsScrollContainer>,
     >,
     children_query: Query<&ComputedNode>,
@@ -2761,7 +2761,7 @@ pub fn update_settings_content_size(
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
+    for (scroll_computed, node, mut content_info, children) in scroll_query.iter_mut() {
         let viewport_height = scroll_computed.size().y / scale_factor;
 
         let mut content_height = 0.0;
@@ -2769,6 +2769,28 @@ pub fn update_settings_content_size(
             if let Ok(child_computed) = children_query.get(child) {
                 content_height += child_computed.size().y / scale_factor;
             }
+        }
+
+        // 加上容器的上下 padding（ComputedNode::size 包含 padding，
+        // 但子元素高度之和不含容器 padding，需要补偿）
+        let padding_top = match node.padding.top {
+            Val::Px(px) => px,
+            _ => 0.0,
+        };
+        let padding_bottom = match node.padding.bottom {
+            Val::Px(px) => px,
+            _ => 0.0,
+        };
+        content_height += padding_top + padding_bottom;
+
+        // 加上 row_gap（子元素间距）
+        let child_count = children.len();
+        if child_count > 1 {
+            let gap = match node.row_gap {
+                Val::Px(px) => px,
+                _ => 0.0,
+            };
+            content_height += gap * (child_count - 1) as f32;
         }
 
         content_info.viewport_height = viewport_height;

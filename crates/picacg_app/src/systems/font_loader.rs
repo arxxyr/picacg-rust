@@ -1,10 +1,11 @@
 //! 字体检测与加载
 //!
-//! 优先使用内置 Sarasa（更纱黑体）字体（支持 CJK + Unicode 符号），
-//! 回退到系统中文字体。
+//! 双路加载策略：
+//! 1. 主路径：Bevy AssetServer 异步加载内置 Sarasa 字体（标准管线，最可靠）
+//! 2. 回退：手动读取系统字体字节（当内置字体不可用时）
 //!
-//! 字体字节在模块首次访问时同步加载（`OnceLock`），
-//! 保证任何 Bevy 系统调用 `get_font()` 时句柄已就绪。
+//! AssetServer 加载的字体经过 Bevy 完整的资产处理管线，
+//! 与 cosmic_text 文本渲染引擎完全兼容。
 
 use std::sync::OnceLock;
 
@@ -13,9 +14,6 @@ use bevy::{prelude::*, text::Font};
 /// 全局字体句柄（`setup_fonts` 初始化后可用）
 static FONT_HANDLE: OnceLock<Handle<Font>> = OnceLock::new();
 
-/// 预加载的字体字节（同步初始化，不依赖 Bevy）
-static FONT_BYTES: OnceLock<Vec<u8>> = OnceLock::new();
-
 /// 获取全局字体句柄，供所有 UI 系统使用
 ///
 /// 如果 `setup_fonts` 尚未运行（理论上不应该），返回默认句柄而非 panic
@@ -23,79 +21,83 @@ pub fn get_font() -> Handle<Font> {
     FONT_HANDLE.get().cloned().unwrap_or_default()
 }
 
-/// 预加载字体字节（同步，可在 App 构建阶段调用）
-///
-/// 仅加载字节到内存，不依赖 Bevy 资产系统
-pub fn preload_font_bytes() {
-    FONT_BYTES.get_or_init(load_font_bytes);
-}
-
-/// Bevy 启动系统：将预加载的字体注册到 Bevy 资产系统
-pub fn setup_fonts(mut fonts: ResMut<Assets<Font>>, mut app_font: ResMut<AppFont>) {
-    // 确保字节已加载
-    let bytes = FONT_BYTES.get_or_init(load_font_bytes);
-    if bytes.is_empty() {
-        tracing::error!("字体字节为空，UI 文字将无法显示");
-        return;
-    }
-
-    match Font::try_from_bytes(bytes.clone()) {
-        Ok(font) => {
-            let handle = fonts.add(font);
-            app_font.0 = handle.clone();
-            FONT_HANDLE.set(handle).ok();
-            tracing::info!("字体加载成功");
-        }
-        Err(e) => {
-            tracing::error!("字体解析失败: {:?}", e);
-        }
-    }
-}
-
 /// 应用字体资源
 #[derive(Resource, Clone, Default)]
 pub struct AppFont(pub Handle<Font>);
 
-// ============ 字体加载 ============
+/// 内置字体的 Bevy 资产路径（相对于 AssetPlugin::file_path 配置的 assets 目录）
+const BUNDLED_FONT_ASSET_PATH: &str = "fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf";
 
-/// 内置字体相对路径（从项目根或可执行文件目录）
+/// 内置字体的完整相对路径（从项目根或可执行文件目录，含 assets/ 前缀）
 const BUNDLED_FONT_RELATIVE: &str = "assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf";
 
-fn load_font_bytes() -> Vec<u8> {
-    // 优先加载内置 Sarasa 字体（TTF 格式，CJK + Unicode 符号全覆盖）
-    if let Some(path) = detect_bundled_font_path() {
-        tracing::info!("使用内置字体: {}", path);
-        match std::fs::read(&path) {
-            Ok(bytes) => return bytes,
-            Err(e) => tracing::warn!("读取内置字体失败: {} - {}", path, e),
-        }
+/// Bevy 启动系统：加载字体
+///
+/// 优先通过 AssetServer 加载内置 Sarasa 字体（走 Bevy 标准管线），
+/// 如果内置字体文件不存在则回退到手动加载系统字体。
+pub fn setup_fonts(
+    asset_server: Res<AssetServer>,
+    mut fonts: ResMut<Assets<Font>>,
+    mut app_font: ResMut<AppFont>,
+) {
+    // 检查内置字体是否存在于文件系统中
+    let bundled_exists = detect_bundled_font_path().is_some();
+
+    if bundled_exists {
+        // 主路径：通过 AssetServer 加载（Bevy 标准管线）
+        // AssetServer 使用 AssetPlugin::file_path 配置的 assets 目录
+        let handle: Handle<Font> = asset_server.load(BUNDLED_FONT_ASSET_PATH);
+        app_font.0 = handle.clone();
+        FONT_HANDLE.set(handle).ok();
+        tracing::info!(
+            "使用内置字体（AssetServer 加载）: {}",
+            BUNDLED_FONT_ASSET_PATH
+        );
+        return;
     }
 
-    // 回退到系统字体
+    // 回退：手动加载系统字体字节
+    tracing::warn!("内置字体未找到，尝试加载系统字体");
     if let Some(path) = detect_system_font_path() {
         tracing::info!("使用系统字体: {}", path);
         match std::fs::read(&path) {
-            Ok(bytes) => return bytes,
-            Err(e) => tracing::error!("读取系统字体失败: {} - {}", path, e),
+            Ok(bytes) => {
+                tracing::info!("系统字体读取成功: {} bytes", bytes.len());
+                match Font::try_from_bytes(bytes) {
+                    Ok(font) => {
+                        let handle = fonts.add(font);
+                        app_font.0 = handle.clone();
+                        FONT_HANDLE.set(handle).ok();
+                        tracing::info!("系统字体加载成功");
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!("系统字体解析失败: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("系统字体读取失败: {} - {}", path, e);
+            }
         }
     }
 
-    tracing::error!("未找到任何可用字体");
-    Vec::new()
+    tracing::error!("未找到任何可用字体，UI 文字将无法显示");
 }
 
-/// 检测内置字体路径
+// ============ 路径检测 ============
+
+/// 检测内置字体是否存在于文件系统中
 fn detect_bundled_font_path() -> Option<String> {
     // 1. 通过 CARGO_MANIFEST_DIR 定位（开发环境） CARGO_MANIFEST_DIR =
     //    crates/picacg_app，需要向上两级到项目根目录
-    let manifest_dir = option_env!("CARGO_MANIFEST_DIR");
-    if let Some(dir) = manifest_dir {
-        let project_root = std::path::Path::new(dir).parent().and_then(|p| p.parent());
-        if let Some(root) = project_root {
-            let path = root.join(BUNDLED_FONT_RELATIVE);
-            if path.exists() {
-                return Some(path.to_string_lossy().to_string());
-            }
+    if let Some(dir) = option_env!("CARGO_MANIFEST_DIR")
+        && let Some(root) = std::path::Path::new(dir).parent().and_then(|p| p.parent())
+    {
+        let path = root.join(BUNDLED_FONT_RELATIVE);
+        if path.exists() {
+            tracing::debug!("检测到内置字体（开发环境）: {}", path.display());
+            return Some(path.to_string_lossy().to_string());
         }
     }
 
@@ -105,12 +107,15 @@ fn detect_bundled_font_path() -> Option<String> {
     {
         let path = exe_dir.join(BUNDLED_FONT_RELATIVE);
         if path.exists() {
+            tracing::debug!("检测到内置字体（生产环境）: {}", path.display());
             return Some(path.to_string_lossy().to_string());
         }
     }
 
     // 3. 相对于当前工作目录
-    if std::path::Path::new(BUNDLED_FONT_RELATIVE).exists() {
+    let path = std::path::Path::new(BUNDLED_FONT_RELATIVE);
+    if path.exists() {
+        tracing::debug!("检测到内置字体（工作目录）: {}", path.display());
         return Some(BUNDLED_FONT_RELATIVE.to_string());
     }
 

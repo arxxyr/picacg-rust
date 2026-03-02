@@ -77,5 +77,8 @@ zip.workspace = true
 # === 繁简转换 ===
 zhconv.workspace = true
 
+# === 内存分配器 ===
+mimalloc.workspace = true
+
 [dev-dependencies]
 tokio-test.workspace = true

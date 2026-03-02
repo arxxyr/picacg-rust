@@ -1271,28 +1271,9 @@ fn get_cbz_output_path() -> std::path::PathBuf {
     get_download_base_path().join("CBZ")
 }
 
-/// 清理文件名中的非法字符
-///
-/// 替换 Windows 文件系统禁止的字符以及可能导致兼容性问题的全角标点
+/// 清理文件名中的非法字符（代理到 utils::sanitize_filename）
 fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            // ASCII 非法文件名字符
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            // 全角标点（可能导致 ZIP 兼容性问题）
-            '\u{FF1A}' // ： 全角冒号
-            | '\u{FF0F}' // ／ 全角斜杠
-            | '\u{FF3C}' // ＼ 全角反斜杠
-            | '\u{FF1C}' // ＜ 全角小于号
-            | '\u{FF1E}' // ＞ 全角大于号
-            | '\u{FF5C}' // ｜ 全角竖线
-            | '\u{FF02}' // ＂ 全角双引号
-            | '\u{FF0A}' // ＊ 全角星号
-            | '\u{FF1F}' // ？ 全角问号
-            => '_',
-            _ => c,
-        })
-        .collect()
+    crate::utils::sanitize_filename(name)
 }
 
 /// 获取本地文件夹中的所有文件名（用于比对）
@@ -2275,6 +2256,7 @@ fn handle_redownload(
 
     for event in messages.read() {
         let comic_id = event.comic_id.clone();
+        let new_base_path = event.new_base_path.clone();
 
         // 检查是否已在下载
         if download_state.downloading_ids.contains(&comic_id) {
@@ -2288,7 +2270,32 @@ fn handle_redownload(
             continue;
         };
 
-        let save_path = old_meta.effective_download_path().to_string();
+        // 如果用户指定了新基础目录（原目录不存在的情况），重新计算路径
+        let (save_path, custom_download_path) = if let Some(ref base_path) = new_base_path {
+            // 从旧 save_path 提取漫画文件夹名
+            let folder_name = std::path::Path::new(&old_meta.save_path)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| old_meta.comic_title.clone());
+            let new_save = std::path::Path::new(base_path)
+                .join("Images")
+                .join(&folder_name);
+            tracing::info!(
+                "使用用户选择的新目录: {} -> {}",
+                old_meta.save_path,
+                new_save.display()
+            );
+            (
+                new_save.to_string_lossy().to_string(),
+                Some(base_path.clone()),
+            )
+        } else {
+            (
+                old_meta.effective_download_path().to_string(),
+                old_meta.custom_download_path.clone(),
+            )
+        };
+
         let comic_title = old_meta.comic_title.clone();
         let old_categories = old_meta.categories.clone();
         let old_tags = old_meta.tags.clone();
@@ -2324,7 +2331,7 @@ fn handle_redownload(
                 updated_at: now,
                 categories: old_categories,
                 tags: old_tags,
-                custom_download_path: old_meta.custom_download_path.clone(),
+                custom_download_path: custom_download_path.clone(),
                 custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
             };
             // 保存到数据库（更新状态从 Completed 变为 Queued）
@@ -2352,7 +2359,7 @@ fn handle_redownload(
             updated_at: now,
             categories: old_categories,
             tags: old_tags,
-            custom_download_path: old_meta.custom_download_path.clone(),
+            custom_download_path: custom_download_path.clone(),
             custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
         };
         download_state.add_task(temp_meta);
@@ -2361,9 +2368,11 @@ fn handle_redownload(
         let client = api_client.0.clone();
         let comic_id_clone = comic_id.clone();
         let save_path_clone = save_path.clone();
+        let custom_download_path_clone = custom_download_path.clone();
+        let custom_auto_pack_cbz = old_meta.custom_auto_pack_cbz;
 
         // 启动异步任务：获取最新章节列表并开始下载
-        runtime.spawn_background_task(|mut ctx| async move {
+        runtime.spawn_background_task(move |mut ctx| async move {
             use picacg_api::endpoints::comic::{GetComicDetailRequest, GetEpisodesRequest};
 
             // 获取漫画详情
@@ -2430,8 +2439,8 @@ fn handle_redownload(
                 updated_at: now,
                 categories: comic.categories.clone(),
                 tags: comic.tags.clone(),
-                custom_download_path: None,
-                custom_auto_pack_cbz: None,
+                custom_download_path: custom_download_path_clone,
+                custom_auto_pack_cbz,
             };
 
             if let Err(e) = meta.save() {
@@ -2924,7 +2933,13 @@ fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, St
     }
 
     // 创建 CBZ 输出目录
-    let cbz_dir = get_cbz_output_path();
+    // 从 source_path 推导：source_path = base/Images/漫画名 → CBZ 目录 = base/CBZ
+    // 这样自定义下载路径的 CBZ 也会保存在同一基础目录下
+    let cbz_dir = source_dir
+        .parent() // base/Images
+        .and_then(|p| p.parent()) // base
+        .map(|p| p.join("CBZ"))
+        .unwrap_or_else(get_cbz_output_path);
     if let Err(e) = std::fs::create_dir_all(&cbz_dir) {
         return Err(format!("创建 CBZ 目录失败: {}", e));
     }

@@ -74,6 +74,9 @@ zip = { version = "8.1.0", default-features = false }
 # === 繁简转换 ===
 zhconv = "0.4.1"
 
+# === 内存分配器 ===
+mimalloc = { version = "0.1", default-features = false }
+
 # === 编译配置 ===
 [profile.dev]
 opt-level = 0

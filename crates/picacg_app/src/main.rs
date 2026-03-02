@@ -4,6 +4,9 @@
 
 #![windows_subsystem = "windows"]
 
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 mod components;
 mod error;
 mod events;
@@ -64,9 +67,6 @@ fn main() {
             tracing::error!("数据库初始化失败: {}", e);
         }
     });
-
-    // 预加载系统字体字节（同步，确保 Bevy 启动前完成）
-    systems::font_loader::preload_font_bytes();
 
     // 配置 assets 路径
     // 注意：在 workspace 结构中，assets

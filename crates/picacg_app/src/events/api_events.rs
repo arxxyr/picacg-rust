@@ -346,6 +346,9 @@ pub struct ResumeDownloadRequest {
 #[derive(Message)]
 pub struct RedownloadRequest {
     pub comic_id: String,
+    /// 新的基础目录（原路径不存在时由用户选择）
+    /// 实际保存路径 = new_base_path/Images/漫画文件夹名
+    pub new_base_path: Option<String>,
 }
 
 // ==================== 排行榜消息 ====================

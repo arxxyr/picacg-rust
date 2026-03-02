@@ -210,6 +210,14 @@ pub struct OpenCompletedFolderButton {
     pub path: String,
 }
 
+/// 移动已下载漫画按钮（同时移动 Images 和 CBZ）
+#[derive(Component)]
+pub struct MoveCompletedButton {
+    pub comic_id: String,
+    pub comic_title: String,
+    pub path: String,
+}
+
 /// 扫描已完成的下载列表
 ///
 /// 从数据库加载已完成的下载任务。
@@ -1451,10 +1459,10 @@ fn spawn_download_task_item(
                     },))
                         .with_children(|btns| {
                             // 暂停按钮（始终创建，通过 display 控制可见性）
-                            spawn_control_button_with_display(
+                            spawn_labeled_button_with_visibility(
                                 btns,
                                 font,
-                                "⏸", // 󰏤 nf-md-pause
+                                "⏸ 暂停",
                                 PauseDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1463,10 +1471,10 @@ fn spawn_download_task_item(
                             );
 
                             // 继续按钮（暂停状态显示）
-                            spawn_control_button_with_display(
+                            spawn_labeled_button_with_visibility(
                                 btns,
                                 font,
-                                "▶", // 󰐊 nf-md-play
+                                "▶ 继续",
                                 ResumeDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1475,10 +1483,10 @@ fn spawn_download_task_item(
                             );
 
                             // 重试按钮（失败状态显示）
-                            spawn_control_button_with_display(
+                            spawn_labeled_button_with_visibility(
                                 btns,
                                 font,
-                                "↻", // 󰑓 nf-md-refresh
+                                "↻ 重试",
                                 RetryDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1487,10 +1495,10 @@ fn spawn_download_task_item(
                             );
 
                             // 删除按钮（始终可见）
-                            spawn_control_button_with_display(
+                            spawn_labeled_button_with_visibility(
                                 btns,
                                 font,
-                                "✕", // 󰆴 nf-md-delete
+                                "✕ 删除",
                                 DeleteDownloadButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1499,10 +1507,10 @@ fn spawn_download_task_item(
                             );
 
                             // 设置按钮（独立下载设置）
-                            spawn_control_button_with_display(
+                            spawn_labeled_button_with_visibility(
                                 btns,
                                 font,
-                                "⚙", // 󰒓 nf-md-cog
+                                "⚙ 设置",
                                 DownloadTaskSettingsButton {
                                     comic_id: task.comic_id.clone(),
                                 },
@@ -1534,11 +1542,83 @@ fn spawn_download_task_item(
         });
 }
 
-/// 创建控制按钮（带可见性控制）
-fn spawn_control_button_with_display<T: Component>(
+/// 创建带标签的按钮（已下载列表使用）
+fn spawn_labeled_button<T: Component>(
     parent: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
-    icon: &str,
+    label: &str,
+    marker: T,
+    color: Color,
+) {
+    parent
+        .spawn((
+            marker,
+            Button,
+            Node {
+                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(color.with_alpha(0.2)),
+            BorderColor::all(color),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(color),
+            ));
+        });
+}
+
+/// 创建下载任务操作按钮（下载中列表使用，带可见性控制）
+fn spawn_task_action_button<T: Component>(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    marker: T,
+    bg_color: Color,
+    display: Display,
+) {
+    parent
+        .spawn((
+            marker,
+            Button,
+            Node {
+                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(3.0), Val::Px(3.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                display,
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(bg_color),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+        });
+}
+
+/// 创建带标签的按钮（等待/已停止区域使用，带可见性控制）
+fn spawn_labeled_button_with_visibility<T: Component>(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
     marker: T,
     color: Color,
     visible: bool,
@@ -1548,8 +1628,7 @@ fn spawn_control_button_with_display<T: Component>(
             marker,
             Button,
             Node {
-                width: Val::Px(28.0),
-                height: Val::Px(28.0),
+                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 border: UiRect::all(Val::Px(1.0)),
@@ -1566,10 +1645,10 @@ fn spawn_control_button_with_display<T: Component>(
         ))
         .with_children(|btn| {
             btn.spawn((
-                Text::new(icon),
+                Text::new(label),
                 TextFont {
                     font: font.clone(),
-                    font_size: 14.0,
+                    font_size: 12.0,
                     ..default()
                 },
                 TextColor(color),
@@ -1700,8 +1779,12 @@ fn spawn_completed_download_item(
                             },
                             Button,
                             Node {
-                                width: Val::Px(28.0),
-                                height: Val::Px(28.0),
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 border: UiRect::all(Val::Px(1.0)),
@@ -1713,10 +1796,10 @@ fn spawn_completed_download_item(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("⟳"), // 󰓦 nf-md-sync
+                                Text::new("⟳ 更新"),
                                 TextFont {
                                     font: font.clone(),
-                                    font_size: 14.0,
+                                    font_size: 12.0,
                                     ..default()
                                 },
                                 TextColor(Color::srgb(0.3, 0.8, 0.4)),
@@ -1726,79 +1809,52 @@ fn spawn_completed_download_item(
 
                     // 设置按钮（独立下载设置）
                     if has_comic_id {
-                        spawn_control_button_with_display(
+                        spawn_labeled_button(
                             btns,
                             font,
-                            "⚙", // 󰒓 nf-md-cog
+                            "⚙ 设置",
                             DownloadTaskSettingsButton {
                                 comic_id: download.comic_id.clone(),
                             },
                             Color::srgb(0.5, 0.5, 0.7),
-                            true,
                         );
                     }
 
                     // 打开文件夹按钮
-                    btns.spawn((
+                    spawn_labeled_button(
+                        btns,
+                        font,
+                        "📂 打开",
                         OpenCompletedFolderButton {
                             path: download.path.clone(),
                         },
-                        Button,
-                        Node {
-                            width: Val::Px(28.0),
-                            height: Val::Px(28.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
+                        Color::srgb(0.5, 0.5, 0.6),
+                    );
+
+                    // 移动按钮
+                    spawn_labeled_button(
+                        btns,
+                        font,
+                        "↷ 移动",
+                        MoveCompletedButton {
+                            comic_id: download.comic_id.clone(),
+                            comic_title: download.folder_name.clone(),
+                            path: download.path.clone(),
                         },
-                        BackgroundColor(Color::srgb(0.3, 0.3, 0.4).with_alpha(0.2)),
-                        BorderColor::all(Color::srgb(0.5, 0.5, 0.6)),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("📂"), // 󰝰 nf-md-folder_open
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
+                        Color::srgb(0.5, 0.6, 0.8),
+                    );
 
                     // 删除按钮
-                    let delete_color = Color::srgb(0.8, 0.3, 0.3);
-                    btns.spawn((
+                    spawn_labeled_button(
+                        btns,
+                        font,
+                        "✕ 删除",
                         DeleteCompletedDownloadButton {
                             comic_id: download.comic_id.clone(),
                             path: download.path.clone(),
                         },
-                        Button,
-                        Node {
-                            width: Val::Px(28.0),
-                            height: Val::Px(28.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(delete_color.with_alpha(0.2)),
-                        BorderColor::all(delete_color),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("✕"), // 󰆴 nf-md-delete
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(delete_color),
-                        ));
-                    });
+                        Color::srgb(0.8, 0.3, 0.3),
+                    );
                 });
         });
 }
@@ -2226,120 +2282,52 @@ pub fn add_new_task_ui(
                     ))
                     .with_children(|btns| {
                         // 暂停按钮
-                        btns.spawn((
+                        spawn_task_action_button(
+                            btns,
+                            &font,
+                            "⏸ 暂停",
                             PauseDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
-                            Button,
-                            Node {
-                                width: Val::Px(24.0),
-                                height: Val::Px(24.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                display: Display::Flex,
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.6, 0.5, 0.2)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("⏸"), // 󰏤 nf-md-pause
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
+                            Color::srgb(0.6, 0.5, 0.2),
+                            Display::Flex,
+                        );
 
                         // 继续按钮（暂停状态）
-                        btns.spawn((
+                        spawn_task_action_button(
+                            btns,
+                            &font,
+                            "▶ 继续",
                             ResumeDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
-                            Button,
-                            Node {
-                                width: Val::Px(24.0),
-                                height: Val::Px(24.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                display: Display::None,
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.3, 0.6, 0.3)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("▶"), // 󰐊 nf-md-play
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
+                            Color::srgb(0.3, 0.6, 0.3),
+                            Display::None,
+                        );
 
                         // 重试按钮（失败状态）
-                        btns.spawn((
+                        spawn_task_action_button(
+                            btns,
+                            &font,
+                            "↻ 重试",
                             RetryDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
-                            Button,
-                            Node {
-                                width: Val::Px(24.0),
-                                height: Val::Px(24.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                display: Display::None,
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.7, 0.5, 0.2)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("↻"), // 󰑓 nf-md-refresh
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
+                            Color::srgb(0.7, 0.5, 0.2),
+                            Display::None,
+                        );
 
                         // 删除按钮（始终可见）
-                        btns.spawn((
+                        spawn_task_action_button(
+                            btns,
+                            &font,
+                            "✕ 删除",
                             DeleteDownloadButton {
                                 comic_id: task.comic_id.clone(),
                             },
-                            Button,
-                            Node {
-                                width: Val::Px(24.0),
-                                height: Val::Px(24.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                display: Display::Flex, // 始终可见
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("✕"), // 󰆴 nf-md-delete
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
+                            Color::srgb(0.6, 0.2, 0.2),
+                            Display::Flex,
+                        );
                     });
                 });
 
@@ -3268,6 +3256,10 @@ pub fn retry_download_button_interaction(
 }
 
 /// 重新下载按钮交互
+///
+/// 点击更新时检查原下载目录是否存在：
+/// - 存在 → 直接发送重新下载请求（原地更新/补全）
+/// - 不存在 → 弹出文件选择对话框让用户选择新目录，从新目录开始下载
 pub fn redownload_button_interaction(
     mut commands: Commands,
     mut interaction_query: Query<
@@ -3277,15 +3269,42 @@ pub fn redownload_button_interaction(
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
 ) {
+    use crate::resources::DownloadTaskMeta;
+
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
         let redownload_color = Color::srgb(0.3, 0.7, 0.4);
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(redownload_color.with_alpha(0.4));
 
-                // 发送重新下载请求
+                // 从数据库获取任务元数据，检查下载目录是否存在
+                let mut new_base_path: Option<String> = None;
+                if let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
+                    let effective_path = old_meta.effective_download_path().to_string();
+                    let path = std::path::Path::new(&effective_path);
+                    if !path.exists() {
+                        tracing::info!("原下载目录不存在: {}，弹出目录选择对话框", effective_path);
+                        // 弹出文件选择对话框
+                        let dialog = rfd::FileDialog::new();
+                        match dialog.pick_folder() {
+                            Some(selected) => {
+                                let selected_str = selected.to_string_lossy().to_string();
+                                tracing::info!("用户选择新下载目录: {}", selected_str);
+                                new_base_path = Some(selected_str);
+                            }
+                            None => {
+                                // 用户取消选择，不执行重新下载
+                                tracing::info!("用户取消选择目录，放弃重新下载");
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                // 发送重新下载请求（带可选的新基础路径）
                 redownload_messages.write(RedownloadRequest {
                     comic_id: btn.comic_id.clone(),
+                    new_base_path,
                 });
                 tracing::info!("请求重新下载/检查更新: {}", btn.comic_id);
 
@@ -3350,6 +3369,160 @@ pub fn open_completed_folder_button_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(folder_color.with_alpha(0.2));
+            }
+        }
+    }
+}
+
+/// 移动已下载漫画按钮交互
+///
+/// 弹出目录选择对话框，将 Images 目录和 CBZ 文件同时移动到新位置，
+/// 并更新数据库记录。移动完成后销毁旧的 UI 项并重建。
+pub fn move_completed_button_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &MoveCompletedButton),
+        Changed<Interaction>,
+    >,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    completed_list_query: Query<Entity, With<CompletedDownloadList>>,
+    download_state: Res<DownloadManagerState>,
+) {
+    use crate::resources::DownloadTaskMeta;
+
+    for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
+        let move_color = Color::srgb(0.5, 0.6, 0.8);
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(move_color.with_alpha(0.4));
+
+                // 如果任务正在下载中，不允许移动
+                if download_state.downloading_ids.contains(&btn.comic_id) {
+                    tracing::warn!("漫画 {} 正在下载中，无法移动", btn.comic_id);
+                    continue;
+                }
+
+                // 弹出目录选择对话框
+                let dialog = rfd::FileDialog::new();
+                let Some(selected_path) = dialog.pick_folder() else {
+                    continue;
+                };
+                let new_base = selected_path.to_string_lossy().to_string();
+                tracing::info!("用户选择移动目标目录: {}", new_base);
+
+                let old_images_path = std::path::Path::new(&btn.path);
+
+                // 从旧路径提取漫画文件夹名
+                let folder_name = old_images_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| btn.comic_title.clone());
+
+                // 新的 Images 路径：new_base/Images/漫画名
+                let new_images_dir = std::path::Path::new(&new_base)
+                    .join("Images")
+                    .join(&folder_name);
+                let new_images_path = new_images_dir.to_string_lossy().to_string();
+
+                // ===== 移动 Images 目录 =====
+                if old_images_path.exists() && old_images_path.is_dir() {
+                    if new_images_dir.exists() {
+                        tracing::warn!("目标 Images 目录已存在: {}", new_images_path);
+                    } else if let Err(e) = move_dir_recursive(old_images_path, &new_images_dir) {
+                        tracing::error!("移动 Images 目录失败: {}", e);
+                        continue;
+                    } else {
+                        tracing::info!("Images 目录已移动: {} -> {}", btn.path, new_images_path);
+                    }
+                }
+
+                // ===== 移动 CBZ 文件 =====
+                // 旧 CBZ 路径：从 save_path 推导 base/CBZ/漫画名.cbz
+                let old_cbz_dir = old_images_path
+                    .parent() // base/Images
+                    .and_then(|p| p.parent()) // base
+                    .map(|p| p.join("CBZ"));
+
+                let cbz_filename =
+                    format!("{}.cbz", crate::utils::sanitize_filename(&btn.comic_title));
+                let new_cbz_dir = std::path::Path::new(&new_base).join("CBZ");
+
+                if let Some(ref old_cbz_parent) = old_cbz_dir {
+                    let old_cbz_file = old_cbz_parent.join(&cbz_filename);
+                    if old_cbz_file.exists() {
+                        if let Err(e) = std::fs::create_dir_all(&new_cbz_dir) {
+                            tracing::error!("创建 CBZ 目录失败: {}", e);
+                        } else {
+                            let new_cbz_file = new_cbz_dir.join(&cbz_filename);
+                            if new_cbz_file.exists() {
+                                tracing::warn!("目标 CBZ 文件已存在: {}", new_cbz_file.display());
+                            } else {
+                                // 先尝试 rename，失败则 copy + delete
+                                if std::fs::rename(&old_cbz_file, &new_cbz_file).is_err() {
+                                    match std::fs::copy(&old_cbz_file, &new_cbz_file) {
+                                        Ok(_) => {
+                                            let _ = std::fs::remove_file(&old_cbz_file);
+                                            tracing::info!(
+                                                "CBZ 文件已移动: {} -> {}",
+                                                old_cbz_file.display(),
+                                                new_cbz_file.display()
+                                            );
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("复制 CBZ 文件失败: {}", e);
+                                        }
+                                    }
+                                } else {
+                                    tracing::info!(
+                                        "CBZ 文件已移动: {} -> {}",
+                                        old_cbz_file.display(),
+                                        new_cbz_file.display()
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ===== 更新数据库记录 =====
+                if let Ok(mut meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
+                    meta.save_path = new_images_path.clone();
+                    meta.custom_download_path = Some(new_base);
+                    if let Err(e) = meta.save() {
+                        tracing::error!("更新数据库下载路径失败: {}", e);
+                    } else {
+                        tracing::info!("数据库路径已更新: {}", new_images_path);
+                    }
+                }
+
+                // ===== 销毁旧 UI 项并重建 =====
+                // 找到该漫画的已下载列表项
+                let comic_id = btn.comic_id.clone();
+                for (entity, item) in completed_item_query.iter() {
+                    if item.comic_id == comic_id {
+                        commands.entity(entity).despawn();
+                        break;
+                    }
+                }
+
+                // 重建 UI 项（从数据库重新读取最新路径）
+                if let Ok(list_entity) = completed_list_query.single() {
+                    let active_ids = &download_state.downloading_ids;
+                    let font = get_font();
+                    // 重新从数据库扫描该漫画的信息
+                    let completed = scan_completed_downloads(active_ids);
+                    if let Some(dl) = completed.iter().find(|d| d.comic_id == comic_id) {
+                        commands.entity(list_entity).with_children(|list| {
+                            spawn_completed_download_item(list, &font, dl);
+                        });
+                    }
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(move_color.with_alpha(0.3));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(move_color.with_alpha(0.2));
             }
         }
     }
@@ -3904,9 +4077,10 @@ pub fn task_path_select_interaction(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| fsm.meta.comic_title.clone());
 
-        // 计算新的完整路径：新基础目录/漫画文件夹名
+        // 计算新的完整路径：新基础目录/Images/漫画文件夹名
+        // 保持与默认下载路径相同的目录结构（base/Images/漫画名）
         let new_dir = std::path::Path::new(&new_path);
-        let target_dir = new_dir.join(&folder_name);
+        let target_dir = new_dir.join("Images").join(&folder_name);
         let new_full_path = target_dir.to_string_lossy().to_string();
 
         // 更新路径（无论旧目录是否存在都要更新）

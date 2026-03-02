@@ -320,7 +320,6 @@ impl Plugin for UiPlugin {
                     open_download_folder_interaction,
                     open_cbz_folder_interaction,
                     completed_download_item_interaction,
-                    // 区域折叠交互
                     section_header_collapse_interaction,
                     // 下载控制按钮交互
                     pause_download_button_interaction,
@@ -331,6 +330,13 @@ impl Plugin for UiPlugin {
                     // 已下载项按钮交互
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
+                    move_completed_button_interaction,
+                )
+                    .run_if(in_state(AppRoute::Downloads)),
+            )
+            .add_systems(
+                Update,
+                (
                     // 标题/分类/标签点击跳转
                     download_title_interaction,
                     download_category_interaction,
