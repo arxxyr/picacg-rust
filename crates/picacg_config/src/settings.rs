@@ -165,6 +165,67 @@ impl LogLevel {
     }
 }
 
+/// 分流通道类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ChannelType {
+    /// 直连（默认）
+    #[default]
+    Direct,
+    /// CDN IP 1 (104.21.91.145)
+    CdnIp1,
+    /// CDN IP 2 (188.114.98.153)
+    CdnIp2,
+    /// 自定义 CDN IP
+    CustomCdnIp,
+    /// 日本反代
+    JpProxy,
+    /// 美国反代
+    UsProxy,
+}
+
+impl ChannelType {
+    /// 获取显示名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ChannelType::Direct => "直连",
+            ChannelType::CdnIp1 => "CDN 1",
+            ChannelType::CdnIp2 => "CDN 2",
+            ChannelType::CustomCdnIp => "自定义IP",
+            ChannelType::JpProxy => "日本反代",
+            ChannelType::UsProxy => "美国反代",
+        }
+    }
+
+    /// 所有通道类型（用于 UI 渲染按钮）
+    pub fn all() -> &'static [ChannelType] {
+        &[
+            ChannelType::Direct,
+            ChannelType::CdnIp1,
+            ChannelType::CdnIp2,
+            ChannelType::CustomCdnIp,
+            ChannelType::JpProxy,
+            ChannelType::UsProxy,
+        ]
+    }
+}
+
+/// 分流通道设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChannelSettings {
+    /// API 分流通道
+    #[serde(default)]
+    pub api_channel: ChannelType,
+    /// 图片分流通道
+    #[serde(default)]
+    pub image_channel: ChannelType,
+    /// 自定义 API CDN IP
+    #[serde(default)]
+    pub custom_cdn_api_ip: String,
+    /// 自定义图片 CDN IP
+    #[serde(default)]
+    pub custom_cdn_img_ip: String,
+}
+
 /// 内容过滤设置
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FilterSettings {
@@ -220,6 +281,9 @@ pub struct AppSettings {
     /// 内容过滤设置
     #[serde(default)]
     pub filter: FilterSettings,
+    /// 分流通道设置
+    #[serde(default)]
+    pub channel: ChannelSettings,
 }
 
 fn default_max_concurrent_downloads() -> usize {
@@ -242,6 +306,7 @@ impl Default for AppSettings {
             auto_pack_cbz: false,
             delete_images_after_cbz: false,
             filter: FilterSettings::default(),
+            channel: ChannelSettings::default(),
         }
     }
 }

@@ -3,7 +3,9 @@
 //! 实现应用设置页面
 
 use bevy::{prelude::*, time::Timer, ui::FocusPolicy, window::PrimaryWindow};
-use picacg_config::{AppSettings, FilterSettings, LogLevel, ProxyType, update_log_level};
+use picacg_config::{
+    AppSettings, ChannelType, FilterSettings, LogLevel, ProxyType, update_log_level,
+};
 
 use super::font_loader::get_font;
 use crate::{
@@ -251,6 +253,69 @@ pub struct KeywordSuggestionToggle;
 #[derive(Component)]
 pub struct BlockedKeywordsListContainer;
 
+// ==================== 分流设置组件 ====================
+
+/// API 分流按钮
+#[derive(Component)]
+pub struct ApiChannelButton {
+    pub channel_type: ChannelType,
+}
+
+/// 图片分流按钮
+#[derive(Component)]
+pub struct ImageChannelButton {
+    pub channel_type: ChannelType,
+}
+
+/// 自定义 CDN API IP 输入框
+#[derive(Component)]
+pub struct CustomCdnApiIpInput;
+
+/// 自定义 CDN 图片 IP 输入框
+#[derive(Component)]
+pub struct CustomCdnImgIpInput;
+
+/// 自定义 CDN API IP 输入框文本
+#[derive(Component)]
+pub struct CustomCdnApiIpInputText;
+
+/// 自定义 CDN 图片 IP 输入框文本
+#[derive(Component)]
+pub struct CustomCdnImgIpInputText;
+
+/// 自定义 API IP 输入行容器（条件显示）
+#[derive(Component)]
+pub struct CustomCdnApiIpRow;
+
+/// 自定义图片 IP 输入行容器（条件显示）
+#[derive(Component)]
+pub struct CustomCdnImgIpRow;
+
+/// 分流设置状态
+#[derive(Resource)]
+pub struct ChannelSettingsState {
+    pub api_channel: ChannelType,
+    pub image_channel: ChannelType,
+    pub custom_cdn_api_ip: String,
+    pub custom_cdn_img_ip: String,
+    pub api_ip_focused: bool,
+    pub img_ip_focused: bool,
+}
+
+impl Default for ChannelSettingsState {
+    fn default() -> Self {
+        let settings = AppSettings::global().read();
+        Self {
+            api_channel: settings.channel.api_channel,
+            image_channel: settings.channel.image_channel,
+            custom_cdn_api_ip: settings.channel.custom_cdn_api_ip.clone(),
+            custom_cdn_img_ip: settings.channel.custom_cdn_img_ip.clone(),
+            api_ip_focused: false,
+            img_ip_focused: false,
+        }
+    }
+}
+
 /// 内容过滤设置状态
 #[derive(Resource)]
 pub struct FilterSettingsState {
@@ -346,6 +411,16 @@ pub fn setup_settings_ui(
         show_suggestions: false,
     });
 
+    // 初始化分流设置状态
+    commands.insert_resource(ChannelSettingsState {
+        api_channel: settings.channel.api_channel,
+        image_channel: settings.channel.image_channel,
+        custom_cdn_api_ip: settings.channel.custom_cdn_api_ip.clone(),
+        custom_cdn_img_ip: settings.channel.custom_cdn_img_ip.clone(),
+        api_ip_focused: false,
+        img_ip_focused: false,
+    });
+
     // 初始化保存状态提示
     commands.insert_resource(SettingsSaveStatus::default());
 
@@ -402,6 +477,11 @@ pub fn setup_settings_ui(
                             // 代理设置分组
                             spawn_settings_section(scroll, &font, "代理设置", |section| {
                                 spawn_proxy_setting(section, &font, &settings);
+                            });
+
+                            // 分流设置分组
+                            spawn_settings_section(scroll, &font, "分流设置", |section| {
+                                spawn_channel_setting(section, &font, &settings);
                             });
 
                             // 日志设置分组
@@ -1884,6 +1964,233 @@ fn spawn_proxy_setting(
         });
 }
 
+/// 创建分流设置
+fn spawn_channel_setting(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    settings: &picacg_config::AppSettings,
+) {
+    parent
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(12.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|col| {
+            // API 分流选择
+            spawn_channel_row(col, font, "API 分流", settings.channel.api_channel, true);
+
+            // 自定义 API IP 输入行
+            spawn_custom_ip_row(
+                col,
+                font,
+                "自定义 API IP",
+                &settings.channel.custom_cdn_api_ip,
+                true,
+                settings.channel.api_channel == ChannelType::CustomCdnIp,
+            );
+
+            // 图片分流选择
+            spawn_channel_row(col, font, "图片分流", settings.channel.image_channel, false);
+
+            // 自定义图片 IP 输入行
+            spawn_custom_ip_row(
+                col,
+                font,
+                "自定义图片 IP",
+                &settings.channel.custom_cdn_img_ip,
+                false,
+                settings.channel.image_channel == ChannelType::CustomCdnIp,
+            );
+        });
+}
+
+/// 创建分流按钮行
+fn spawn_channel_row(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    current: ChannelType,
+    is_api: bool,
+) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+            Transform::default(),
+        ))
+        .with_children(|type_col| {
+            type_col.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+
+            type_col
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Row,
+                        column_gap: Val::Px(8.0),
+                        flex_wrap: FlexWrap::Wrap,
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                    Transform::default(),
+                ))
+                .with_children(|btn_row| {
+                    for channel_type in ChannelType::all() {
+                        let is_selected = current == *channel_type;
+                        let mut btn = btn_row.spawn((
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(10.0),
+                                    Val::Px(10.0),
+                                    Val::Px(6.0),
+                                    Val::Px(6.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(if is_selected {
+                                AppColors::PRIMARY
+                            } else {
+                                Color::srgb(0.12, 0.12, 0.16)
+                            }),
+                            BorderColor::all(if is_selected {
+                                AppColors::PRIMARY
+                            } else {
+                                AppColors::BORDER
+                            }),
+                        ));
+                        if is_api {
+                            btn.insert(ApiChannelButton {
+                                channel_type: *channel_type,
+                            });
+                        } else {
+                            btn.insert(ImageChannelButton {
+                                channel_type: *channel_type,
+                            });
+                        }
+                        btn.with_children(|btn| {
+                            btn.spawn((
+                                Text::new(channel_type.display_name()),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 12.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                    }
+                });
+        });
+}
+
+/// 创建自定义 IP 输入行
+fn spawn_custom_ip_row(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    value: &str,
+    is_api: bool,
+    visible: bool,
+) {
+    let mut row = parent.spawn((
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            display: if visible {
+                Display::Flex
+            } else {
+                Display::None
+            },
+            ..default()
+        },
+        Transform::default(),
+    ));
+    if is_api {
+        row.insert(CustomCdnApiIpRow);
+    } else {
+        row.insert(CustomCdnImgIpRow);
+    }
+    row.with_children(|row| {
+        row.spawn((
+            Text::new(label),
+            TextFont {
+                font: font.clone(),
+                font_size: 14.0,
+                ..default()
+            },
+            TextColor(AppColors::TEXT),
+        ));
+
+        let placeholder = if value.is_empty() {
+            "输入 IP 地址，例如 104.21.91.145"
+        } else {
+            ""
+        };
+        let display_text = if value.is_empty() { placeholder } else { value };
+        let text_color = if value.is_empty() {
+            Color::srgb(0.4, 0.4, 0.5)
+        } else {
+            AppColors::TEXT
+        };
+
+        let mut input = row.spawn((
+            Button,
+            Interaction::default(),
+            Node {
+                flex_grow: 1.0,
+                height: Val::Px(32.0),
+                padding: UiRect::horizontal(Val::Px(10.0)),
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+            BorderColor::all(AppColors::BORDER),
+        ));
+        if is_api {
+            input.insert(CustomCdnApiIpInput);
+        } else {
+            input.insert(CustomCdnImgIpInput);
+        }
+        input.with_children(|input| {
+            let mut text_cmd = input.spawn((
+                Text::new(display_text),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(text_color),
+            ));
+            if is_api {
+                text_cmd.insert(CustomCdnApiIpInputText);
+            } else {
+                text_cmd.insert(CustomCdnImgIpInputText);
+            }
+        });
+    });
+}
+
 /// 创建日志等级设置
 fn spawn_log_level_setting(
     parent: &mut ChildSpawnerCommands,
@@ -2093,6 +2400,7 @@ pub fn cleanup_settings_ui(mut commands: Commands, query: Query<Entity, With<Set
     commands.remove_resource::<AutoResumeDownloadsState>();
     commands.remove_resource::<MaxConcurrentDownloadsState>();
     commands.remove_resource::<CbzPackageSettingsState>();
+    commands.remove_resource::<ChannelSettingsState>();
     commands.remove_resource::<SettingsSaveStatus>();
 }
 
@@ -2243,6 +2551,7 @@ fn save_all_settings(
     max_concurrent_state: &MaxConcurrentDownloadsState,
     cbz_state: &CbzPackageSettingsState,
     filter_state: &FilterSettingsState,
+    channel_state: &ChannelSettingsState,
 ) -> Result<(), String> {
     let mut settings = AppSettings::global().write();
     settings.download_path = input_state.value.clone();
@@ -2261,6 +2570,10 @@ fn save_all_settings(
         filter_by_tag: filter_state.filter_by_tag,
         filter_by_title: filter_state.filter_by_title,
     };
+    settings.channel.api_channel = channel_state.api_channel;
+    settings.channel.image_channel = channel_state.image_channel;
+    settings.channel.custom_cdn_api_ip = channel_state.custom_cdn_api_ip.clone();
+    settings.channel.custom_cdn_img_ip = channel_state.custom_cdn_img_ip.clone();
     settings.save().map_err(|e| e.to_string())?;
     update_log_level(log_state.level);
     Ok(())
@@ -2275,16 +2588,20 @@ pub fn auto_save_settings(
     max_concurrent_state: Res<MaxConcurrentDownloadsState>,
     cbz_state: Res<CbzPackageSettingsState>,
     filter_state: Res<FilterSettingsState>,
+    channel_state: Res<ChannelSettingsState>,
     mut save_status: ResMut<SettingsSaveStatus>,
+    mut reload_api_messages: MessageWriter<crate::events::ReloadApiClientEvent>,
     mut initialized: Local<bool>,
 ) {
+    let channel_changed = channel_state.is_changed();
     let any_changed = input_state.is_changed()
         || proxy_state.is_changed()
         || log_state.is_changed()
         || auto_resume_state.is_changed()
         || max_concurrent_state.is_changed()
         || cbz_state.is_changed()
-        || filter_state.is_changed();
+        || filter_state.is_changed()
+        || channel_changed;
 
     if !any_changed {
         return;
@@ -2304,6 +2621,7 @@ pub fn auto_save_settings(
         &max_concurrent_state,
         &cbz_state,
         &filter_state,
+        &channel_state,
     ) {
         Ok(()) => {
             save_status.visible = true;
@@ -2311,6 +2629,12 @@ pub fn auto_save_settings(
             save_status.is_error = false;
             save_status.timer.reset();
             tracing::debug!("设置已自动保存");
+
+            // 分流或代理变更时通知重建 API 客户端
+            if channel_changed || proxy_state.is_changed() {
+                reload_api_messages.write(crate::events::ReloadApiClientEvent);
+                tracing::info!("分流/代理设置变更，通知重建 API 客户端");
+            }
         }
         Err(e) => {
             save_status.visible = true;
@@ -3489,6 +3813,263 @@ pub fn keyword_suggestion_item_interaction(
                 }
             }
             _ => {}
+        }
+    }
+}
+
+// ==================== 分流设置交互系统 ====================
+
+/// API 分流按钮交互
+pub fn api_channel_button_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &ApiChannelButton,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Changed<Interaction>,
+    >,
+    mut channel_state: ResMut<ChannelSettingsState>,
+    mut all_buttons_query: Query<
+        (&ApiChannelButton, &mut BackgroundColor, &mut BorderColor),
+        Without<Interaction>,
+    >,
+    mut api_ip_row_query: Query<&mut Node, With<CustomCdnApiIpRow>>,
+) {
+    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                channel_state.api_channel = btn.channel_type;
+
+                // 更新当前按钮样式
+                *bg_color = BackgroundColor(AppColors::PRIMARY);
+                *border_color = BorderColor::all(AppColors::PRIMARY);
+
+                // 更新其他按钮样式
+                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
+                    if other_btn.channel_type != btn.channel_type {
+                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                        *other_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
+
+                // 切换自定义 IP 输入行显示
+                for mut node in api_ip_row_query.iter_mut() {
+                    node.display = if btn.channel_type == ChannelType::CustomCdnIp {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    };
+                }
+            }
+            Interaction::Hovered => {
+                if channel_state.api_channel != btn.channel_type {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if channel_state.api_channel != btn.channel_type {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 图片分流按钮交互
+pub fn image_channel_button_interaction(
+    mut interaction_query: Query<
+        (
+            &Interaction,
+            &ImageChannelButton,
+            &mut BackgroundColor,
+            &mut BorderColor,
+        ),
+        Changed<Interaction>,
+    >,
+    mut channel_state: ResMut<ChannelSettingsState>,
+    mut all_buttons_query: Query<
+        (&ImageChannelButton, &mut BackgroundColor, &mut BorderColor),
+        Without<Interaction>,
+    >,
+    mut img_ip_row_query: Query<&mut Node, With<CustomCdnImgIpRow>>,
+) {
+    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                channel_state.image_channel = btn.channel_type;
+
+                // 更新当前按钮样式
+                *bg_color = BackgroundColor(AppColors::PRIMARY);
+                *border_color = BorderColor::all(AppColors::PRIMARY);
+
+                // 更新其他按钮样式
+                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
+                    if other_btn.channel_type != btn.channel_type {
+                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                        *other_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
+
+                // 切换自定义 IP 输入行显示
+                for mut node in img_ip_row_query.iter_mut() {
+                    node.display = if btn.channel_type == ChannelType::CustomCdnIp {
+                        Display::Flex
+                    } else {
+                        Display::None
+                    };
+                }
+            }
+            Interaction::Hovered => {
+                if channel_state.image_channel != btn.channel_type {
+                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                }
+            }
+            Interaction::None => {
+                if channel_state.image_channel != btn.channel_type {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                }
+            }
+        }
+    }
+}
+
+/// 自定义 CDN IP 输入框交互
+pub fn custom_cdn_ip_input_interaction(
+    mut api_query: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            Changed<Interaction>,
+            With<CustomCdnApiIpInput>,
+            Without<CustomCdnImgIpInput>,
+        ),
+    >,
+    mut img_query: Query<
+        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            Changed<Interaction>,
+            With<CustomCdnImgIpInput>,
+            Without<CustomCdnApiIpInput>,
+        ),
+    >,
+    mut channel_state: ResMut<ChannelSettingsState>,
+) {
+    for (interaction, mut bg_color, mut border_color) in api_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                channel_state.api_ip_focused = true;
+                channel_state.img_ip_focused = false;
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                *border_color = BorderColor::all(AppColors::PRIMARY);
+            }
+            Interaction::Hovered => {
+                if !channel_state.api_ip_focused {
+                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
+                }
+            }
+            Interaction::None => {
+                if !channel_state.api_ip_focused {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+
+    for (interaction, mut bg_color, mut border_color) in img_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                channel_state.img_ip_focused = true;
+                channel_state.api_ip_focused = false;
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+                *border_color = BorderColor::all(AppColors::PRIMARY);
+            }
+            Interaction::Hovered => {
+                if !channel_state.img_ip_focused {
+                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
+                }
+            }
+            Interaction::None => {
+                if !channel_state.img_ip_focused {
+                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
+                    *border_color = BorderColor::all(AppColors::BORDER);
+                }
+            }
+        }
+    }
+}
+
+/// 自定义 CDN IP 键盘输入
+pub fn custom_cdn_ip_keyboard_input(
+    mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut channel_state: ResMut<ChannelSettingsState>,
+    api_text_query: Query<Entity, With<CustomCdnApiIpInputText>>,
+    img_text_query: Query<Entity, With<CustomCdnImgIpInputText>>,
+    mut text_query: Query<(&mut Text, &mut TextColor)>,
+) {
+    use bevy::input::{ButtonState, keyboard::Key};
+
+    if !channel_state.api_ip_focused && !channel_state.img_ip_focused {
+        return;
+    }
+
+    for event in keyboard_events.read() {
+        if event.state != ButtonState::Pressed {
+            continue;
+        }
+
+        match &event.logical_key {
+            Key::Backspace => {
+                if channel_state.api_ip_focused {
+                    channel_state.custom_cdn_api_ip.pop();
+                } else if channel_state.img_ip_focused {
+                    channel_state.custom_cdn_img_ip.pop();
+                }
+            }
+            Key::Escape | Key::Enter => {
+                channel_state.api_ip_focused = false;
+                channel_state.img_ip_focused = false;
+            }
+            Key::Character(input) => {
+                for c in input.chars() {
+                    // 只允许 IP 地址字符（数字和点）
+                    if c.is_ascii_digit() || c == '.' {
+                        if channel_state.api_ip_focused {
+                            channel_state.custom_cdn_api_ip.push(c);
+                        } else if channel_state.img_ip_focused {
+                            channel_state.custom_cdn_img_ip.push(c);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 更新 API IP 文本显示
+    for entity in api_text_query.iter() {
+        if let Ok((mut text, mut color)) = text_query.get_mut(entity) {
+            if channel_state.custom_cdn_api_ip.is_empty() {
+                **text = "输入 IP 地址，例如 104.21.91.145".to_string();
+                *color = TextColor(Color::srgb(0.4, 0.4, 0.5));
+            } else {
+                **text = channel_state.custom_cdn_api_ip.clone();
+                *color = TextColor(AppColors::TEXT);
+            }
+        }
+    }
+
+    // 更新图片 IP 文本显示
+    for entity in img_text_query.iter() {
+        if let Ok((mut text, mut color)) = text_query.get_mut(entity) {
+            if channel_state.custom_cdn_img_ip.is_empty() {
+                **text = "输入 IP 地址，例如 104.21.91.145".to_string();
+                *color = TextColor(Color::srgb(0.4, 0.4, 0.5));
+            } else {
+                **text = channel_state.custom_cdn_img_ip.clone();
+                *color = TextColor(AppColors::TEXT);
+            }
         }
     }
 }

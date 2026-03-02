@@ -37,13 +37,13 @@ BIN_DIR="$ROOT_DIR/bin"
 # 源目录
 TARGET_DIR="$ROOT_DIR/target/$PROFILE"
 
-echo -e "\n${YELLOW}[1/3] 清理旧的 bin 目录...${NC}"
+echo -e "\n${YELLOW}[1/4] 清理旧的 bin 目录...${NC}"
 if [ -d "$BIN_DIR" ]; then
     rm -rf "$BIN_DIR"
     echo -e "${GRAY}已删除旧目录: $BIN_DIR${NC}"
 fi
 
-echo -e "\n${YELLOW}[2/3] 复制可执行文件...${NC}"
+echo -e "\n${YELLOW}[2/4] 复制可执行文件...${NC}"
 mkdir -p "$BIN_DIR"
 EXE_NAME="picacg"
 # Windows 下可执行文件带 .exe 后缀
@@ -60,14 +60,30 @@ else
     exit 1
 fi
 
+echo -e "\n${YELLOW}[3/4] 复制内置字体...${NC}"
+FONT_SRC="$ROOT_DIR/assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"
+FONT_DEST_DIR="$BIN_DIR/assets/fonts/SarasaTermSCNerd"
+if [ -f "$FONT_SRC" ]; then
+    mkdir -p "$FONT_DEST_DIR"
+    cp "$FONT_SRC" "$FONT_DEST_DIR/"
+    FONT_SIZE=$(du -h "$FONT_SRC" | cut -f1)
+    echo -e "${GREEN}已复制: SarasaTermSCNerd-Regular.ttf ($FONT_SIZE)${NC}"
+else
+    echo -e "${YELLOW}警告: 未找到内置字体 $FONT_SRC${NC}"
+    echo -e "${GRAY}程序将回退到系统字体${NC}"
+fi
+
 echo -e "\n${CYAN}=== 部署完成 ===${NC}"
 echo -e "\n${GREEN}目录结构:${NC}"
 echo "bin/"
-echo "└── $EXE_NAME"
+echo "├── $EXE_NAME"
+echo "└── assets/"
+echo "    └── fonts/"
+echo "        └── SarasaTermSCNerd/"
+echo "            └── SarasaTermSCNerd-Regular.ttf"
 echo ""
-echo -e "${GRAY}注：字体使用系统字体，无需捆绑${NC}"
 
-echo -e "\n${YELLOW}[3/3] 创建版本压缩包...${NC}"
+echo -e "\n${YELLOW}[4/4] 创建版本压缩包...${NC}"
 ZIP_NAME="picacg-v${VERSION}.zip"
 
 # 进入 bin 目录创建 zip（排除 zip 文件本身）

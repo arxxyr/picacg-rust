@@ -369,6 +369,12 @@ pub struct RankingsLoadFailedEvent {
     pub error: String,
 }
 
+// ==================== API 客户端重载消息 ====================
+
+/// 重新加载 API 客户端配置（通道/代理变更时触发）
+#[derive(Message)]
+pub struct ReloadApiClientEvent;
+
 // ==================== CBZ 打包消息 ====================
 
 /// CBZ 打包请求

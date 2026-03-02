@@ -18,6 +18,9 @@ use crate::{
         },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
+    utils::content_filter::{
+        FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+    },
 };
 
 /// 滚动容器标记组件
@@ -452,11 +455,22 @@ pub fn waterfall_create_cards(
     time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
+    // 构建屏蔽过滤配置
+    let blocked_keywords = load_filter_keywords();
+    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
+    let filter_config = FilterConfig {
+        blocked_keywords: &blocked_keywords,
+        filter_by_category,
+        filter_by_tag,
+        filter_by_title,
+    };
+
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     // （解决系统执行顺序导致 is_changed() 检测失败的问题）
     if !creation_state.is_creating && !rankings_state.is_loading {
         let comics = rankings_state.current_comics();
-        if !comics.is_empty() {
+        let filtered_indices = filter_comic_indices(comics, &filter_config);
+        if !filtered_indices.is_empty() {
             // 检查当前容器中是否有卡片
             if let Ok((container_entity, children)) = scroll_container_query.single() {
                 // 检查容器的子元素中是否有 RankingsComicCard
@@ -502,10 +516,14 @@ pub fn waterfall_create_cards(
                     let context = RankingsContext {
                         current_type: Some(rankings_state.current_type),
                     };
-                    creation_state.start_precreate_with_context(comics.len(), font, context);
+                    creation_state.start_precreate_with_context(
+                        filtered_indices.len(),
+                        font,
+                        context,
+                    );
                     tracing::debug!(
-                        "自动启动排行榜卡片预创建: {} 个 ({:?})",
-                        comics.len(),
+                        "自动启动排行榜卡片预创建: {} 个（过滤后，{:?}）",
+                        filtered_indices.len(),
                         rankings_state.current_type
                     );
                 }
@@ -538,19 +556,23 @@ pub fn waterfall_create_cards(
         };
 
         let comics = rankings_state.current_comics();
+        let filtered_indices = filter_comic_indices(comics, &filter_config);
         let count = creation_state.get_precreate_count();
 
-        if comics.is_empty() || count == 0 {
+        if filtered_indices.is_empty() || count == 0 {
             creation_state.clear();
             return;
         }
 
-        // 一次性创建所有隐藏卡片
+        // 一次性创建所有隐藏卡片（使用过滤后的索引，保留原始排名号）
         let mut entities = Vec::with_capacity(count);
         commands.entity(container_entity).with_children(|parent| {
             for i in 0..count {
-                if let Some(comic) = comics.get(i) {
-                    let entity = spawn_comic_card(parent, &font, comic, i + 1, true);
+                if let Some(&original_index) = filtered_indices.get(i)
+                    && let Some(comic) = comics.get(original_index)
+                {
+                    // 排名号使用原始索引 +1，保留真实排名
+                    let entity = spawn_comic_card(parent, &font, comic, original_index + 1, true);
                     entities.push(entity);
                 }
             }
@@ -558,7 +580,7 @@ pub fn waterfall_create_cards(
 
         // 设置预创建完成后的实体列表
         creation_state.set_precreated_entities(entities);
-        tracing::debug!("排行榜卡片预创建完成: {} 个", count);
+        tracing::debug!("排行榜卡片预创建完成: {} 个（过滤后）", count);
         return;
     }
 

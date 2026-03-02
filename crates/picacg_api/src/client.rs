@@ -3,11 +3,15 @@
 use std::{sync::Arc, time::Duration};
 
 use parking_lot::RwLock;
+use picacg_config::ChannelType;
 use picacg_core::{PicacgError, Result};
 use reqwest::{Client, Method, Proxy};
 use serde::{Deserialize, Serialize};
 
-use crate::signer::Signer;
+use crate::{
+    channel::{ChannelRoute, apply_api_dns_override, resolve_api_route},
+    signer::Signer,
+};
 
 // API 基础配置
 pub const API_BASE_URL: &str = "https://picaapi.picacomic.com";
@@ -43,22 +47,72 @@ pub struct ApiClient {
     client: Client,
     token: Arc<RwLock<Option<String>>>,
     signer: Signer,
+    channel_route: ChannelRoute,
 }
 
 impl ApiClient {
-    /// 创建新的 API 客户端（不使用代理）
+    /// 创建新的 API 客户端（不使用代理，直连通道）
     pub fn new() -> Result<Self> {
-        Self::with_proxy(None)
+        Self::with_config(None, ChannelType::Direct, "")
     }
 
-    /// 创建带代理的 API 客户端
+    /// 创建带代理的 API 客户端（直连通道，向后兼容）
     pub fn with_proxy(proxy_url: Option<String>) -> Result<Self> {
+        Self::with_config(proxy_url, ChannelType::Direct, "")
+    }
+
+    /// 创建带完整配置的 API 客户端
+    pub fn with_config(
+        proxy_url: Option<String>,
+        api_channel: ChannelType,
+        custom_cdn_api_ip: &str,
+    ) -> Result<Self> {
+        let channel_route = resolve_api_route(api_channel, custom_cdn_api_ip);
+        let client = Self::build_client(proxy_url, api_channel, custom_cdn_api_ip)?;
+
+        Ok(ApiClient {
+            client,
+            token: Arc::new(RwLock::new(None)),
+            signer: Signer::new(),
+            channel_route,
+        })
+    }
+
+    /// 重新加载代理配置（向后兼容）
+    pub fn reload_proxy(&mut self, proxy_url: Option<String>) -> Result<()> {
+        self.reload_config(proxy_url, ChannelType::Direct, "")
+    }
+
+    /// 重新加载完整配置（代理 + 分流通道）
+    pub fn reload_config(
+        &mut self,
+        proxy_url: Option<String>,
+        api_channel: ChannelType,
+        custom_cdn_api_ip: &str,
+    ) -> Result<()> {
+        tracing::info!(
+            "重新加载 API 客户端配置: 通道={:?}, 代理={:?}",
+            api_channel,
+            proxy_url.as_deref().unwrap_or("无")
+        );
+
+        self.channel_route = resolve_api_route(api_channel, custom_cdn_api_ip);
+        self.client = Self::build_client(proxy_url, api_channel, custom_cdn_api_ip)?;
+        Ok(())
+    }
+
+    /// 构建 reqwest::Client
+    fn build_client(
+        proxy_url: Option<String>,
+        api_channel: ChannelType,
+        custom_cdn_api_ip: &str,
+    ) -> Result<Client> {
         let mut builder = Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10));
 
-        // 如果有代理配置，添加代理
+        // 添加代理
         if let Some(url) = proxy_url {
             tracing::info!("使用代理: {}", url);
             let proxy = Proxy::all(&url).map_err(|e| {
@@ -66,45 +120,15 @@ impl ApiClient {
                 PicacgError::ConfigError(format!("无效的代理配置: {}", e))
             })?;
             builder = builder.proxy(proxy);
-        } else {
-            tracing::info!("不使用代理");
         }
 
-        let client = builder.build().map_err(|e| {
+        // 添加 CDN DNS 覆盖
+        builder = apply_api_dns_override(builder, api_channel, custom_cdn_api_ip);
+
+        builder.build().map_err(|e| {
             tracing::error!("创建 HTTP 客户端失败: {}", e);
             PicacgError::ConfigError(format!("创建 HTTP 客户端失败: {}", e))
-        })?;
-
-        Ok(ApiClient {
-            client,
-            token: Arc::new(RwLock::new(None)),
-            signer: Signer::new(),
         })
-    }
-
-    /// 重新加载代理配置
-    pub fn reload_proxy(&mut self, proxy_url: Option<String>) -> Result<()> {
-        let mut builder = Client::builder()
-            .danger_accept_invalid_certs(true)
-            .timeout(Duration::from_secs(30))
-            .connect_timeout(Duration::from_secs(10));
-
-        if let Some(url) = proxy_url {
-            tracing::info!("重新加载代理配置: {}", url);
-            let proxy = Proxy::all(&url).map_err(|e| {
-                tracing::error!("创建代理失败: {}", e);
-                PicacgError::ConfigError(format!("无效的代理配置: {}", e))
-            })?;
-            builder = builder.proxy(proxy);
-        } else {
-            tracing::info!("重新加载配置：不使用代理");
-        }
-
-        self.client = builder.build().map_err(|e| {
-            tracing::error!("重新创建 HTTP 客户端失败: {}", e);
-            PicacgError::ConfigError(format!("重新创建 HTTP 客户端失败: {}", e))
-        })?;
-        Ok(())
     }
 
     pub fn set_token(&self, token: impl Into<String>) {
@@ -130,8 +154,11 @@ impl ApiClient {
     {
         let method = req.method();
 
-        // 构建完整 URL(包含查询参数)用于签名
-        let mut url_with_query = format!("{}{}", API_BASE_URL, req.path());
+        // 构建签名 URL（始终使用原始域名）
+        let mut sign_url = format!("{}{}", self.channel_route.sign_base_url, req.path());
+        // 构建请求 URL（使用分流后域名）
+        let mut request_url = format!("{}{}", self.channel_route.api_base_url, req.path());
+
         if let Some(query) = req.query() {
             let query_string = query
                 .iter()
@@ -141,14 +168,15 @@ impl ApiClient {
                 })
                 .collect::<Vec<_>>()
                 .join("&");
-            url_with_query = format!("{}?{}", url_with_query, query_string);
-            tracing::debug!("完整 URL(用于签名): {}", url_with_query);
+            sign_url = format!("{}?{}", sign_url, query_string);
+            request_url = format!("{}?{}", request_url, query_string);
+            tracing::debug!("签名 URL: {}", sign_url);
         }
 
-        tracing::debug!("发送请求: {} {}", method, url_with_query);
+        tracing::debug!("发送请求: {} {}", method, request_url);
 
-        // 使用包含查询参数的完整 URL 进行签名
-        let mut headers = self.signer.sign(&url_with_query, &method);
+        // 使用签名 URL 进行签名（始终用原始域名）
+        let mut headers = self.signer.sign(&sign_url, &method);
 
         // 添加 Token
         if req.need_auth() {
@@ -167,10 +195,10 @@ impl ApiClient {
             }
         }
 
-        // 构建请求(使用完整 URL)
+        // 构建请求（使用实际请求 URL）
         let mut builder = self
             .client
-            .request(method.clone(), &url_with_query)
+            .request(method.clone(), &request_url)
             .headers(headers);
 
         // 添加 Body
@@ -276,5 +304,17 @@ mod tests {
 
         client.clear_token();
         assert!(!client.is_logged_in());
+    }
+
+    #[test]
+    fn test_client_with_channel() {
+        let client = ApiClient::with_config(None, ChannelType::JpProxy, "");
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_client_with_cdn() {
+        let client = ApiClient::with_config(None, ChannelType::CdnIp1, "");
+        assert!(client.is_ok());
     }
 }

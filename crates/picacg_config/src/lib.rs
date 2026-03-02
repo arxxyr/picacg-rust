@@ -10,6 +10,6 @@ mod settings;
 // 重新导出
 pub use picacg_core::{PicacgError, Result};
 pub use settings::{
-    AppSettings, FilterSettings, LogLevel, LoginSettings, ProxySettings, ProxyType,
-    get_log_level_handle, set_log_level_handle, update_log_level,
+    AppSettings, ChannelSettings, ChannelType, FilterSettings, LogLevel, LoginSettings,
+    ProxySettings, ProxyType, get_log_level_handle, set_log_level_handle, update_log_level,
 };

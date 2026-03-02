@@ -7,6 +7,7 @@ description = "PicACG API 客户端库"
 
 [dependencies]
 picacg_core = { path = "../picacg_core" }
+picacg_config = { path = "../picacg_config" }
 
 reqwest.workspace = true
 serde.workspace = true

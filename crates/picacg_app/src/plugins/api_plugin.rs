@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use bevy::{asset::RenderAssetUsages, prelude::*};
-use picacg_api::ApiClient;
+use picacg_api::{ApiClient, apply_image_dns_override, transform_image_url};
 use picacg_config::AppSettings;
 
 use crate::{
@@ -83,6 +83,8 @@ impl Plugin for ApiPlugin {
             .add_message::<LoadRecommendationsRequest>()
             .add_message::<RecommendationsLoadedEvent>()
             .add_message::<RecommendationsLoadFailedEvent>()
+            // API 客户端重载消息
+            .add_message::<ReloadApiClientEvent>()
             // 注册相关消息
             .add_message::<RegisterRequestEvent>()
             .add_message::<RegisterResponseEvent>()
@@ -155,6 +157,8 @@ impl Plugin for ApiPlugin {
                     handle_cbz_package_failed,
                 ),
             )
+            // API 客户端重载（通道/代理变更）
+            .add_systems(Update, handle_reload_api_client)
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -177,12 +181,19 @@ pub struct AutoLoginTimer {
 
 impl ApiClientResource {
     pub fn new() -> Self {
-        // 读取代理设置
-        let proxy_url = {
+        // 读取代理和分流设置
+        let (proxy_url, api_channel, custom_cdn_api_ip) = {
             let settings = AppSettings::global().read();
-            settings.proxy.to_proxy_url()
+            (
+                settings.proxy.to_proxy_url(),
+                settings.channel.api_channel,
+                settings.channel.custom_cdn_api_ip.clone(),
+            )
         };
-        Self(ApiClient::with_proxy(proxy_url).expect("创建 API 客户端失败"))
+        Self(
+            ApiClient::with_config(proxy_url, api_channel, &custom_cdn_api_ip)
+                .expect("创建 API 客户端失败"),
+        )
     }
 }
 
@@ -566,10 +577,17 @@ async fn download_image(url: &str) -> Result<Vec<u8>, String> {
     type HmacSha256 = Hmac<Sha256>;
 
     // 使用独立作用域确保锁在 await 之前释放
-    let proxy_url = {
+    let (proxy_url, image_channel, custom_cdn_img_ip) = {
         let settings = AppSettings::global().read();
-        settings.proxy.to_proxy_url()
+        (
+            settings.proxy.to_proxy_url(),
+            settings.channel.image_channel,
+            settings.channel.custom_cdn_img_ip.clone(),
+        )
     };
+
+    // 转换图片 URL（反代模式下替换域名）
+    let actual_url = transform_image_url(url, image_channel);
 
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
@@ -583,9 +601,12 @@ async fn download_image(url: &str) -> Result<Vec<u8>, String> {
         builder = builder.proxy(proxy);
     }
 
+    // 添加图片 CDN DNS 覆盖
+    builder = apply_image_dns_override(builder, image_channel, &custom_cdn_img_ip);
+
     let client = builder.build().map_err(|e| e.to_string())?;
 
-    // 生成签名头部
+    // 生成签名头部（始终使用原始 URL 签名）
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -602,7 +623,7 @@ async fn download_image(url: &str) -> Result<Vec<u8>, String> {
     let signature = hex::encode(mac.finalize().into_bytes());
 
     let response = client
-        .get(url)
+        .get(&actual_url)
         .header("api-key", API_KEY)
         .header("accept", "application/vnd.picacomic.com.v1+json")
         .header("app-channel", "3")
@@ -680,6 +701,32 @@ fn handle_punch_in_response(mut messages: MessageReader<PunchInResponseEvent>) {
             Err(error) => {
                 tracing::warn!("打卡失败: {}", error);
             }
+        }
+    }
+}
+
+/// 处理 API 客户端重载事件（通道/代理变更时重建客户端）
+fn handle_reload_api_client(
+    mut messages: MessageReader<ReloadApiClientEvent>,
+    mut api_client: ResMut<ApiClientResource>,
+) {
+    for _ in messages.read() {
+        let (proxy_url, api_channel, custom_cdn_api_ip) = {
+            let settings = AppSettings::global().read();
+            (
+                settings.proxy.to_proxy_url(),
+                settings.channel.api_channel,
+                settings.channel.custom_cdn_api_ip.clone(),
+            )
+        };
+
+        if let Err(e) = api_client
+            .0
+            .reload_config(proxy_url, api_channel, &custom_cdn_api_ip)
+        {
+            tracing::error!("重载 API 客户端失败: {}", e);
+        } else {
+            tracing::info!("API 客户端已重载");
         }
     }
 }
@@ -1951,10 +1998,17 @@ async fn download_image_to_file(
     type HmacSha256 = Hmac<Sha256>;
 
     // 使用独立作用域确保锁在 await 之前释放
-    let proxy_url = {
+    let (proxy_url, image_channel, custom_cdn_img_ip) = {
         let settings = AppSettings::global().read();
-        settings.proxy.to_proxy_url()
+        (
+            settings.proxy.to_proxy_url(),
+            settings.channel.image_channel,
+            settings.channel.custom_cdn_img_ip.clone(),
+        )
     };
+
+    // 转换图片 URL（反代模式下替换域名）
+    let actual_url = transform_image_url(url, image_channel);
 
     let mut builder = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
@@ -1969,9 +2023,12 @@ async fn download_image_to_file(
         builder = builder.proxy(proxy);
     }
 
+    // 添加图片 CDN DNS 覆盖
+    builder = apply_image_dns_override(builder, image_channel, &custom_cdn_img_ip);
+
     let client = builder.build().map_err(|e| e.to_string())?;
 
-    // 生成签名头部（参考 Python 的 ToolUtil.GetHeader）
+    // 生成签名头部（始终使用原始 URL 签名）
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -1979,7 +2036,6 @@ async fn download_image_to_file(
         .to_string();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
 
-    // 对于 CDN URL，使用完整 URL 作为 path 进行签名
     let method = "GET";
     let src = format!("{}{}{}{}{}", url, now, nonce, method, API_KEY);
 
@@ -1990,7 +2046,7 @@ async fn download_image_to_file(
 
     // 发送带签名头部的请求
     let response = client
-        .get(url)
+        .get(&actual_url)
         .header("api-key", API_KEY)
         .header("accept", "application/vnd.picacomic.com.v1+json")
         .header("app-channel", "3")

@@ -295,6 +295,11 @@ impl Plugin for UiPlugin {
                     refresh_blocked_keywords_ui,
                     keyword_suggestion_toggle_interaction,
                     keyword_suggestion_item_interaction,
+                    // 分流设置交互
+                    api_channel_button_interaction,
+                    image_channel_button_interaction,
+                    custom_cdn_ip_input_interaction,
+                    custom_cdn_ip_keyboard_input,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )

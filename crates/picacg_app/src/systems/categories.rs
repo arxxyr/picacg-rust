@@ -15,6 +15,9 @@ use crate::{
         },
         waterfall::CategoriesCardCreationState,
     },
+    utils::content_filter::{
+        FilterConfig, filter_category_indices, load_filter_flags, load_filter_keywords,
+    },
 };
 
 /// 分类卡片布局常量
@@ -317,6 +320,19 @@ pub fn waterfall_create_category_cards(
     time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
+    // 构建屏蔽过滤配置
+    let blocked_keywords = load_filter_keywords();
+    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
+    let filter_config = FilterConfig {
+        blocked_keywords: &blocked_keywords,
+        filter_by_category,
+        filter_by_tag,
+        filter_by_title,
+    };
+
+    // 计算过滤后的分类索引
+    let filtered_indices = filter_category_indices(&categories_state.categories, &filter_config);
+
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     // （解决系统执行顺序导致 is_changed() 检测失败的问题）
     if !creation_state.is_creating
@@ -330,7 +346,7 @@ pub fn waterfall_create_category_cards(
                 .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
                 .unwrap_or(false);
 
-            if !has_cards {
+            if !has_cards && !filtered_indices.is_empty() {
                 // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
                 for entity in loading_query.iter() {
                     if let Ok(mut entity_commands) = commands.get_entity(entity) {
@@ -338,10 +354,10 @@ pub fn waterfall_create_category_cards(
                     }
                 }
                 let font: Handle<Font> = get_font();
-                creation_state.start_precreate(categories_state.categories.len(), font);
+                creation_state.start_precreate(filtered_indices.len(), font);
                 tracing::debug!(
-                    "自动启动分类卡片预创建: {} 个",
-                    categories_state.categories.len()
+                    "自动启动分类卡片预创建: {} 个（过滤后）",
+                    filtered_indices.len()
                 );
             }
             let _ = container_entity; // suppress warning
@@ -361,16 +377,18 @@ pub fn waterfall_create_category_cards(
         let categories = &categories_state.categories;
         let count = creation_state.get_precreate_count();
 
-        if categories.is_empty() || count == 0 {
+        if filtered_indices.is_empty() || count == 0 {
             creation_state.clear();
             return;
         }
 
-        // 一次性创建所有隐藏卡片
+        // 一次性创建所有隐藏卡片（使用过滤后的索引）
         let mut entities = Vec::with_capacity(count);
         commands.entity(container_entity).with_children(|parent| {
             for i in 0..count {
-                if let Some(category) = categories.get(i) {
+                if let Some(&original_index) = filtered_indices.get(i)
+                    && let Some(category) = categories.get(original_index)
+                {
                     let entity = spawn_category_card(parent, category, &font, &image_cache, true);
                     entities.push(entity);
                 }
@@ -379,7 +397,7 @@ pub fn waterfall_create_category_cards(
 
         // 设置预创建完成后的实体列表
         creation_state.set_precreated_entities(entities);
-        tracing::debug!("分类卡片预创建完成: {} 个", count);
+        tracing::debug!("分类卡片预创建完成: {} 个（过滤后）", count);
         return;
     }
 

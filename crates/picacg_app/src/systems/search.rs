@@ -18,6 +18,9 @@ use crate::{
         ui_common::{calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar},
         waterfall::SearchCardCreationState,
     },
+    utils::content_filter::{
+        FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+    },
 };
 
 /// 排序方式定义
@@ -974,7 +977,19 @@ pub fn setup_search_ui(
 
     if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
     {
-        creation_state.start_precreate(search_state.results.len(), font);
+        // 应用屏蔽过滤后的数量
+        let blocked_kw = load_filter_keywords();
+        let (f_cat, f_tag, f_title) = load_filter_flags();
+        let f_cfg = FilterConfig {
+            blocked_keywords: &blocked_kw,
+            filter_by_category: f_cat,
+            filter_by_tag: f_tag,
+            filter_by_title: f_title,
+        };
+        let filtered_count = filter_comic_indices(&search_state.results, &f_cfg).len();
+        if filtered_count > 0 {
+            creation_state.start_precreate(filtered_count, font);
+        }
     }
 }
 
@@ -1687,7 +1702,19 @@ pub fn refresh_search_ui(
 
     if search_state.has_searched && !search_state.results.is_empty() && search_state.error.is_none()
     {
-        creation_state.start_precreate(search_state.results.len(), font);
+        // 应用屏蔽过滤后的数量
+        let blocked_kw = load_filter_keywords();
+        let (f_cat, f_tag, f_title) = load_filter_flags();
+        let f_cfg = FilterConfig {
+            blocked_keywords: &blocked_kw,
+            filter_by_category: f_cat,
+            filter_by_tag: f_tag,
+            filter_by_title: f_title,
+        };
+        let filtered_count = filter_comic_indices(&search_state.results, &f_cfg).len();
+        if filtered_count > 0 {
+            creation_state.start_precreate(filtered_count, font);
+        }
     }
 }
 
@@ -1700,6 +1727,16 @@ pub fn waterfall_create_search_cards(
     results_grid_query: Query<Entity, With<SearchResultsGrid>>,
     time: Res<Time>,
 ) {
+    // 构建屏蔽过滤配置
+    let blocked_keywords = load_filter_keywords();
+    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
+    let filter_config = FilterConfig {
+        blocked_keywords: &blocked_keywords,
+        filter_by_category,
+        filter_by_tag,
+        filter_by_title,
+    };
+
     // 检查是否需要预创建
     if creation_state.needs_precreate() {
         let Ok(grid_entity) = results_grid_query.single() else {
@@ -1711,18 +1748,21 @@ pub fn waterfall_create_search_cards(
         };
 
         let results = &search_state.results;
+        let filtered_indices = filter_comic_indices(results, &filter_config);
         let count = creation_state.get_precreate_count();
 
-        if results.is_empty() || count == 0 {
+        if filtered_indices.is_empty() || count == 0 {
             creation_state.clear();
             return;
         }
 
-        // 一次性创建所有隐藏卡片
+        // 一次性创建所有隐藏卡片（使用过滤后的索引）
         let mut entities = Vec::with_capacity(count);
         commands.entity(grid_entity).with_children(|parent| {
             for i in 0..count {
-                if let Some(comic) = results.get(i) {
+                if let Some(&original_index) = filtered_indices.get(i)
+                    && let Some(comic) = results.get(original_index)
+                {
                     let entity = spawn_search_result_card(parent, comic, &font, &image_cache, true);
                     entities.push(entity);
                 }
@@ -1731,7 +1771,7 @@ pub fn waterfall_create_search_cards(
 
         // 设置预创建完成后的实体列表
         creation_state.set_precreated_entities(entities);
-        tracing::debug!("搜索结果卡片预创建完成: {} 个", count);
+        tracing::debug!("搜索结果卡片预创建完成: {} 个（过滤后）", count);
         return;
     }
 

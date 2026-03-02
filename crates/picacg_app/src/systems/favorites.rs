@@ -21,6 +21,9 @@ use crate::{
             spawn_tag_badge,
         },
     },
+    utils::content_filter::{
+        FilterConfig, load_filter_flags, load_filter_keywords, should_block_comic,
+    },
 };
 
 /// 收藏页面标记类型（用于分页组件的泛型参数）
@@ -533,6 +536,23 @@ pub fn waterfall_create_favorite_cards(
         return;
     };
 
+    // 构建屏蔽过滤配置
+    let blocked_keywords = load_filter_keywords();
+    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
+    let filter_config = FilterConfig {
+        blocked_keywords: &blocked_keywords,
+        filter_by_category,
+        filter_by_tag,
+        filter_by_title,
+    };
+
+    // 计算过滤后的漫画数量
+    let filtered_count = favorites_state
+        .comics
+        .iter()
+        .filter(|c| !should_block_comic(c, &filter_config))
+        .count();
+
     // 自动检测：数据存在但没有卡片，启动预创建
     if !creation_state.is_creating
         && !favorites_state.comics.is_empty()
@@ -542,7 +562,7 @@ pub fn waterfall_create_favorite_cards(
             .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
             .unwrap_or(false);
 
-        if !has_cards {
+        if !has_cards && filtered_count > 0 {
             // 删除加载指示器和空状态提示
             for entity in loading_query.iter() {
                 commands.entity(entity).despawn();
@@ -552,7 +572,7 @@ pub fn waterfall_create_favorite_cards(
             }
 
             let font: Handle<Font> = get_font();
-            creation_state.start_precreate(favorites_state.comics.len(), font);
+            creation_state.start_precreate(filtered_count, font);
         }
     }
 
@@ -571,10 +591,12 @@ pub fn waterfall_create_favorite_cards(
         .unwrap_or(false);
 
     if !has_cards && creation_state.visible_count == 0 {
-        // 一次性创建所有卡片（隐藏）
+        // 一次性创建所有卡片（隐藏），跳过被屏蔽的漫画
         commands.entity(scroll_entity).with_children(|parent| {
             for comic in favorites_state.comics.iter() {
-                spawn_favorite_card(parent, comic, &font, &image_cache, true);
+                if !should_block_comic(comic, &filter_config) {
+                    spawn_favorite_card(parent, comic, &font, &image_cache, true);
+                }
             }
         });
         return;

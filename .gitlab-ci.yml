@@ -80,10 +80,19 @@ build-release:
   stage: build
   script:
     - cargo build --release -p picacg
+    # 收集产物（可执行文件 + 内置字体）
+    - mkdir -p package/assets/fonts/SarasaTermSCNerd
+    - cp target/release/picacg package/
+    - |
+      FONT_SRC="assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"
+      if [ -f "$FONT_SRC" ]; then
+        cp "$FONT_SRC" package/assets/fonts/SarasaTermSCNerd/
+        echo "已打包内置字体"
+      fi
   artifacts:
     name: "picacg-${CI_COMMIT_SHORT_SHA}"
     paths:
-      - target/release/picacg
+      - package/
     expire_in: 7 days
   needs:
     - test

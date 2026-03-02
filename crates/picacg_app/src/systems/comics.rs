@@ -16,6 +16,9 @@ use crate::{
         },
         waterfall::ComicsCardCreationState,
     },
+    utils::content_filter::{
+        FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+    },
 };
 
 /// 漫画卡片布局常量
@@ -623,6 +626,19 @@ pub fn waterfall_create_comic_cards(
     time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
+    // 构建屏蔽过滤配置
+    let blocked_keywords = load_filter_keywords();
+    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
+    let filter_config = FilterConfig {
+        blocked_keywords: &blocked_keywords,
+        filter_by_category,
+        filter_by_tag,
+        filter_by_title,
+    };
+
+    // 计算过滤后的索引列表
+    let filtered_indices = filter_comic_indices(&comics_state.comics, &filter_config);
+
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     if !creation_state.is_creating
         && !comics_state.comics.is_empty()
@@ -638,21 +654,21 @@ pub fn waterfall_create_comic_cards(
             })
             .unwrap_or(0);
 
-        let total_comics = comics_state.comics.len();
+        let total_filtered = filtered_indices.len();
 
-        if existing_card_count == 0 && total_comics > 0 {
-            // 首次加载：没有卡片，创建全部
+        if existing_card_count == 0 && total_filtered > 0 {
+            // 首次加载：没有卡片，创建全部（过滤后）
             for entity in loading_query.iter() {
                 if let Ok(mut entity_commands) = commands.get_entity(entity) {
                     entity_commands.despawn();
                 }
             }
             let font: Handle<Font> = get_font();
-            creation_state.start_precreate(total_comics, font);
-            tracing::debug!("自动启动漫画卡片预创建: {} 个", total_comics);
-        } else if existing_card_count < total_comics && existing_card_count > 0 {
+            creation_state.start_precreate(total_filtered, font);
+            tracing::debug!("自动启动漫画卡片预创建: {} 个（过滤后）", total_filtered);
+        } else if existing_card_count < total_filtered && existing_card_count > 0 {
             // 无限滚动追加：有新数据追加，增量创建新卡片
-            let new_count = total_comics - existing_card_count;
+            let new_count = total_filtered - existing_card_count;
             let font: Handle<Font> = get_font();
             creation_state.start_precreate(new_count, font);
             tracing::debug!(
@@ -676,7 +692,7 @@ pub fn waterfall_create_comic_cards(
         let comics = &comics_state.comics;
         let count = creation_state.get_precreate_count();
 
-        if comics.is_empty() || count == 0 {
+        if filtered_indices.is_empty() || count == 0 {
             creation_state.clear();
             return;
         }
@@ -691,13 +707,13 @@ pub fn waterfall_create_comic_cards(
             .unwrap_or(0);
 
         let start_index = existing_card_count;
-        let end_index = (start_index + count).min(comics.len());
+        let end_index = (start_index + count).min(filtered_indices.len());
 
-        // 一次性创建所有隐藏卡片
+        // 一次性创建所有隐藏卡片（使用过滤后的索引）
         let mut entities = Vec::with_capacity(end_index - start_index);
         commands.entity(container_entity).with_children(|parent| {
-            for i in start_index..end_index {
-                if let Some(comic) = comics.get(i) {
+            for &original_index in &filtered_indices[start_index..end_index] {
+                if let Some(comic) = comics.get(original_index) {
                     let entity = spawn_comic_card(parent, comic, &font, &image_cache, true);
                     entities.push(entity);
                 }

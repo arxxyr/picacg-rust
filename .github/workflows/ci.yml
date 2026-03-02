@@ -227,6 +227,16 @@ jobs:
           cp target/${{ matrix.target }}/release/picacg package/
           echo "${{ steps.version.outputs.full_version }}" > package/VERSION
 
+          # 复制内置字体
+          FONT_SRC="assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"
+          if [ -f "$FONT_SRC" ]; then
+            mkdir -p package/assets/fonts/SarasaTermSCNerd
+            cp "$FONT_SRC" package/assets/fonts/SarasaTermSCNerd/
+            echo "已打包内置字体: $(ls -lh "$FONT_SRC" | awk '{print $5}')"
+          else
+            echo "警告: 未找到内置字体 $FONT_SRC"
+          fi
+
           cd package
           tar -czvf ../${{ steps.version.outputs.package_name }}.tar.gz .
           cd ..
@@ -240,6 +250,17 @@ jobs:
 
           Copy-Item target/${{ matrix.target }}/release/picacg.exe package/
           "${{ steps.version.outputs.full_version }}" | Out-File -FilePath package/VERSION -Encoding UTF8
+
+          # 复制内置字体
+          $FontSrc = "assets\fonts\SarasaTermSCNerd\SarasaTermSCNerd-Regular.ttf"
+          if (Test-Path $FontSrc) {
+            New-Item -ItemType Directory -Force -Path "package\assets\fonts\SarasaTermSCNerd" | Out-Null
+            Copy-Item $FontSrc "package\assets\fonts\SarasaTermSCNerd\"
+            $FontSize = [math]::Round((Get-Item $FontSrc).Length / 1MB, 1)
+            Write-Host "已打包内置字体: ${FontSize}MB"
+          } else {
+            Write-Host "警告: 未找到内置字体 $FontSrc"
+          }
 
           Compress-Archive -Path package/* -DestinationPath "${{ steps.version.outputs.package_name }}.zip"
 
@@ -317,6 +338,10 @@ jobs:
             - Linux x64: `picacg-${{ steps.version.outputs.full_version }}-linux-x64.tar.gz`
             - Windows x64: `picacg-${{ steps.version.outputs.full_version }}-windows-x64.zip`
             - macOS ARM64: `picacg-${{ steps.version.outputs.full_version }}-macos-arm64.tar.gz`
+
+            ## 说明
+            - 已内置 Sarasa（更纱黑体）字体，无需额外安装
+            - 解压后保持目录结构即可运行
 
   # ============ Dev 构建通知 ============
   dev-build-summary:

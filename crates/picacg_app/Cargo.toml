@@ -74,5 +74,8 @@ rfd.workspace = true
 # === 压缩 ===
 zip.workspace = true
 
+# === 繁简转换 ===
+zhconv.workspace = true
+
 [dev-dependencies]
 tokio-test.workspace = true

@@ -29,7 +29,7 @@ $TargetDir = Join-Path $RootDir "target\$Profile"
 
 # Step 1: 清理旧的 bin 目录
 Write-Host ""
-Write-Host "[1/3] 清理旧的 bin 目录..." -ForegroundColor Yellow
+Write-Host "[1/4] 清理旧的 bin 目录..." -ForegroundColor Yellow
 if (Test-Path $BinDir) {
     Remove-Item -Recurse -Force $BinDir
     Write-Host "  已删除旧目录: $BinDir" -ForegroundColor Gray
@@ -37,7 +37,7 @@ if (Test-Path $BinDir) {
 
 # Step 2: 复制可执行文件
 Write-Host ""
-Write-Host "[2/3] 复制可执行文件..." -ForegroundColor Yellow
+Write-Host "[2/4] 复制可执行文件..." -ForegroundColor Yellow
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 $ExeName = "picacg.exe"
 $ExePath = Join-Path $TargetDir $ExeName
@@ -50,19 +50,37 @@ if (Test-Path $ExePath) {
     exit 1
 }
 
+# Step 3: 复制内置字体
+Write-Host ""
+Write-Host "[3/4] 复制内置字体..." -ForegroundColor Yellow
+$FontSrc = Join-Path $RootDir "assets\fonts\SarasaTermSCNerd\SarasaTermSCNerd-Regular.ttf"
+$FontDestDir = Join-Path $BinDir "assets\fonts\SarasaTermSCNerd"
+if (Test-Path $FontSrc) {
+    New-Item -ItemType Directory -Force -Path $FontDestDir | Out-Null
+    Copy-Item $FontSrc -Destination $FontDestDir
+    $FontSize = [math]::Round((Get-Item $FontSrc).Length / 1MB, 1)
+    Write-Host "  已复制: SarasaTermSCNerd-Regular.ttf (${FontSize}MB)" -ForegroundColor Green
+} else {
+    Write-Host "  警告: 未找到内置字体 $FontSrc" -ForegroundColor Yellow
+    Write-Host "  程序将回退到系统字体" -ForegroundColor Gray
+}
+
 # 部署完成提示
 Write-Host ""
 Write-Host "=== 部署完成 ===" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "目录结构:" -ForegroundColor Green
 Write-Host "bin/"
-Write-Host "└── $ExeName"
+Write-Host "├── $ExeName"
+Write-Host "└── assets/"
+Write-Host "    └── fonts/"
+Write-Host "        └── SarasaTermSCNerd/"
+Write-Host "            └── SarasaTermSCNerd-Regular.ttf"
 Write-Host ""
-Write-Host "注：字体使用系统字体，无需捆绑" -ForegroundColor Gray
 
-# Step 3: 创建版本压缩包
+# Step 4: 创建版本压缩包
 Write-Host ""
-Write-Host "[3/3] 创建版本压缩包..." -ForegroundColor Yellow
+Write-Host "[4/4] 创建版本压缩包..." -ForegroundColor Yellow
 $ZipName = "picacg-v$Version.zip"
 $ZipPath = Join-Path $BinDir $ZipName
 
