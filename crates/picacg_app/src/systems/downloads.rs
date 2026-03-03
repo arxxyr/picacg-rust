@@ -243,8 +243,15 @@ fn scan_completed_downloads(
             continue;
         }
 
-        // 从 save_path 提取文件夹名称
-        let folder_name = std::path::Path::new(&db_task.save_path)
+        // 计算有效下载路径（优先使用 custom_download_path）
+        let effective_path = db_task
+            .custom_download_path
+            .as_deref()
+            .unwrap_or(&db_task.save_path)
+            .to_string();
+
+        // 从有效路径提取文件夹名称
+        let folder_name = std::path::Path::new(&effective_path)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(&db_task.comic_title)
@@ -258,7 +265,7 @@ fn scan_completed_downloads(
             comic_id: db_task.comic_id,
             folder_name,
             episode_count,
-            path: db_task.save_path,
+            path: effective_path,
             categories,
             tags,
         });

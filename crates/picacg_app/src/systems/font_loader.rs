@@ -1,88 +1,75 @@
-//! 字体检测与加载
+//! 字体加载
 //!
-//! 双路加载策略：
-//! 1. 主路径：Bevy AssetServer 异步加载内置 Sarasa 字体（标准管线，最可靠）
-//! 2. 回退：手动读取系统字体字节（当内置字体不可用时）
+//! 启动时同步加载 CJK 字体，替换 Bevy 默认字体（FiraMono，仅英文）。
+//! 替换后 `Handle::default()` 即指向 CJK 字体。
 //!
-//! AssetServer 加载的字体经过 Bevy 完整的资产处理管线，
-//! 与 cosmic_text 文本渲染引擎完全兼容。
+//! 全局统一接口：[`get_font()`] 返回 `Handle::default()`。
+//! 所有 UI 系统通过此函数获取字体，无需额外的 Resource 或 static。
 
-use std::sync::OnceLock;
+use bevy::{asset::AssetId, prelude::*, text::Font};
 
-use bevy::{prelude::*, text::Font};
-
-/// 全局字体句柄（`setup_fonts` 初始化后可用）
-static FONT_HANDLE: OnceLock<Handle<Font>> = OnceLock::new();
-
-/// 获取全局字体句柄，供所有 UI 系统使用
+/// 获取全局字体句柄
 ///
-/// 如果 `setup_fonts` 尚未运行（理论上不应该），返回默认句柄而非 panic
+/// `setup_fonts` 已将 CJK 字体注入 `AssetId::default()`，
+/// 因此 `Handle::default()` 就是 CJK 字体。
+#[inline]
 pub fn get_font() -> Handle<Font> {
-    FONT_HANDLE.get().cloned().unwrap_or_default()
+    Handle::default()
 }
-
-/// 应用字体资源
-#[derive(Resource, Clone, Default)]
-pub struct AppFont(pub Handle<Font>);
-
-/// 内置字体的 Bevy 资产路径（相对于 AssetPlugin::file_path 配置的 assets 目录）
-const BUNDLED_FONT_ASSET_PATH: &str = "fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf";
 
 /// 内置字体的完整相对路径（从项目根或可执行文件目录，含 assets/ 前缀）
 const BUNDLED_FONT_RELATIVE: &str = "assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf";
 
-/// Bevy 启动系统：加载字体
+/// Bevy 启动系统：同步加载 CJK 字体并替换默认字体
 ///
-/// 优先通过 AssetServer 加载内置 Sarasa 字体（走 Bevy 标准管线），
-/// 如果内置字体文件不存在则回退到手动加载系统字体。
-pub fn setup_fonts(
-    asset_server: Res<AssetServer>,
-    mut fonts: ResMut<Assets<Font>>,
-    mut app_font: ResMut<AppFont>,
-) {
-    // 检查内置字体是否存在于文件系统中
-    let bundled_exists = detect_bundled_font_path().is_some();
+/// 通过 `std::fs::read()` + `Font::try_from_bytes()` 同步读取字体文件，
+/// 然后用 `Assets::insert(AssetId::default(), font)` 替换 Bevy 内置的
+/// FiraMono（纯英文字体），使所有文本节点默认就能渲染中文。
+pub fn setup_fonts(mut fonts: ResMut<Assets<Font>>) {
+    // 加载 CJK 字体（内置优先，系统回退）
+    let font_asset = load_font_asset(&detect_bundled_font_path(), "内置字体").or_else(|| {
+        tracing::warn!("内置字体未找到，尝试加载系统字体");
+        load_font_asset(&detect_system_font_path(), "系统字体")
+    });
 
-    if bundled_exists {
-        // 主路径：通过 AssetServer 加载（Bevy 标准管线）
-        // AssetServer 使用 AssetPlugin::file_path 配置的 assets 目录
-        let handle: Handle<Font> = asset_server.load(BUNDLED_FONT_ASSET_PATH);
-        app_font.0 = handle.clone();
-        FONT_HANDLE.set(handle).ok();
-        tracing::info!(
-            "使用内置字体（AssetServer 加载）: {}",
-            BUNDLED_FONT_ASSET_PATH
-        );
+    let Some(font) = font_asset else {
+        tracing::error!("未找到任何可用字体，UI 中文将无法显示");
+        return;
+    };
+
+    // 替换 Bevy 默认字体（FiraMono → CJK 字体）
+    // Bevy TextPlugin 在 build() 中用 assets.insert(AssetId::default(), FiraMono)
+    // 设置了默认字体。我们用同样的 API 替换它，之后 Handle::default() = CJK 字体。
+    if let Err(e) = fonts.insert(AssetId::default(), font) {
+        tracing::error!("设置默认字体失败: {:?}", e);
         return;
     }
+    tracing::info!("已替换 Bevy 默认字体为 CJK 字体");
+}
 
-    // 回退：手动加载系统字体字节
-    tracing::warn!("内置字体未找到，尝试加载系统字体");
-    if let Some(path) = detect_system_font_path() {
-        tracing::info!("使用系统字体: {}", path);
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                tracing::info!("系统字体读取成功: {} bytes", bytes.len());
-                match Font::try_from_bytes(bytes) {
-                    Ok(font) => {
-                        let handle = fonts.add(font);
-                        app_font.0 = handle.clone();
-                        FONT_HANDLE.set(handle).ok();
-                        tracing::info!("系统字体加载成功");
-                        return;
-                    }
-                    Err(e) => {
-                        tracing::error!("系统字体解析失败: {:?}", e);
-                    }
+/// 从文件路径同步读取字体数据，成功返回 Font 资产
+fn load_font_asset(path: &Option<String>, label: &str) -> Option<Font> {
+    let path = path.as_ref()?;
+    tracing::info!("使用{}: {}", label, path);
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            tracing::info!("{}读取成功: {} bytes", label, bytes.len());
+            match Font::try_from_bytes(bytes) {
+                Ok(font) => {
+                    tracing::info!("{}解析成功", label);
+                    Some(font)
+                }
+                Err(e) => {
+                    tracing::error!("{}解析失败: {:?}", label, e);
+                    None
                 }
             }
-            Err(e) => {
-                tracing::error!("系统字体读取失败: {} - {}", path, e);
-            }
+        }
+        Err(e) => {
+            tracing::error!("{}读取失败: {} - {}", label, path, e);
+            None
         }
     }
-
-    tracing::error!("未找到任何可用字体，UI 文字将无法显示");
 }
 
 // ============ 路径检测 ============

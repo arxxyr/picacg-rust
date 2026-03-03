@@ -25,7 +25,6 @@ impl Plugin for UiPlugin {
             .init_resource::<GlobalMessageState>()
             .init_resource::<ImageCache>()
             .init_resource::<NavigationHistory>()
-            .init_resource::<AppFont>()
             .init_resource::<ScrollbarDragState>()
             .init_resource::<SearchState>()
             .init_resource::<RankingsState>()
