@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2026-02-17
+> 最后更新: 2026-03-21
 
 ## 其他
  - git commit 带emoji
@@ -13,20 +13,25 @@
 picacg-rust/
 ├── Cargo.toml                    # 纯 Workspace 配置（无 [package]）
 ├── assets/                       # 静态资源（字体、图片）
+│   └── fonts/SarasaTermSCNerd/   # 内置更纱黑体 CJK 字体
 ├── docs/                         # 文档
+├── migrations/                   # SQLite 数据库迁移脚本
 ├── scripts/                      # 部署脚本
 │   ├── deploy.sh                 # Bash 部署脚本
 │   └── deploy-windows.ps1        # PowerShell 部署脚本
 └── crates/
     ├── picacg_app/               # 主应用 (picacg)
     │   └── src/
-    │       ├── main.rs           # 入口
+    │       ├── main.rs           # 入口（mimalloc 全局分配器）
     │       ├── error.rs          # 错误类型
     │       ├── components/       # Bevy ECS 组件
     │       ├── events/           # Bevy 事件定义
     │       ├── resources/        # Bevy 资源
     │       ├── systems/          # Bevy 系统函数（页面逻辑）
-    │       └── plugins/          # Bevy 插件
+    │       ├── plugins/          # Bevy 插件
+    │       └── utils/            # 工具模块
+    │           ├── content_filter.rs  # 内容过滤（繁简转换+多维度匹配）
+    │           └── tokio_tasks.rs     # Bevy-tokio 集成
     ├── picacg_core/              # 核心类型库
     │   └── src/
     │       ├── lib.rs
@@ -37,6 +42,7 @@ picacg-rust/
     │       ├── client.rs         # ApiClient
     │       ├── signer.rs         # 请求签名
     │       ├── models.rs         # API 数据模型
+    │       ├── channel.rs        # 分流通道路由（直连/CDN/反代）
     │       └── endpoints/        # API 端点实现
     ├── picacg_db/                # 数据库层
     │   └── src/
@@ -47,8 +53,8 @@ picacg-rust/
     ├── picacg_config/            # 配置管理
     │   └── src/
     │       ├── lib.rs
-    │       └── settings.rs       # AppSettings, ProxySettings
-    └── bevy_ui_toolkit/          # 通用 UI 组件库
+    │       └── settings.rs       # AppSettings, ProxySettings, ChannelSettings, FilterSettings
+    └── bevy_ui_toolkit/          # 通用 UI 组件库（本地 crate）
         └── src/
             ├── lib.rs
             ├── theme.rs          # 主题系统
@@ -62,15 +68,15 @@ picacg-rust/
 ```
 picacg_core          ← 无依赖（错误类型）
     ↑
-picacg_api           ← 依赖 picacg_core
+picacg_config        ← 依赖 picacg_core
+    ↑
+picacg_api           ← 依赖 picacg_core, picacg_config
     ↑
 picacg_db            ← 依赖 picacg_core, picacg_api
 
-picacg_config        ← 依赖 picacg_core
-
 bevy_ui_toolkit      ← 依赖 bevy（独立 UI 库）
 
-picacg (主应用)      ← 依赖以上所有 crate
+picacg_app (主应用)  ← 依赖以上所有 crate
 ```
 
 ### Workspace 依赖管理
@@ -193,25 +199,30 @@ Bevy 0.18 IME（输入法）支持要点
 
 ---
 
-### 字体加载配置
+### 字体加载方案
 
-必须显式配置 `AssetPlugin` 的 `file_path` 以确保字体正确加载：
+采用**同步替换 Bevy 默认字体**的方案，启动时用 CJK 字体替换 FiraMono。
+
+**核心实现**（`systems/font_loader.rs`）：
 
 ```rust
-use bevy::asset::AssetPlugin;
+/// 获取全局字体句柄 —— 所有 UI 统一调用此函数
+pub fn get_font() -> Handle<Font> {
+    Handle::default()  // 已被替换为 CJK 字体
+}
 
-let manifest_dir = env!("CARGO_MANIFEST_DIR");
-let assets_path = std::path::Path::new(manifest_dir).join("assets");
-
-App::new()
-    .add_plugins(
-        DefaultPlugins
-            .set(AssetPlugin {
-                file_path: assets_path.to_string_lossy().to_string(),
-                ..default()
-            })
-    )
+/// 启动系统：同步加载字体 → 替换 Bevy 默认字体
+pub fn setup_fonts(mut fonts: ResMut<Assets<Font>>) {
+    // 1. 优先加载内置更纱黑体（assets/fonts/SarasaTermSCNerd/）
+    // 2. 回退：检测系统中文字体（微软雅黑、思源黑体、PingFang SC 等）
+    // 3. 用 fonts.insert(AssetId::default(), font) 替换默认字体
+}
 ```
+
+**优势：**
+- `Handle::default()` 全局统一，无需传递字体 Resource
+- 同步加载，解决启动时中文不显示的时序问题
+- 内置字体优先，系统字体回退，跨平台兼容
 
 ### UI 图标使用
 
@@ -1142,6 +1153,86 @@ pub fn refresh_search_ui(
 
 ---
 
+## 分流通道系统
+
+支持 6 种分流通道，API 和图片可独立配置，解决网络访问问题。
+
+### 通道类型
+
+| 类型 | 说明 | 实现方式 |
+|------|------|---------|
+| Direct | 直连（默认） | 直接请求原始域名 |
+| CdnIp1 | CDN IP 1 (104.21.91.145) | DNS 覆盖，`ClientBuilder::resolve()` |
+| CdnIp2 | CDN IP 2 (188.114.98.153) | DNS 覆盖 |
+| CustomCdnIp | 自定义 CDN IP | 用户指定 IP，DNS 覆盖 |
+| JpProxy | 日本反代 (bika-api.jpacg.cc) | URL 重写，签名用原始域名 |
+| UsProxy | 美国反代 (bika2-api.jpacg.cc) | URL 重写，签名用原始域名 |
+
+### 关键实现
+
+**文件：** `crates/picacg_api/src/channel.rs`
+
+```rust
+/// 通道路由结果
+pub struct ChannelRoute {
+    pub request_url: String,  // 实际请求的 URL
+    pub sign_url: String,     // 签名用的 URL（始终用原始域名）
+}
+```
+
+**配置（`picacg_config`）：**
+```rust
+pub struct ChannelSettings {
+    pub api_channel: ChannelType,      // API 分流
+    pub image_channel: ChannelType,    // 图片分流
+    pub custom_cdn_api_ip: String,     // 自定义 API CDN IP
+    pub custom_cdn_img_ip: String,     // 自定义图片 CDN IP
+}
+```
+
+**注意事项：**
+- 反代模式下签名**始终使用原始域名** `picaapi.picacomic.com`
+- CDN 模式通过 `ClientBuilder::resolve()` 指定 IP，不修改 URL
+- 修改通道后自动重建 `ApiClient`，Token 保持不变
+
+---
+
+## 内容过滤系统
+
+基于屏蔽词列表过滤漫画，支持繁简转换和多维度匹配。
+
+### 过滤维度
+
+| 维度 | 匹配方式 | 说明 |
+|------|---------|------|
+| 分类 | 精确匹配 | 漫画分类列表中包含屏蔽词 |
+| 标签 | 精确匹配 | 漫画标签列表中包含屏蔽词 |
+| 标题 | 子串匹配 | 标题包含屏蔽词子串 |
+
+### 关键实现
+
+**文件：** `crates/picacg_app/src/utils/content_filter.rs`
+
+- 所有文本先经过**繁体转简体** + **小写标准化**（`zhconv` crate）
+- `should_block_comic()` 检查单个漫画
+- `filter_comic_indices()` 批量返回未屏蔽的索引列表
+
+**接入页面：** 搜索、分类、排行、收藏、漫画列表（共 5 个页面）
+
+---
+
+## mimalloc 内存分配器
+
+全局使用 mimalloc 替换默认分配器，优化多线程内存碎片。
+
+```rust
+// main.rs
+#[global_allocator]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+```
+
+---
+
 ## 通用分页组件
 
 实现了泛型分页组件模块 `src/systems/pagination.rs`，支持多个页面复用。
@@ -1416,14 +1507,11 @@ fn auto_resume_downloads_on_startup(
 
 ### 当前功能开发
 - [ ] 清理编译警告（未使用的导入和变量）
+
+### 已完成
+
 - [x] 实现基础阅读器（单页模式、键盘翻页、顶部/底部工具栏）
-- [x] 阅读器增强功能
-  - [x] 条漫模式（Webtoon 垂直无限滚动）
-  - [x] 模式切换按钮（单页/条漫）
-  - [x] 鼠标滚轮翻页（单页）/滚动（条漫）
-  - [x] Ctrl+滚轮 缩放
-  - [x] 键盘 +/-/0 缩放控制
-  - [x] 缩放比例显示
+- [x] 阅读器增强功能（条漫模式、缩放控制、滚轮翻页/滚动）
 - [x] 实现搜索功能
 - [x] 实现收藏页面
 - [x] 下载管理 UI
@@ -1442,7 +1530,15 @@ fn auto_resume_downloads_on_startup(
 - [x] 屏蔽词输入 IME 中文支持 + 分类建议面板 + 列表动态刷新
 - [x] 搜索页面 needs_rebuild 优化（输入不触发全量 UI 重建）
 - [x] 部署脚本（deploy.sh + deploy-windows.ps1）
-- [x] CI/CD 流水线（GitHub Actions：fmt/clippy/build/release）
+- [x] CI/CD 流水线（GitHub Actions + GitLab CI 双轨，多平台构建）
+- [x] 分流通道系统（6 种通道：直连/CDN/反代，API 和图片独立配置）
+- [x] 内容过滤系统（繁简转换 + 多维度匹配，5 个页面接入）
+- [x] 字体方案统一（同步加载内置更纱黑体，系统字体回退，`Handle::default()` 全局统一）
+- [x] Nerd Font 图标替换为 Unicode 通用符号（跨字体兼容）
+- [x] 下载按钮标签化（图标+中文标签）+ 已下载漫画移动功能
+- [x] mimalloc 全局内存分配器集成
+- [x] bevy_ui_toolkit 从 git 依赖改为本地 crate
+- [x] 修复下载路径问题（停止任务恢复、路径一致性）
 
 ### 已完成：Workspace 重构与模块拆分
 
