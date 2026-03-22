@@ -1682,7 +1682,7 @@ fn spawn_about_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 TextColor(AppColors::TEXT),
             ));
             col.spawn((
-                Text::new("版本: 0.2.0"),
+                Text::new(format!("版本: {}", env!("CARGO_PKG_VERSION"))),
                 TextFont {
                     font: font.clone(),
                     font_size: 12.0,
@@ -1691,7 +1691,7 @@ fn spawn_about_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
                 TextColor(AppColors::TEXT_SECONDARY),
             ));
             col.spawn((
-                Text::new("框架: Bevy 0.17.3"),
+                Text::new(format!("框架: Bevy {}", env!("BEVY_VERSION"))),
                 TextFont {
                     font: font.clone(),
                     font_size: 12.0,
