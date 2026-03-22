@@ -115,7 +115,7 @@ jobs:
             target: aarch64-apple-darwin
             platform: macos-arm64
             exe_suffix: ""
-            archive_ext: "tar.gz"
+            archive_ext: "dmg"
 
     steps:
       - uses: actions/checkout@v4
@@ -218,9 +218,9 @@ jobs:
           echo "=== 压缩后 ==="
           ls -lh "$EXE"
 
-      # 打包产物 (Linux/macOS)
-      - name: Package artifacts (Unix)
-        if: runner.os != 'Windows'
+      # 打包产物 (Linux)
+      - name: Package artifacts (Linux)
+        if: runner.os == 'Linux'
         run: |
           mkdir -p package
 
@@ -240,6 +240,78 @@ jobs:
           cd package
           tar -czvf ../${{ steps.version.outputs.package_name }}.tar.gz .
           cd ..
+
+      # 打包产物 (macOS: .app Bundle + .dmg)
+      - name: Package artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          APP_NAME="PicACG.app"
+          APP_DIR="package/${APP_NAME}"
+
+          # 创建 .app 目录结构
+          mkdir -p "${APP_DIR}/Contents/MacOS"
+          mkdir -p "${APP_DIR}/Contents/Resources"
+
+          # 复制可执行文件
+          cp target/${{ matrix.target }}/release/picacg "${APP_DIR}/Contents/MacOS/picacg"
+
+          # 复制内置字体到 Resources
+          FONT_SRC="assets/fonts/SarasaTermSCNerd/SarasaTermSCNerd-Regular.ttf"
+          if [ -f "$FONT_SRC" ]; then
+            mkdir -p "${APP_DIR}/Contents/Resources/assets/fonts/SarasaTermSCNerd"
+            cp "$FONT_SRC" "${APP_DIR}/Contents/Resources/assets/fonts/SarasaTermSCNerd/"
+            echo "已打包内置字体: $(ls -lh "$FONT_SRC" | awk '{print $5}')"
+          else
+            echo "警告: 未找到内置字体 $FONT_SRC"
+          fi
+
+          # 写入版本文件
+          echo "${{ steps.version.outputs.full_version }}" > "${APP_DIR}/Contents/Resources/VERSION"
+
+          # 生成 Info.plist
+          VERSION="${{ steps.version.outputs.base_version }}"
+          cat > "${APP_DIR}/Contents/Info.plist" << PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>PicACG</string>
+    <key>CFBundleDisplayName</key>
+    <string>PicACG</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.picacg</string>
+    <key>CFBundleVersion</key>
+    <string>${VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundleExecutable</key>
+    <string>picacg</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+</dict>
+</plist>
+PLIST_EOF
+
+          # 创建 DMG 临时目录
+          DMG_STAGING="dmg_staging"
+          mkdir -p "${DMG_STAGING}"
+          cp -R "${APP_DIR}" "${DMG_STAGING}/"
+          ln -s /Applications "${DMG_STAGING}/Applications"
+
+          # 生成 DMG
+          hdiutil create \
+            -volname "PicACG ${{ steps.version.outputs.full_version }}" \
+            -srcfolder "${DMG_STAGING}" \
+            -ov \
+            -format UDZO \
+            "${{ steps.version.outputs.package_name }}.dmg"
+
+          rm -rf "${DMG_STAGING}" package
 
       # 打包产物 (Windows)
       - name: Package artifacts (Windows)
@@ -272,6 +344,7 @@ jobs:
           path: |
             ${{ steps.version.outputs.package_name }}.tar.gz
             ${{ steps.version.outputs.package_name }}.zip
+            ${{ steps.version.outputs.package_name }}.dmg
           retention-days: 7
 
   # ============ Release 发布 ============
@@ -310,12 +383,12 @@ jobs:
       - name: List artifacts
         run: |
           echo "=== Downloaded artifacts ==="
-          find artifacts -type f -name "*.tar.gz" -o -name "*.zip" | head -20
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" \) | head -20
 
       - name: Collect release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" \) -exec cp {} release/ \;
           echo "=== Release files ==="
           ls -la release/
 
@@ -337,11 +410,12 @@ jobs:
             ## 下载
             - Linux x64: `picacg-${{ steps.version.outputs.full_version }}-linux-x64.tar.gz`
             - Windows x64: `picacg-${{ steps.version.outputs.full_version }}-windows-x64.zip`
-            - macOS ARM64: `picacg-${{ steps.version.outputs.full_version }}-macos-arm64.tar.gz`
+            - macOS ARM64: `picacg-${{ steps.version.outputs.full_version }}-macos-arm64.dmg`
 
             ## 说明
             - 已内置 Sarasa（更纱黑体）字体，无需额外安装
-            - 解压后保持目录结构即可运行
+            - Linux/Windows: 解压后保持目录结构即可运行
+            - macOS: 双击 DMG → 拖拽 PicACG.app 到 Applications 文件夹
 
   # ============ Dev 构建通知 ============
   dev-build-summary:
