@@ -1,10 +1,6 @@
 //! 搜索界面系统
 
-use bevy::{
-    input::keyboard::Key,
-    prelude::*,
-    window::{Ime, PrimaryWindow},
-};
+use bevy::{input::keyboard::Key, prelude::*, window::PrimaryWindow};
 
 use super::font_loader::get_font;
 use crate::{
@@ -18,8 +14,11 @@ use crate::{
         ui_common::{calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar},
         waterfall::SearchCardCreationState,
     },
-    utils::content_filter::{
-        FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+    utils::{
+        content_filter::{
+            FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+        },
+        text_input::{TextInput, TextInputDisplay},
     },
 };
 
@@ -60,15 +59,9 @@ mod search_layout {
 #[derive(Component)]
 pub struct SearchRoot;
 
-/// 搜索输入框标记
+/// 搜索输入框标记（配合 TextInput 使用）
 #[derive(Component)]
-pub struct SearchInputField {
-    pub focused: bool,
-}
-
-/// 搜索输入框文本标记
-#[derive(Component)]
-pub struct SearchInputText;
+pub struct SearchInputField;
 
 /// 搜索按钮标记
 #[derive(Component)]
@@ -248,38 +241,43 @@ fn spawn_search_header(
             (search_state.keyword.clone(), AppColors::TEXT)
         };
 
-        header
-            .spawn((
-                SearchInputField {
-                    focused: input_focused,
-                },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(400.0),
-                    height: Val::Px(40.0),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BorderColor::all(input_border_color),
-                BackgroundColor(AppColors::CARD_BG),
-                Transform::default(),
-            ))
-            .with_children(|input| {
-                input.spawn((
-                    SearchInputText,
-                    Text::new(display_text),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
+        {
+            let mut text_input = TextInput::new("输入关键词搜索漫画、作者、标签...")
+                .with_value(search_state.keyword.clone());
+            text_input.focused = input_focused;
+
+            header
+                .spawn((
+                    SearchInputField,
+                    text_input,
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        width: Val::Px(400.0),
+                        height: Val::Px(40.0),
+                        padding: UiRect::horizontal(Val::Px(12.0)),
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(4.0)),
                         ..default()
                     },
-                    TextColor(text_color),
-                ));
-            });
+                    BorderColor::all(input_border_color),
+                    BackgroundColor(AppColors::CARD_BG),
+                    Transform::default(),
+                ))
+                .with_children(|input| {
+                    input.spawn((
+                        TextInputDisplay,
+                        Text::new(display_text),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(text_color),
+                    ));
+                });
+        }
 
         // 搜索按钮
         header
@@ -1225,39 +1223,31 @@ pub fn search_input_interaction(
             &Interaction,
             &mut BackgroundColor,
             &mut BorderColor,
-            &mut SearchInputField,
-            &GlobalTransform,
+            &mut TextInput,
             &ComputedNode,
         ),
-        Changed<Interaction>,
+        (Changed<Interaction>, With<SearchInputField>),
     >,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut bg_color, mut border_color, mut input, _transform, computed) in
+    for (interaction, mut bg_color, mut border_color, mut input, computed) in
         interaction_query.iter_mut()
     {
         match *interaction {
             Interaction::Pressed => {
                 input.focused = true;
-                tracing::info!("搜索输入框获得焦点");
                 *border_color = BorderColor::all(AppColors::PRIMARY);
                 *bg_color = BackgroundColor(AppColors::CARD_BG);
 
                 // 启用 IME 并设置位置
                 if let Ok(mut window) = window_query.single_mut() {
                     window.ime_enabled = true;
-
-                    // 使用当前鼠标位置设置 IME 候选框位置
                     if let Some(cursor_pos) = window.cursor_position() {
                         let scale_factor = window.scale_factor();
                         let input_height = computed.size().y / scale_factor;
-                        // IME 候选框显示在点击位置下方
                         let ime_x = cursor_pos.x;
                         let ime_y = cursor_pos.y + input_height / 2.0 + 5.0;
                         window.ime_position = bevy::math::Vec2::new(ime_x, ime_y);
-                        tracing::info!("启用 IME，位置: ({:.0}, {:.0})", ime_x, ime_y);
-                    } else {
-                        tracing::info!("启用 IME");
                     }
                 }
             }
@@ -1275,49 +1265,41 @@ pub fn search_input_interaction(
     }
 }
 
-/// 处理键盘输入
+/// 搜索页面动作键处理（Enter 搜索、Escape 失焦）
+/// 字符编辑由通用 TextInput 系统处理
 pub fn handle_search_keyboard_input(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut input_query: Query<&mut SearchInputField>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<SearchInputText>>,
+    mut input_query: Query<&mut TextInput, With<SearchInputField>>,
     mut search_state: ResMut<SearchState>,
     mut search_messages: MessageWriter<SearchComicsRequestEvent>,
-    key_input: Res<ButtonInput<KeyCode>>,
 ) {
-    // 检查是否有聚焦的输入框
-    let has_focus = input_query.iter().any(|input| input.focused);
-
-    // 检查修饰键状态
-    let ctrl_pressed =
-        key_input.pressed(KeyCode::ControlLeft) || key_input.pressed(KeyCode::ControlRight);
+    let has_focus = input_query.iter().any(|i| i.focused);
+    if !has_focus {
+        return;
+    }
 
     for event in keyboard_events.read() {
         if event.state != bevy::input::ButtonState::Pressed {
             continue;
         }
 
-        if !has_focus {
-            continue;
-        }
-
         match &event.logical_key {
-            Key::Backspace => {
-                search_state.keyword.pop();
-                update_input_text(&search_state.keyword, &mut text_query);
-            }
-            Key::Enter if !search_state.keyword.is_empty() => {
-                search_state.is_loading = true;
-                search_state.needs_rebuild = true;
-                search_state.page = 1;
-                search_messages.write(SearchComicsRequestEvent {
-                    keyword: search_state.keyword.clone(),
-                    page: 1,
-                    sort: search_state.sort.clone(),
-                    categories: search_state.selected_categories.clone(),
-                });
-                // 取消输入框焦点
+            Key::Enter => {
+                // 从 TextInput 同步 keyword 并发起搜索
                 for mut input in input_query.iter_mut() {
-                    input.focused = false;
+                    if input.focused && !input.value.is_empty() {
+                        search_state.keyword.clone_from(&input.value);
+                        search_state.is_loading = true;
+                        search_state.needs_rebuild = true;
+                        search_state.page = 1;
+                        search_messages.write(SearchComicsRequestEvent {
+                            keyword: search_state.keyword.clone(),
+                            page: 1,
+                            sort: search_state.sort.clone(),
+                            categories: search_state.selected_categories.clone(),
+                        });
+                        input.focused = false;
+                    }
                 }
             }
             Key::Escape => {
@@ -1325,113 +1307,7 @@ pub fn handle_search_keyboard_input(
                     input.focused = false;
                 }
             }
-            Key::Character(input) => {
-                // 处理 Ctrl 组合键
-                if ctrl_pressed {
-                    match input.as_str() {
-                        "v" | "V" => {
-                            // Ctrl+V 粘贴
-                            if let Ok(mut clipboard) = arboard::Clipboard::new()
-                                && let Ok(text) = clipboard.get_text()
-                            {
-                                // 过滤控制字符，只保留可打印字符
-                                let filtered: String =
-                                    text.chars().filter(|c| !c.is_control()).collect();
-                                search_state.keyword.push_str(&filtered);
-                                update_input_text(&search_state.keyword, &mut text_query);
-                                tracing::info!("粘贴内容: {:?}", filtered);
-                            }
-                        }
-                        "a" | "A" => {
-                            // Ctrl+A 全选（这里实现为清空，因为没有选择状态）
-                            // 实际上什么都不做，防止 'a' 被输入
-                        }
-                        "c" | "C" => {
-                            // Ctrl+C 复制当前内容到剪贴板
-                            if !search_state.keyword.is_empty()
-                                && let Ok(mut clipboard) = arboard::Clipboard::new()
-                            {
-                                let _ = clipboard.set_text(&search_state.keyword);
-                                tracing::info!("复制内容: {:?}", search_state.keyword);
-                            }
-                        }
-                        "x" | "X" if !search_state.keyword.is_empty() => {
-                            // Ctrl+X 剪切（复制并清空）
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(&search_state.keyword);
-                                tracing::info!("剪切内容: {:?}", search_state.keyword);
-                            }
-                            search_state.keyword.clear();
-                            update_input_text(&search_state.keyword, &mut text_query);
-                        }
-                        _ => {}
-                    }
-                } else {
-                    // 普通字符输入
-                    for c in input.chars() {
-                        if !c.is_control() {
-                            search_state.keyword.push(c);
-                        }
-                    }
-                    update_input_text(&search_state.keyword, &mut text_query);
-                }
-            }
             _ => {}
-        }
-    }
-}
-
-/// 更新输入框文本
-fn update_input_text(
-    keyword: &str,
-    text_query: &mut Query<(&mut Text, &mut TextColor), With<SearchInputText>>,
-) {
-    for (mut text, mut color) in text_query.iter_mut() {
-        if keyword.is_empty() {
-            **text = "输入关键词搜索漫画、作者、标签...".to_string();
-            *color = TextColor(AppColors::TEXT_SECONDARY);
-        } else {
-            **text = keyword.to_string();
-            *color = TextColor(AppColors::TEXT);
-        }
-    }
-}
-
-/// 处理 IME 输入（中文输入法）
-pub fn handle_search_ime_input(
-    mut ime_events: MessageReader<Ime>,
-    input_query: Query<&SearchInputField>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<SearchInputText>>,
-    mut search_state: ResMut<SearchState>,
-) {
-    // 检查是否有聚焦的输入框
-    let has_focus = input_query.iter().any(|input| input.focused);
-
-    if !has_focus {
-        return;
-    }
-
-    for event in ime_events.read() {
-        match event {
-            Ime::Commit { value, .. } => {
-                // IME 提交完成的文本（用户按下空格或回车确认输入）
-                tracing::info!("IME 提交: {:?}", value);
-                search_state.keyword.push_str(value);
-                update_input_text(&search_state.keyword, &mut text_query);
-            }
-            Ime::Preedit { value, cursor, .. } => {
-                // IME 预览文本（输入过程中）
-                // 这里可以显示输入法的候选文字预览
-                if !value.is_empty() {
-                    tracing::debug!("IME 预览: {:?}, cursor: {:?}", value, cursor);
-                }
-            }
-            Ime::Enabled { .. } => {
-                tracing::debug!("IME 已启用");
-            }
-            Ime::Disabled { .. } => {
-                tracing::debug!("IME 已禁用");
-            }
         }
     }
 }
@@ -1659,7 +1535,7 @@ pub fn refresh_search_ui(
     search_root_query: Query<Entity, With<SearchRoot>>,
     _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
-    input_query: Query<&SearchInputField>,
+    input_query: Query<&TextInput, With<SearchInputField>>,
     mut creation_state: ResMut<SearchCardCreationState>,
 ) {
     if !search_state.is_changed() || !search_state.needs_rebuild {
@@ -1807,7 +1683,10 @@ pub fn waterfall_create_search_cards(
 /// 点击其他区域取消输入框焦点
 pub fn unfocus_search_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
-    mut input_query: Query<(&Interaction, &mut SearchInputField, &mut BorderColor)>,
+    mut input_query: Query<
+        (&Interaction, &mut TextInput, &mut BorderColor),
+        With<SearchInputField>,
+    >,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
@@ -1816,10 +1695,8 @@ pub fn unfocus_search_input(
                 input.focused = false;
                 *border = BorderColor::all(AppColors::BORDER);
 
-                // 禁用 IME
                 if let Ok(mut window) = window_query.single_mut() {
                     window.ime_enabled = false;
-                    tracing::info!("输入框失去焦点，禁用 IME");
                 }
             }
         }

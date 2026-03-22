@@ -261,7 +261,8 @@ impl Plugin for UiPlugin {
                 (
                     download_path_input_interaction,
                     download_path_keyboard_input,
-                    update_download_path_display,
+                    sync_download_path_value,
+                    download_path_picker_interaction,
                     clear_cache_button_interaction,
                     auto_save_settings,
                     update_settings_save_status,
@@ -432,7 +433,6 @@ impl Plugin for UiPlugin {
                 (
                     search_input_interaction,
                     handle_search_keyboard_input,
-                    handle_search_ime_input,
                     search_button_interaction,
                     search_result_card_interaction,
                     search_pagination_interaction,

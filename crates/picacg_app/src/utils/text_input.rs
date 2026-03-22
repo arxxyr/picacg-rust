@@ -141,13 +141,11 @@ pub fn text_input_keyboard(
             }
 
             match &event.logical_key {
-                Key::Backspace => {
-                    if input.cursor > 0 {
-                        let start = char_to_byte_index(&input.value, input.cursor - 1);
-                        let end = char_to_byte_index(&input.value, input.cursor);
-                        input.value.replace_range(start..end, "");
-                        input.cursor -= 1;
-                    }
+                Key::Backspace if input.cursor > 0 => {
+                    let start = char_to_byte_index(&input.value, input.cursor - 1);
+                    let end = char_to_byte_index(&input.value, input.cursor);
+                    input.value.replace_range(start..end, "");
+                    input.cursor -= 1;
                 }
                 Key::Delete => {
                     let len = input.value.chars().count();
@@ -187,29 +185,29 @@ fn handle_ctrl_shortcut(input: &mut Mut<'_, TextInput>, ch: &str) {
     match ch.to_ascii_lowercase().as_str() {
         "v" => {
             // 粘贴
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                if let Ok(text) = clipboard.get_text() {
-                    let filtered: String = text.chars().filter(|c| !c.is_control()).collect();
-                    let byte_idx = char_to_byte_index(&input.value, input.cursor);
-                    input.value.insert_str(byte_idx, &filtered);
-                    input.cursor += filtered.chars().count();
-                }
+            if let Ok(mut clipboard) = arboard::Clipboard::new()
+                && let Ok(text) = clipboard.get_text()
+            {
+                let filtered: String = text.chars().filter(|c| !c.is_control()).collect();
+                let byte_idx = char_to_byte_index(&input.value, input.cursor);
+                input.value.insert_str(byte_idx, &filtered);
+                input.cursor += filtered.chars().count();
             }
         }
         "c" => {
             // 复制
-            if !input.value.is_empty() {
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let _ = clipboard.set_text(&input.value);
-                }
+            if !input.value.is_empty()
+                && let Ok(mut clipboard) = arboard::Clipboard::new()
+            {
+                let _ = clipboard.set_text(&input.value);
             }
         }
         "x" => {
             // 剪切
-            if !input.value.is_empty() {
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    let _ = clipboard.set_text(&input.value);
-                }
+            if !input.value.is_empty()
+                && let Ok(mut clipboard) = arboard::Clipboard::new()
+            {
+                let _ = clipboard.set_text(&input.value);
                 input.value.clear();
                 input.cursor = 0;
             }

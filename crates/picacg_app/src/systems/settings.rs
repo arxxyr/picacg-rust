@@ -13,6 +13,7 @@ use crate::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
     },
     systems::{login::AppColors, scrollbar::scrollbar_config::*},
+    utils::text_input::{TextInput, TextInputDisplay},
 };
 
 /// 设置滚动容器组件（本地定义）
@@ -27,9 +28,13 @@ pub struct SettingsRoot;
 #[derive(Component)]
 pub struct SettingsScrollContainer;
 
-/// 下载路径输入框标记
+/// 下载路径输入框标记（配合 TextInput 使用）
 #[derive(Component)]
 pub struct DownloadPathInput;
+
+/// 下载路径目录选择按钮
+#[derive(Component)]
+pub struct DownloadPathPickerButton;
 
 /// 下载路径输入状态
 #[derive(Resource)]
@@ -677,41 +682,90 @@ fn spawn_download_path_setting(
                 TextColor(AppColors::TEXT_SECONDARY),
             ));
 
-            // 输入框
+            // 输入框 + 选择目录按钮 行
             row.spawn((
-                DownloadPathInput,
-                Button,
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(36.0),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
                     align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
                     ..default()
                 },
-                BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                BorderColor::all(AppColors::BORDER),
+                Transform::default(),
             ))
-            .with_children(|input| {
+            .with_children(|input_row| {
+                // 输入框（TextInput 通用组件）
                 let display_text = if current_path.is_empty() {
                     "（使用默认路径）".to_string()
                 } else {
                     current_path.to_string()
                 };
-                input.spawn((
-                    Text::new(display_text),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(if current_path.is_empty() {
-                        AppColors::TEXT_SECONDARY
-                    } else {
-                        AppColors::TEXT
-                    }),
-                ));
+                input_row
+                    .spawn((
+                        DownloadPathInput,
+                        TextInput::new("（使用默认路径）").with_value(current_path),
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Px(36.0),
+                            padding: UiRect::horizontal(Val::Px(12.0)),
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+                        BorderColor::all(AppColors::BORDER),
+                        Transform::default(),
+                    ))
+                    .with_children(|input| {
+                        input.spawn((
+                            TextInputDisplay,
+                            Text::new(display_text),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(if current_path.is_empty() {
+                                AppColors::TEXT_SECONDARY
+                            } else {
+                                AppColors::TEXT
+                            }),
+                        ));
+                    });
+
+                // 选择目录按钮
+                input_row
+                    .spawn((
+                        DownloadPathPickerButton,
+                        Button,
+                        Interaction::default(),
+                        Node {
+                            width: Val::Px(36.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(AppColors::SECONDARY),
+                        BorderColor::all(AppColors::BORDER),
+                        Transform::default(),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("📂"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 16.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
             });
         });
 }
@@ -2407,27 +2461,33 @@ pub fn cleanup_settings_ui(mut commands: Commands, query: Query<Entity, With<Set
 /// 下载路径输入框交互
 pub fn download_path_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut TextInput,
+        ),
         (Changed<Interaction>, With<DownloadPathInput>),
     >,
     mut input_state: ResMut<DownloadPathInputState>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
+                input.focused = true;
                 input_state.is_focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
             }
             Interaction::Hovered => {
                 *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                if !input_state.is_focused {
+                if !input.focused {
                     *border_color = BorderColor::all(Color::srgb(0.4, 0.4, 0.5));
                 }
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                if !input_state.is_focused {
+                if !input.focused {
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
             }
@@ -2435,15 +2495,16 @@ pub fn download_path_input_interaction(
     }
 }
 
-/// 下载路径键盘输入
+/// 下载路径动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
 pub fn download_path_keyboard_input(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut input_query: Query<&mut TextInput, With<DownloadPathInput>>,
     mut input_state: ResMut<DownloadPathInputState>,
-    mut text_query: Query<&mut Text, With<DownloadPathInput>>,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    if !input_state.is_focused {
+    let has_focus = input_query.iter().any(|i| i.focused);
+    if !has_focus {
         return;
     }
 
@@ -2452,51 +2513,56 @@ pub fn download_path_keyboard_input(
             continue;
         }
 
-        match &event.logical_key {
-            Key::Backspace => {
-                input_state.value.pop();
-            }
-            Key::Escape | Key::Enter => {
+        if matches!(&event.logical_key, Key::Escape | Key::Enter) {
+            for mut input in input_query.iter_mut() {
+                input.focused = false;
                 input_state.is_focused = false;
             }
-            Key::Character(input) => {
-                for c in input.chars() {
-                    if !c.is_control() {
-                        input_state.value.push(c);
-                    }
-                }
-            }
-            _ => {}
         }
-    }
-
-    // 更新显示文本
-    for children in text_query.iter_mut() {
-        // 由于 Text 结构的访问方式，这里需要重新查询
-        let _ = children;
     }
 }
 
-/// 更新下载路径输入框显示
-pub fn update_download_path_display(
-    input_state: Res<DownloadPathInputState>,
-    input_query: Query<&Children, With<DownloadPathInput>>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
+/// 同步 TextInput.value → DownloadPathInputState
+pub fn sync_download_path_value(
+    mut input_state: ResMut<DownloadPathInputState>,
+    query: Query<&TextInput, (Changed<TextInput>, With<DownloadPathInput>)>,
 ) {
-    if !input_state.is_changed() {
-        return;
+    for input in query.iter() {
+        if input_state.value != input.value {
+            input_state.value.clone_from(&input.value);
+        }
     }
+}
 
-    for children in input_query.iter() {
-        for child in children.iter() {
-            if let Ok((mut text, mut color)) = text_query.get_mut(child) {
-                if input_state.value.is_empty() {
-                    **text = "（使用默认路径）".to_string();
-                    *color = TextColor(AppColors::TEXT_SECONDARY);
-                } else {
-                    **text = input_state.value.clone();
-                    *color = TextColor(AppColors::TEXT);
+/// 下载路径目录选择按钮交互
+pub fn download_path_picker_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<DownloadPathPickerButton>),
+    >,
+    mut input_query: Query<&mut TextInput, With<DownloadPathInput>>,
+    mut input_state: ResMut<DownloadPathInputState>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
+                // 打开目录选择对话框
+                if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                    let path_str = path.to_string_lossy().to_string();
+                    for mut input in input_query.iter_mut() {
+                        input.set_value(path_str.clone());
+                        input.focused = false;
+                    }
+                    input_state.value = path_str;
+                    input_state.is_focused = false;
                 }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(AppColors::SECONDARY_HOVER);
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(AppColors::SECONDARY);
             }
         }
     }
