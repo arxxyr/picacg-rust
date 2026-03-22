@@ -10,7 +10,12 @@ use bevy::{
 use picacg_config::{AppSettings, ProxyType};
 
 use super::font_loader::get_font;
-use crate::{components::*, resources::*, systems::login::AppColors};
+use crate::{
+    components::*,
+    resources::*,
+    systems::login::AppColors,
+    utils::text_input::{TextInput, TextInputDisplay},
+};
 
 /// 代理设置页面根组件
 #[derive(Component)]
@@ -375,7 +380,9 @@ fn spawn_input_field(
 
             row.spawn((
                 ProxyInputField { field_type },
+                TextInput::new("点击输入...").with_value(value),
                 Button,
+                Interaction::default(),
                 Node {
                     flex_grow: 1.0,
                     height: Val::Px(40.0),
@@ -387,9 +394,11 @@ fn spawn_input_field(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
+                Transform::default(),
             ))
             .with_children(|input| {
                 input.spawn((
+                    TextInputDisplay,
                     Text::new(if value.is_empty() {
                         "点击输入..."
                     } else {
@@ -551,7 +560,6 @@ pub fn proxy_input_interaction(
             focus.focused = Some(input.field_type);
             *border = BorderColor::all(AppColors::PRIMARY);
 
-            // 取消其他输入框的焦点
             for (other_input, mut other_border) in &mut all_inputs {
                 if other_input.field_type != input.field_type {
                     *other_border = BorderColor::all(AppColors::BORDER);
@@ -561,96 +569,33 @@ pub fn proxy_input_interaction(
     }
 }
 
-/// 处理键盘输入
-pub fn proxy_keyboard_input(
-    mut keyboard_events: MessageReader<KeyboardInput>,
+/// 同步 ProxyInputFocus → TextInput.focused
+pub fn proxy_sync_focus(
     focus: Res<ProxyInputFocus>,
-    mut proxy_state: ResMut<ProxySettingsState>,
-    mut input_query: Query<(&ProxyInputField, &Children)>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
+    mut query: Query<(&ProxyInputField, &mut TextInput)>,
 ) {
-    let Some(focused_type) = focus.focused else {
+    if !focus.is_changed() {
         return;
-    };
-
-    for event in keyboard_events.read() {
-        // 只处理按下事件
-        if event.state != ButtonState::Pressed {
-            continue;
-        }
-
-        match &event.logical_key {
-            Key::Backspace => {
-                match focused_type {
-                    ProxyFieldType::Host => {
-                        proxy_state.host.pop();
-                    }
-                    ProxyFieldType::Port => {
-                        proxy_state.port.pop();
-                    }
-                }
-                update_input_text(
-                    &mut input_query,
-                    &mut text_query,
-                    &proxy_state,
-                    focused_type,
-                );
-            }
-            Key::Character(input) => {
-                // 跳过控制字符
-                if input.chars().any(|c| c.is_control()) {
-                    continue;
-                }
-
-                match focused_type {
-                    ProxyFieldType::Host => {
-                        proxy_state.host.push_str(input);
-                    }
-                    ProxyFieldType::Port => {
-                        // 端口只接受数字
-                        for c in input.chars() {
-                            if c.is_ascii_digit() {
-                                proxy_state.port.push(c);
-                            }
-                        }
-                    }
-                }
-                update_input_text(
-                    &mut input_query,
-                    &mut text_query,
-                    &proxy_state,
-                    focused_type,
-                );
-            }
-            _ => {}
-        }
+    }
+    for (field, mut input) in query.iter_mut() {
+        input.focused = focus.focused == Some(field.field_type);
     }
 }
 
-fn update_input_text(
-    input_query: &mut Query<(&ProxyInputField, &Children)>,
-    text_query: &mut Query<(&mut Text, &mut TextColor)>,
-    proxy_state: &ProxySettingsState,
-    field_type: ProxyFieldType,
+/// 同步 TextInput.value → ProxySettingsState
+pub fn proxy_sync_text_values(
+    mut proxy_state: ResMut<ProxySettingsState>,
+    query: Query<(&ProxyInputField, &TextInput), Changed<TextInput>>,
 ) {
-    for (input, children) in input_query.iter() {
-        if input.field_type == field_type {
-            let value = match field_type {
-                ProxyFieldType::Host => &proxy_state.host,
-                ProxyFieldType::Port => &proxy_state.port,
-            };
-
-            for child in children.iter() {
-                if let Ok((mut text, mut color)) = text_query.get_mut(child) {
-                    if value.is_empty() {
-                        **text = "点击输入...".to_string();
-                        *color = TextColor(AppColors::TEXT_SECONDARY);
-                    } else {
-                        **text = value.clone();
-                        *color = TextColor(AppColors::TEXT);
-                    }
-                }
+    for (field, input) in query.iter() {
+        match field.field_type {
+            ProxyFieldType::Host if proxy_state.host != input.value => {
+                proxy_state.host.clone_from(&input.value);
             }
+            ProxyFieldType::Port if proxy_state.port != input.value => {
+                proxy_state.port.clone_from(&input.value);
+            }
+            _ => {}
         }
     }
 }

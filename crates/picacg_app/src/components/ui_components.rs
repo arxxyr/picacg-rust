@@ -84,11 +84,10 @@ pub enum RegisterInputType {
     Answer3,
 }
 
-/// 注册页面输入框
+/// 注册页面输入框标记（配合 TextInput 使用）
 #[derive(Component)]
 pub struct RegisterInputField {
     pub input_type: RegisterInputType,
-    pub focused: bool,
 }
 
 /// 注册页面性别按钮

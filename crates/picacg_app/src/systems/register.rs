@@ -6,11 +6,17 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
-    window::{Ime, PrimaryWindow},
+    window::PrimaryWindow,
 };
 
 use super::font_loader::get_font;
-use crate::{components::*, events::*, resources::*, systems::login::AppColors};
+use crate::{
+    components::*,
+    events::*,
+    resources::*,
+    systems::login::AppColors,
+    utils::text_input::{TextInput, TextInputDisplay},
+};
 
 /// 当前注册页面焦点
 #[derive(Resource, Default)]
@@ -398,45 +404,51 @@ fn spawn_register_input_row(
                 },
             ));
 
-            // 输入框
-            row.spawn((
-                RegisterInputField {
-                    input_type,
-                    focused: false,
-                },
-                Button,
-                Interaction::default(),
-                Node {
-                    flex_grow: 1.0,
-                    height: Val::Px(36.0),
-                    padding: UiRect::all(Val::Px(8.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    justify_content: JustifyContent::FlexStart,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(AppColors::CARD_BG),
-            ))
-            .with_children(|input| {
-                input.spawn((
-                    Text::new(if display_value.is_empty() {
-                        placeholder
-                    } else {
-                        &display_value
-                    }),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
+            // 输入框（TextInput 通用组件）
+            {
+                let mut text_input = TextInput::new(placeholder).with_value(value);
+                if is_password {
+                    text_input = text_input.with_password();
+                }
+                row.spawn((
+                    RegisterInputField { input_type },
+                    text_input,
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        flex_grow: 1.0,
+                        height: Val::Px(36.0),
+                        padding: UiRect::all(Val::Px(8.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
                         ..default()
                     },
-                    TextColor(if display_value.is_empty() {
-                        AppColors::TEXT_MUTED
-                    } else {
-                        AppColors::TEXT
-                    }),
-                ));
-            });
+                    BorderColor::all(AppColors::BORDER),
+                    BackgroundColor(AppColors::CARD_BG),
+                    Transform::default(),
+                ))
+                .with_children(|input| {
+                    input.spawn((
+                        TextInputDisplay,
+                        Text::new(if display_value.is_empty() {
+                            placeholder
+                        } else {
+                            &display_value
+                        }),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(if display_value.is_empty() {
+                            AppColors::TEXT_MUTED
+                        } else {
+                            AppColors::TEXT
+                        }),
+                    ));
+                });
+            }
         });
 }
 
@@ -524,28 +536,24 @@ pub fn cleanup_register_ui(mut commands: Commands, query: Query<Entity, With<Reg
 /// 注册输入框交互
 pub fn register_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut RegisterInputField, &mut BorderColor),
+        (&Interaction, &RegisterInputField, &mut BorderColor),
         Changed<Interaction>,
     >,
     mut focus: ResMut<RegisterInputFocus>,
-    mut all_inputs: Query<(&mut RegisterInputField, &mut BorderColor), Without<Interaction>>,
+    mut all_inputs: Query<(&RegisterInputField, &mut BorderColor), Without<Interaction>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut input, mut border) in &mut interaction_query {
+    for (interaction, input, mut border) in &mut interaction_query {
         if *interaction == Interaction::Pressed {
             focus.focused = Some(input.input_type);
-            input.focused = true;
             *border = BorderColor::all(AppColors::PRIMARY);
 
-            // 启用 IME
             if let Ok(mut window) = window_query.single_mut() {
                 window.ime_enabled = true;
             }
 
-            // 取消其他输入框焦点
-            for (mut other_input, mut other_border) in &mut all_inputs {
+            for (other_input, mut other_border) in &mut all_inputs {
                 if other_input.input_type != input.input_type {
-                    other_input.focused = false;
                     *other_border = BorderColor::all(AppColors::BORDER);
                 }
             }
@@ -553,81 +561,44 @@ pub fn register_input_interaction(
     }
 }
 
-/// 处理注册页面键盘输入
+/// 同步 RegisterInputFocus → TextInput.focused
+pub fn register_sync_focus(
+    focus: Res<RegisterInputFocus>,
+    mut query: Query<(&RegisterInputField, &mut TextInput)>,
+) {
+    if !focus.is_changed() {
+        return;
+    }
+    for (field, mut input) in query.iter_mut() {
+        input.focused = focus.focused == Some(field.input_type);
+    }
+}
+
+/// 同步 TextInput.value → RegisterFormState
+pub fn register_sync_text_values(
+    mut register_state: ResMut<RegisterFormState>,
+    query: Query<(&RegisterInputField, &TextInput), Changed<TextInput>>,
+) {
+    for (field, input) in query.iter() {
+        let target = get_field_mut(&mut register_state, field.input_type);
+        if *target != input.value {
+            target.clone_from(&input.value);
+        }
+    }
+}
+
+/// 注册页面动作键（仅 Enter 提交），编辑由通用 TextInput 处理
 pub fn register_keyboard_input(
     mut keyboard_events: MessageReader<KeyboardInput>,
-    focus: Res<RegisterInputFocus>,
     mut register_state: ResMut<RegisterFormState>,
-    mut input_query: Query<(&RegisterInputField, &Children, &mut BorderColor)>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
     mut register_messages: MessageWriter<RegisterRequestEvent>,
 ) {
     for event in keyboard_events.read() {
         if event.state != ButtonState::Pressed {
             continue;
         }
-
-        match &event.logical_key {
-            Key::Tab => {
-                // Tab 切换焦点由 interaction 处理
-            }
-            Key::Enter => {
-                // 触发注册
-                trigger_register(&mut register_state, &mut register_messages);
-            }
-            Key::Backspace => {
-                if let Some(focused_type) = focus.focused {
-                    let value = get_field_mut(&mut register_state, focused_type);
-                    value.pop();
-                    update_register_input_text(
-                        &mut input_query,
-                        &mut text_query,
-                        &register_state,
-                        focused_type,
-                    );
-                }
-            }
-            Key::Character(input) => {
-                if let Some(focused_type) = focus.focused {
-                    // 跳过控制字符
-                    if input.chars().any(|c| c.is_control()) {
-                        continue;
-                    }
-                    let value = get_field_mut(&mut register_state, focused_type);
-                    value.push_str(input);
-                    update_register_input_text(
-                        &mut input_query,
-                        &mut text_query,
-                        &register_state,
-                        focused_type,
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// 处理注册页面 IME 输入
-pub fn register_ime_input(
-    mut ime_events: MessageReader<Ime>,
-    focus: Res<RegisterInputFocus>,
-    mut register_state: ResMut<RegisterFormState>,
-    mut input_query: Query<(&RegisterInputField, &Children, &mut BorderColor)>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
-) {
-    for event in ime_events.read() {
-        if let Ime::Commit { value, .. } = event
-            && let Some(focused_type) = focus.focused
-        {
-            let field = get_field_mut(&mut register_state, focused_type);
-            field.push_str(value);
-            update_register_input_text(
-                &mut input_query,
-                &mut text_query,
-                &register_state,
-                focused_type,
-            );
+        if matches!(&event.logical_key, Key::Enter) {
+            trigger_register(&mut register_state, &mut register_messages);
         }
     }
 }
@@ -691,39 +662,7 @@ fn is_password_field(field_type: RegisterInputType) -> bool {
     )
 }
 
-/// 更新输入框文本显示
-fn update_register_input_text(
-    input_query: &mut Query<(&RegisterInputField, &Children, &mut BorderColor)>,
-    text_query: &mut Query<(&mut Text, &mut TextColor)>,
-    register_state: &RegisterFormState,
-    field_type: RegisterInputType,
-) {
-    let value = get_field_value(register_state, field_type);
-    let placeholder = get_field_placeholder(field_type);
-    let is_password = is_password_field(field_type);
-
-    let display_value = if is_password && !value.is_empty() {
-        "*".repeat(value.len())
-    } else {
-        value.to_string()
-    };
-
-    for (input, children, _border) in input_query.iter() {
-        if input.input_type == field_type {
-            for child in children.iter() {
-                if let Ok((mut text, mut color)) = text_query.get_mut(child) {
-                    if display_value.is_empty() {
-                        **text = placeholder.to_string();
-                        *color = TextColor(AppColors::TEXT_MUTED);
-                    } else {
-                        **text = display_value.clone();
-                        *color = TextColor(AppColors::TEXT);
-                    }
-                }
-            }
-        }
-    }
-}
+// update_register_input_text 已移除 — 由通用 text_input_cursor_blink 系统处理
 
 /// 性别按钮交互
 pub fn register_gender_interaction(
@@ -931,27 +870,19 @@ pub fn handle_register_response(
 pub fn unfocus_register_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
     mut focus: ResMut<RegisterInputFocus>,
-    mut input_query: Query<(&mut RegisterInputField, &mut BorderColor, &Interaction)>,
+    mut input_query: Query<(&RegisterInputField, &mut BorderColor, &Interaction)>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
-        // 检查是否有输入框被点击
-        let mut any_clicked = false;
-        for (_, _, interaction) in &input_query {
-            if *interaction == Interaction::Pressed {
-                any_clicked = true;
-                break;
-            }
-        }
+        let any_clicked = input_query
+            .iter()
+            .any(|(_, _, i)| *i == Interaction::Pressed);
 
-        // 如果没有输入框被点击，取消所有焦点
         if !any_clicked {
             focus.focused = None;
-            for (mut input, mut border, _) in &mut input_query {
-                input.focused = false;
+            for (_, mut border, _) in input_query.iter_mut() {
                 *border = BorderColor::all(AppColors::BORDER);
             }
-            // 禁用 IME
             if let Ok(mut window) = window_query.single_mut() {
                 window.ime_enabled = false;
             }

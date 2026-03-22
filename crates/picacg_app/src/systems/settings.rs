@@ -36,6 +36,18 @@ pub struct DownloadPathInput;
 #[derive(Component)]
 pub struct DownloadPathPickerButton;
 
+/// 目录选择器结果（后台线程 → 主线程，使用 Mutex 包裹 Receiver 以满足 Sync）
+#[derive(Resource)]
+pub struct DownloadPathPickerResult {
+    pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Option<String>>>>,
+}
+
+impl Default for DownloadPathPickerResult {
+    fn default() -> Self {
+        Self { receiver: None }
+    }
+}
+
 /// 下载路径输入状态
 #[derive(Resource)]
 pub struct DownloadPathInputState {
@@ -112,8 +124,6 @@ pub struct ProxySettingsInputState {
     pub proxy_type: ProxyType,
     pub host: String,
     pub port: String,
-    pub host_focused: bool,
-    pub port_focused: bool,
 }
 
 impl Default for ProxySettingsInputState {
@@ -124,8 +134,6 @@ impl Default for ProxySettingsInputState {
             proxy_type: settings.proxy.proxy_type,
             host: settings.proxy.host.clone(),
             port: settings.proxy.port.to_string(),
-            host_focused: false,
-            port_focused: false,
         }
     }
 }
@@ -236,10 +244,6 @@ pub struct NewKeywordInput;
 #[derive(Component)]
 pub struct AddKeywordButton;
 
-/// 屏蔽词输入框文本标记
-#[derive(Component)]
-pub struct NewKeywordInputText;
-
 /// 下拉建议面板容器
 #[derive(Component)]
 pub struct KeywordSuggestionPanel;
@@ -280,14 +284,6 @@ pub struct CustomCdnApiIpInput;
 #[derive(Component)]
 pub struct CustomCdnImgIpInput;
 
-/// 自定义 CDN API IP 输入框文本
-#[derive(Component)]
-pub struct CustomCdnApiIpInputText;
-
-/// 自定义 CDN 图片 IP 输入框文本
-#[derive(Component)]
-pub struct CustomCdnImgIpInputText;
-
 /// 自定义 API IP 输入行容器（条件显示）
 #[derive(Component)]
 pub struct CustomCdnApiIpRow;
@@ -303,8 +299,6 @@ pub struct ChannelSettingsState {
     pub image_channel: ChannelType,
     pub custom_cdn_api_ip: String,
     pub custom_cdn_img_ip: String,
-    pub api_ip_focused: bool,
-    pub img_ip_focused: bool,
 }
 
 impl Default for ChannelSettingsState {
@@ -315,8 +309,6 @@ impl Default for ChannelSettingsState {
             image_channel: settings.channel.image_channel,
             custom_cdn_api_ip: settings.channel.custom_cdn_api_ip.clone(),
             custom_cdn_img_ip: settings.channel.custom_cdn_img_ip.clone(),
-            api_ip_focused: false,
-            img_ip_focused: false,
         }
     }
 }
@@ -329,7 +321,6 @@ pub struct FilterSettingsState {
     pub filter_by_tag: bool,
     pub filter_by_title: bool,
     pub new_keyword: String,
-    pub input_focused: bool,
     /// 是否展开分类建议面板
     pub show_suggestions: bool,
 }
@@ -343,7 +334,6 @@ impl Default for FilterSettingsState {
             filter_by_tag: settings.filter.filter_by_tag,
             filter_by_title: settings.filter.filter_by_title,
             new_keyword: String::new(),
-            input_focused: false,
             show_suggestions: false,
         }
     }
@@ -373,6 +363,7 @@ pub fn setup_settings_ui(
         value: settings.download_path.clone(),
         is_focused: false,
     });
+    commands.insert_resource(DownloadPathPickerResult::default());
 
     // 初始化代理设置状态
     commands.insert_resource(ProxySettingsInputState {
@@ -380,8 +371,6 @@ pub fn setup_settings_ui(
         proxy_type: settings.proxy.proxy_type,
         host: settings.proxy.host.clone(),
         port: settings.proxy.port.to_string(),
-        host_focused: false,
-        port_focused: false,
     });
 
     // 初始化日志等级状态
@@ -412,7 +401,6 @@ pub fn setup_settings_ui(
         filter_by_tag: settings.filter.filter_by_tag,
         filter_by_title: settings.filter.filter_by_title,
         new_keyword: String::new(),
-        input_focused: false,
         show_suggestions: false,
     });
 
@@ -422,8 +410,6 @@ pub fn setup_settings_ui(
         image_channel: settings.channel.image_channel,
         custom_cdn_api_ip: settings.channel.custom_cdn_api_ip.clone(),
         custom_cdn_img_ip: settings.channel.custom_cdn_img_ip.clone(),
-        api_ip_focused: false,
-        img_ip_focused: false,
     });
 
     // 初始化保存状态提示
@@ -1251,9 +1237,10 @@ fn spawn_filter_settings(
             Transform::default(),
         ))
         .with_children(|row| {
-            // 输入框
+            // 输入框（TextInput 通用组件）
             row.spawn((
                 NewKeywordInput,
+                TextInput::new("输入新屏蔽词..."),
                 Button,
                 Interaction::default(),
                 Node {
@@ -1271,7 +1258,7 @@ fn spawn_filter_settings(
             ))
             .with_children(|input| {
                 input.spawn((
-                    NewKeywordInputText,
+                    TextInputDisplay,
                     Text::new("输入新屏蔽词..."),
                     TextFont {
                         font: font.clone(),
@@ -1940,7 +1927,9 @@ fn spawn_proxy_setting(
                     host_col
                         .spawn((
                             ProxyHostInput,
+                            TextInput::new("127.0.0.1").with_value(&settings.proxy.host),
                             Button,
+                            Interaction::default(),
                             Node {
                                 width: Val::Percent(100.0),
                                 height: Val::Px(32.0),
@@ -1952,16 +1941,26 @@ fn spawn_proxy_setting(
                             },
                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                             BorderColor::all(AppColors::BORDER),
+                            Transform::default(),
                         ))
                         .with_children(|input| {
                             input.spawn((
-                                Text::new(&settings.proxy.host),
+                                TextInputDisplay,
+                                Text::new(if settings.proxy.host.is_empty() {
+                                    "127.0.0.1".to_string()
+                                } else {
+                                    settings.proxy.host.clone()
+                                }),
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 13.0,
                                     ..default()
                                 },
-                                TextColor(AppColors::TEXT),
+                                TextColor(if settings.proxy.host.is_empty() {
+                                    AppColors::TEXT_SECONDARY
+                                } else {
+                                    AppColors::TEXT
+                                }),
                             ));
                         });
                 });
@@ -1989,7 +1988,9 @@ fn spawn_proxy_setting(
                     port_col
                         .spawn((
                             ProxyPortInput,
+                            TextInput::new("7890").with_value(settings.proxy.port.to_string()),
                             Button,
+                            Interaction::default(),
                             Node {
                                 width: Val::Percent(100.0),
                                 height: Val::Px(32.0),
@@ -2001,16 +2002,27 @@ fn spawn_proxy_setting(
                             },
                             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
                             BorderColor::all(AppColors::BORDER),
+                            Transform::default(),
                         ))
                         .with_children(|input| {
+                            let port_str = settings.proxy.port.to_string();
                             input.spawn((
-                                Text::new(settings.proxy.port.to_string()),
+                                TextInputDisplay,
+                                Text::new(if port_str.is_empty() {
+                                    "7890".to_string()
+                                } else {
+                                    port_str.clone()
+                                }),
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 13.0,
                                     ..default()
                                 },
-                                TextColor(AppColors::TEXT),
+                                TextColor(if port_str.is_empty() {
+                                    AppColors::TEXT_SECONDARY
+                                } else {
+                                    AppColors::TEXT
+                                }),
                             ));
                         });
                 });
@@ -2194,12 +2206,12 @@ fn spawn_custom_ip_row(
             TextColor(AppColors::TEXT),
         ));
 
-        let placeholder = if value.is_empty() {
-            "输入 IP 地址，例如 104.21.91.145"
+        let placeholder = "输入 IP 地址，例如 104.21.91.145";
+        let display_text = if value.is_empty() {
+            placeholder.to_string()
         } else {
-            ""
+            value.to_string()
         };
-        let display_text = if value.is_empty() { placeholder } else { value };
         let text_color = if value.is_empty() {
             Color::srgb(0.4, 0.4, 0.5)
         } else {
@@ -2207,6 +2219,7 @@ fn spawn_custom_ip_row(
         };
 
         let mut input = row.spawn((
+            TextInput::new(placeholder).with_value(value),
             Button,
             Interaction::default(),
             Node {
@@ -2220,6 +2233,7 @@ fn spawn_custom_ip_row(
             },
             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
             BorderColor::all(AppColors::BORDER),
+            Transform::default(),
         ));
         if is_api {
             input.insert(CustomCdnApiIpInput);
@@ -2227,7 +2241,8 @@ fn spawn_custom_ip_row(
             input.insert(CustomCdnImgIpInput);
         }
         input.with_children(|input| {
-            let mut text_cmd = input.spawn((
+            input.spawn((
+                TextInputDisplay,
                 Text::new(display_text),
                 TextFont {
                     font: font.clone(),
@@ -2236,11 +2251,6 @@ fn spawn_custom_ip_row(
                 },
                 TextColor(text_color),
             ));
-            if is_api {
-                text_cmd.insert(CustomCdnApiIpInputText);
-            } else {
-                text_cmd.insert(CustomCdnImgIpInputText);
-            }
         });
     });
 }
@@ -2534,28 +2544,28 @@ pub fn sync_download_path_value(
     }
 }
 
-/// 下载路径目录选择按钮交互
+/// 下载路径目录选择按钮交互（异步，不阻塞主线程）
 pub fn download_path_picker_interaction(
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<DownloadPathPickerButton>),
     >,
-    mut input_query: Query<&mut TextInput, With<DownloadPathInput>>,
-    mut input_state: ResMut<DownloadPathInputState>,
+    mut picker: ResMut<DownloadPathPickerResult>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                // 打开目录选择对话框
-                if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                    let path_str = path.to_string_lossy().to_string();
-                    for mut input in input_query.iter_mut() {
-                        input.set_value(path_str.clone());
-                        input.focused = false;
-                    }
-                    input_state.value = path_str;
-                    input_state.is_focused = false;
+                // 防止重复打开
+                if picker.receiver.is_none() {
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    picker.receiver = Some(std::sync::Mutex::new(rx));
+                    std::thread::spawn(move || {
+                        let path = rfd::FileDialog::new()
+                            .pick_folder()
+                            .map(|p| p.to_string_lossy().to_string());
+                        let _ = tx.send(path);
+                    });
                 }
             }
             Interaction::Hovered => {
@@ -2565,6 +2575,34 @@ pub fn download_path_picker_interaction(
                 *bg_color = BackgroundColor(AppColors::SECONDARY);
             }
         }
+    }
+}
+
+/// 轮询目录选择器的异步结果
+pub fn handle_download_path_picker_result(
+    mut picker: ResMut<DownloadPathPickerResult>,
+    mut input_query: Query<&mut TextInput, With<DownloadPathInput>>,
+    mut input_state: ResMut<DownloadPathInputState>,
+) {
+    let Some(ref receiver) = picker.receiver else {
+        return;
+    };
+    let Ok(receiver) = receiver.lock() else {
+        return;
+    };
+    let Ok(result) = receiver.try_recv() else {
+        return;
+    };
+    drop(receiver);
+    // 收到结果，清除 receiver
+    picker.receiver = None;
+    if let Some(path_str) = result {
+        for mut input in input_query.iter_mut() {
+            input.set_value(path_str.clone());
+            input.focused = false;
+        }
+        input_state.value = path_str;
+        input_state.is_focused = false;
     }
 }
 
@@ -2967,29 +3005,43 @@ pub fn proxy_type_button_interaction(
     }
 }
 
-/// 代理主机输入框交互
+/// 代理主机输入框交互（设置 TextInput.focused）
 pub fn proxy_host_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut TextInput,
+        ),
         (Changed<Interaction>, With<ProxyHostInput>),
     >,
-    mut proxy_state: ResMut<ProxySettingsInputState>,
+    mut port_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<ProxyPortInput>, Without<ProxyHostInput>),
+    >,
 ) {
-    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                proxy_state.host_focused = true;
-                proxy_state.port_focused = false;
+                input.focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
+                // 失焦端口输入框
+                for (mut port_input, mut port_border) in port_query.iter_mut() {
+                    if port_input.focused {
+                        port_input.focused = false;
+                        *port_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
             }
             Interaction::Hovered => {
-                if !proxy_state.host_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
                 }
             }
             Interaction::None => {
-                if !proxy_state.host_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
@@ -2998,29 +3050,43 @@ pub fn proxy_host_input_interaction(
     }
 }
 
-/// 代理端口输入框交互
+/// 代理端口输入框交互（设置 TextInput.focused）
 pub fn proxy_port_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut TextInput,
+        ),
         (Changed<Interaction>, With<ProxyPortInput>),
     >,
-    mut proxy_state: ResMut<ProxySettingsInputState>,
+    mut host_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<ProxyHostInput>, Without<ProxyPortInput>),
+    >,
 ) {
-    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                proxy_state.port_focused = true;
-                proxy_state.host_focused = false;
+                input.focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
+                // 失焦主机输入框
+                for (mut host_input, mut host_border) in host_query.iter_mut() {
+                    if host_input.focused {
+                        host_input.focused = false;
+                        *host_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
             }
             Interaction::Hovered => {
-                if !proxy_state.port_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
                 }
             }
             Interaction::None => {
-                if !proxy_state.port_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
@@ -3029,17 +3095,23 @@ pub fn proxy_port_input_interaction(
     }
 }
 
-/// 代理输入键盘处理
+/// 代理输入动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
 pub fn proxy_input_keyboard(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut proxy_state: ResMut<ProxySettingsInputState>,
-    host_query: Query<&Children, With<ProxyHostInput>>,
-    port_query: Query<&Children, With<ProxyPortInput>>,
-    mut text_query: Query<&mut Text>,
+    mut host_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<ProxyHostInput>, Without<ProxyPortInput>),
+    >,
+    mut port_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<ProxyPortInput>, Without<ProxyHostInput>),
+    >,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    if !proxy_state.host_focused && !proxy_state.port_focused {
+    let has_focus =
+        host_query.iter().any(|(i, _)| i.focused) || port_query.iter().any(|(i, _)| i.focused);
+    if !has_focus {
         return;
     }
 
@@ -3048,48 +3120,51 @@ pub fn proxy_input_keyboard(
             continue;
         }
 
-        match &event.logical_key {
-            Key::Backspace => {
-                if proxy_state.host_focused {
-                    proxy_state.host.pop();
-                } else if proxy_state.port_focused {
-                    proxy_state.port.pop();
+        if matches!(&event.logical_key, Key::Escape | Key::Enter) {
+            for (mut input, mut border) in host_query.iter_mut() {
+                if input.focused {
+                    input.focused = false;
+                    *border = BorderColor::all(AppColors::BORDER);
                 }
             }
-            Key::Escape | Key::Enter => {
-                proxy_state.host_focused = false;
-                proxy_state.port_focused = false;
-            }
-            Key::Character(input) => {
-                for c in input.chars() {
-                    if !c.is_control() {
-                        if proxy_state.host_focused {
-                            proxy_state.host.push(c);
-                        } else if proxy_state.port_focused && c.is_ascii_digit() {
-                            proxy_state.port.push(c);
-                        }
-                    }
+            for (mut input, mut border) in port_query.iter_mut() {
+                if input.focused {
+                    input.focused = false;
+                    *border = BorderColor::all(AppColors::BORDER);
                 }
-            }
-            _ => {}
-        }
-    }
-
-    // 更新主机显示
-    for children in host_query.iter() {
-        for child in children.iter() {
-            if let Ok(mut text) = text_query.get_mut(child) {
-                **text = proxy_state.host.clone();
             }
         }
     }
+}
 
-    // 更新端口显示
-    for children in port_query.iter() {
-        for child in children.iter() {
-            if let Ok(mut text) = text_query.get_mut(child) {
-                **text = proxy_state.port.clone();
-            }
+/// 同步 TextInput.value → ProxySettingsInputState
+pub fn sync_proxy_input_values(
+    mut proxy_state: ResMut<ProxySettingsInputState>,
+    host_query: Query<
+        &TextInput,
+        (
+            Changed<TextInput>,
+            With<ProxyHostInput>,
+            Without<ProxyPortInput>,
+        ),
+    >,
+    port_query: Query<
+        &TextInput,
+        (
+            Changed<TextInput>,
+            With<ProxyPortInput>,
+            Without<ProxyHostInput>,
+        ),
+    >,
+) {
+    for input in host_query.iter() {
+        if proxy_state.host != input.value {
+            proxy_state.host.clone_from(&input.value);
+        }
+    }
+    for input in port_query.iter() {
+        if proxy_state.port != input.value {
+            proxy_state.port.clone_from(&input.value);
         }
     }
 }
@@ -3578,24 +3653,26 @@ pub fn remove_keyword_interaction(
     }
 }
 
-/// 新增屏蔽词输入框交互（含 IME 启用）
+/// 新增屏蔽词输入框交互（设置 TextInput.focused，含 IME 启用）
 pub fn new_keyword_input_interaction(
     mut interaction_query: Query<
         (
             &Interaction,
             &mut BackgroundColor,
             &mut BorderColor,
+            &mut TextInput,
             &ComputedNode,
         ),
         (Changed<Interaction>, With<NewKeywordInput>),
     >,
-    mut filter_state: ResMut<FilterSettingsState>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut bg_color, mut border_color, computed) in interaction_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input, computed) in
+        interaction_query.iter_mut()
+    {
         match *interaction {
             Interaction::Pressed => {
-                filter_state.input_focused = true;
+                input.focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
 
@@ -3613,12 +3690,12 @@ pub fn new_keyword_input_interaction(
                 }
             }
             Interaction::Hovered => {
-                if !filter_state.input_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
                 }
             }
             Interaction::None => {
-                if !filter_state.input_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(AppColors::CARD_BG);
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
@@ -3627,38 +3704,20 @@ pub fn new_keyword_input_interaction(
     }
 }
 
-/// 更新屏蔽词输入框文本显示
-fn update_keyword_input_text(
-    keyword: &str,
-    text_query: &mut Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
-) {
-    for (mut text, mut color) in text_query.iter_mut() {
-        if keyword.is_empty() {
-            **text = "输入新屏蔽词...".to_string();
-            *color = TextColor(AppColors::TEXT_SECONDARY);
-        } else {
-            **text = keyword.to_string();
-            *color = TextColor(AppColors::TEXT);
-        }
-    }
-}
-
-/// 新增屏蔽词键盘输入（含 Ctrl+V/C/X/A 快捷键）
+/// 新增屏蔽词动作键处理（Enter 添加屏蔽词，Escape 失焦），编辑由通用 TextInput
+/// 处理
 pub fn new_keyword_keyboard_input(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut input_query: Query<&mut TextInput, With<NewKeywordInput>>,
     mut filter_state: ResMut<FilterSettingsState>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
-    key_input: Res<ButtonInput<KeyCode>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    if !filter_state.input_focused {
+    let has_focus = input_query.iter().any(|i| i.focused);
+    if !has_focus {
         return;
     }
 
     use bevy::input::{ButtonState, keyboard::Key};
-
-    let ctrl_pressed =
-        key_input.pressed(KeyCode::ControlLeft) || key_input.pressed(KeyCode::ControlRight);
 
     for event in keyboard_events.read() {
         if event.state != ButtonState::Pressed {
@@ -3666,73 +3725,24 @@ pub fn new_keyword_keyboard_input(
         }
 
         match &event.logical_key {
-            Key::Backspace => {
-                filter_state.new_keyword.pop();
-                update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
-            }
             Key::Escape => {
-                filter_state.input_focused = false;
+                for mut input in input_query.iter_mut() {
+                    input.focused = false;
+                }
                 // 禁用 IME
                 if let Ok(mut window) = window_query.single_mut() {
                     window.ime_enabled = false;
                 }
             }
             Key::Enter => {
-                // 回车添加屏蔽词
-                let keyword = filter_state.new_keyword.trim().to_string();
-                if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
-                    tracing::info!("添加屏蔽词: {}", keyword);
-                    filter_state.blocked_keywords.push(keyword);
-                    filter_state.new_keyword.clear();
-                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
-                }
-            }
-            Key::Character(input) => {
-                if ctrl_pressed {
-                    match input.as_str() {
-                        "v" | "V" => {
-                            // Ctrl+V 粘贴
-                            if let Ok(mut clipboard) = arboard::Clipboard::new()
-                                && let Ok(text) = clipboard.get_text()
-                            {
-                                let filtered: String =
-                                    text.chars().filter(|c| !c.is_control()).collect();
-                                filter_state.new_keyword.push_str(&filtered);
-                                update_keyword_input_text(
-                                    &filter_state.new_keyword,
-                                    &mut text_query,
-                                );
-                            }
-                        }
-                        "c" | "C" => {
-                            // Ctrl+C 复制
-                            if !filter_state.new_keyword.is_empty()
-                                && let Ok(mut clipboard) = arboard::Clipboard::new()
-                            {
-                                let _ = clipboard.set_text(&filter_state.new_keyword);
-                            }
-                        }
-                        "x" | "X" if !filter_state.new_keyword.is_empty() => {
-                            // Ctrl+X 剪切
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(&filter_state.new_keyword);
-                            }
-                            filter_state.new_keyword.clear();
-                            update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
-                        }
-                        "a" | "A" => {
-                            // Ctrl+A 全选（防止 'a' 被输入）
-                        }
-                        _ => {}
+                // 回车添加屏蔽词（从 TextInput.value 读取）
+                for mut input in input_query.iter_mut() {
+                    let keyword = input.value.trim().to_string();
+                    if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                        tracing::info!("添加屏蔽词: {}", keyword);
+                        filter_state.blocked_keywords.push(keyword);
+                        input.set_value("");
                     }
-                } else {
-                    // 普通字符输入
-                    for c in input.chars() {
-                        if !c.is_control() {
-                            filter_state.new_keyword.push(c);
-                        }
-                    }
-                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
                 }
             }
             _ => {}
@@ -3740,20 +3750,14 @@ pub fn new_keyword_keyboard_input(
     }
 }
 
-/// 新增屏蔽词 IME 输入
-pub fn new_keyword_ime_input(
-    mut ime_events: MessageReader<bevy::window::Ime>,
+/// 同步 TextInput.value → FilterSettingsState.new_keyword
+pub fn sync_keyword_input_value(
     mut filter_state: ResMut<FilterSettingsState>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
+    query: Query<&TextInput, (Changed<TextInput>, With<NewKeywordInput>)>,
 ) {
-    if !filter_state.input_focused {
-        return;
-    }
-
-    for event in ime_events.read() {
-        if let bevy::window::Ime::Commit { value, .. } = event {
-            filter_state.new_keyword.push_str(value);
-            update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
+    for input in query.iter() {
+        if filter_state.new_keyword != input.value {
+            filter_state.new_keyword.clone_from(&input.value);
         }
     }
 }
@@ -3765,18 +3769,20 @@ pub fn add_keyword_button_interaction(
         (Changed<Interaction>, With<AddKeywordButton>),
     >,
     mut filter_state: ResMut<FilterSettingsState>,
-    mut text_query: Query<(&mut Text, &mut TextColor), With<NewKeywordInputText>>,
+    mut input_query: Query<&mut TextInput, With<NewKeywordInput>>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
-                let keyword = filter_state.new_keyword.trim().to_string();
-                if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
-                    tracing::info!("添加屏蔽词: {}", keyword);
-                    filter_state.blocked_keywords.push(keyword);
-                    filter_state.new_keyword.clear();
-                    update_keyword_input_text(&filter_state.new_keyword, &mut text_query);
+                // 从 TextInput.value 读取关键词
+                for mut input in input_query.iter_mut() {
+                    let keyword = input.value.trim().to_string();
+                    if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                        tracing::info!("添加屏蔽词: {}", keyword);
+                        filter_state.blocked_keywords.push(keyword);
+                        input.set_value("");
+                    }
                 }
             }
             Interaction::Hovered => {
@@ -3792,14 +3798,13 @@ pub fn add_keyword_button_interaction(
 /// 点击输入框外部取消焦点
 pub fn unfocus_keyword_input(
     mouse_button: Res<ButtonInput<MouseButton>>,
-    mut input_query: Query<(&Interaction, &mut BorderColor), With<NewKeywordInput>>,
-    mut filter_state: ResMut<FilterSettingsState>,
+    mut input_query: Query<(&Interaction, &mut BorderColor, &mut TextInput), With<NewKeywordInput>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
     if mouse_button.just_pressed(MouseButton::Left) {
-        for (interaction, mut border) in input_query.iter_mut() {
-            if *interaction == Interaction::None && filter_state.input_focused {
-                filter_state.input_focused = false;
+        for (interaction, mut border, mut input) in input_query.iter_mut() {
+            if *interaction == Interaction::None && input.focused {
+                input.focused = false;
                 *border = BorderColor::all(AppColors::BORDER);
 
                 // 禁用 IME
@@ -4023,10 +4028,15 @@ pub fn image_channel_button_interaction(
     }
 }
 
-/// 自定义 CDN IP 输入框交互
+/// 自定义 CDN IP 输入框交互（设置 TextInput.focused）
 pub fn custom_cdn_ip_input_interaction(
     mut api_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut TextInput,
+        ),
         (
             Changed<Interaction>,
             With<CustomCdnApiIpInput>,
@@ -4034,30 +4044,40 @@ pub fn custom_cdn_ip_input_interaction(
         ),
     >,
     mut img_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (
+            &Interaction,
+            &mut BackgroundColor,
+            &mut BorderColor,
+            &mut TextInput,
+        ),
         (
             Changed<Interaction>,
             With<CustomCdnImgIpInput>,
             Without<CustomCdnApiIpInput>,
         ),
     >,
-    mut channel_state: ResMut<ChannelSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in api_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input) in api_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                channel_state.api_ip_focused = true;
-                channel_state.img_ip_focused = false;
+                input.focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
+                // 失焦图片 IP 输入框
+                for (_, _, mut img_border, mut img_input) in img_query.iter_mut() {
+                    if img_input.focused {
+                        img_input.focused = false;
+                        *img_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
             }
             Interaction::Hovered => {
-                if !channel_state.api_ip_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
                 }
             }
             Interaction::None => {
-                if !channel_state.api_ip_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
@@ -4065,21 +4085,27 @@ pub fn custom_cdn_ip_input_interaction(
         }
     }
 
-    for (interaction, mut bg_color, mut border_color) in img_query.iter_mut() {
+    for (interaction, mut bg_color, mut border_color, mut input) in img_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
-                channel_state.img_ip_focused = true;
-                channel_state.api_ip_focused = false;
+                input.focused = true;
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
                 *border_color = BorderColor::all(AppColors::PRIMARY);
+                // 失焦 API IP 输入框
+                for (_, _, mut api_border, mut api_input) in api_query.iter_mut() {
+                    if api_input.focused {
+                        api_input.focused = false;
+                        *api_border = BorderColor::all(AppColors::BORDER);
+                    }
+                }
             }
             Interaction::Hovered => {
-                if !channel_state.img_ip_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
                 }
             }
             Interaction::None => {
-                if !channel_state.img_ip_focused {
+                if !input.focused {
                     *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
@@ -4088,17 +4114,23 @@ pub fn custom_cdn_ip_input_interaction(
     }
 }
 
-/// 自定义 CDN IP 键盘输入
+/// 自定义 CDN IP 动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
 pub fn custom_cdn_ip_keyboard_input(
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut channel_state: ResMut<ChannelSettingsState>,
-    api_text_query: Query<Entity, With<CustomCdnApiIpInputText>>,
-    img_text_query: Query<Entity, With<CustomCdnImgIpInputText>>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
+    mut api_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<CustomCdnApiIpInput>, Without<CustomCdnImgIpInput>),
+    >,
+    mut img_query: Query<
+        (&mut TextInput, &mut BorderColor),
+        (With<CustomCdnImgIpInput>, Without<CustomCdnApiIpInput>),
+    >,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    if !channel_state.api_ip_focused && !channel_state.img_ip_focused {
+    let has_focus =
+        api_query.iter().any(|(i, _)| i.focused) || img_query.iter().any(|(i, _)| i.focused);
+    if !has_focus {
         return;
     }
 
@@ -4107,57 +4139,51 @@ pub fn custom_cdn_ip_keyboard_input(
             continue;
         }
 
-        match &event.logical_key {
-            Key::Backspace => {
-                if channel_state.api_ip_focused {
-                    channel_state.custom_cdn_api_ip.pop();
-                } else if channel_state.img_ip_focused {
-                    channel_state.custom_cdn_img_ip.pop();
+        if matches!(&event.logical_key, Key::Escape | Key::Enter) {
+            for (mut input, mut border) in api_query.iter_mut() {
+                if input.focused {
+                    input.focused = false;
+                    *border = BorderColor::all(AppColors::BORDER);
                 }
             }
-            Key::Escape | Key::Enter => {
-                channel_state.api_ip_focused = false;
-                channel_state.img_ip_focused = false;
-            }
-            Key::Character(input) => {
-                for c in input.chars() {
-                    // 只允许 IP 地址字符（数字和点）
-                    if c.is_ascii_digit() || c == '.' {
-                        if channel_state.api_ip_focused {
-                            channel_state.custom_cdn_api_ip.push(c);
-                        } else if channel_state.img_ip_focused {
-                            channel_state.custom_cdn_img_ip.push(c);
-                        }
-                    }
+            for (mut input, mut border) in img_query.iter_mut() {
+                if input.focused {
+                    input.focused = false;
+                    *border = BorderColor::all(AppColors::BORDER);
                 }
-            }
-            _ => {}
-        }
-    }
-
-    // 更新 API IP 文本显示
-    for entity in api_text_query.iter() {
-        if let Ok((mut text, mut color)) = text_query.get_mut(entity) {
-            if channel_state.custom_cdn_api_ip.is_empty() {
-                **text = "输入 IP 地址，例如 104.21.91.145".to_string();
-                *color = TextColor(Color::srgb(0.4, 0.4, 0.5));
-            } else {
-                **text = channel_state.custom_cdn_api_ip.clone();
-                *color = TextColor(AppColors::TEXT);
             }
         }
     }
+}
 
-    // 更新图片 IP 文本显示
-    for entity in img_text_query.iter() {
-        if let Ok((mut text, mut color)) = text_query.get_mut(entity) {
-            if channel_state.custom_cdn_img_ip.is_empty() {
-                **text = "输入 IP 地址，例如 104.21.91.145".to_string();
-                *color = TextColor(Color::srgb(0.4, 0.4, 0.5));
-            } else {
-                **text = channel_state.custom_cdn_img_ip.clone();
-                *color = TextColor(AppColors::TEXT);
-            }
+/// 同步 TextInput.value → ChannelSettingsState
+pub fn sync_cdn_ip_input_values(
+    mut channel_state: ResMut<ChannelSettingsState>,
+    api_query: Query<
+        &TextInput,
+        (
+            Changed<TextInput>,
+            With<CustomCdnApiIpInput>,
+            Without<CustomCdnImgIpInput>,
+        ),
+    >,
+    img_query: Query<
+        &TextInput,
+        (
+            Changed<TextInput>,
+            With<CustomCdnImgIpInput>,
+            Without<CustomCdnApiIpInput>,
+        ),
+    >,
+) {
+    for input in api_query.iter() {
+        if channel_state.custom_cdn_api_ip != input.value {
+            channel_state.custom_cdn_api_ip.clone_from(&input.value);
+        }
+    }
+    for input in img_query.iter() {
+        if channel_state.custom_cdn_img_ip != input.value {
+            channel_state.custom_cdn_img_ip.clone_from(&input.value);
         }
     }
 }

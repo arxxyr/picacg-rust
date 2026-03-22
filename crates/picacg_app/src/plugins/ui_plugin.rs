@@ -101,7 +101,8 @@ impl Plugin for UiPlugin {
                     proxy_toggle_interaction,
                     proxy_type_interaction,
                     proxy_input_interaction,
-                    proxy_keyboard_input,
+                    proxy_sync_focus,
+                    proxy_sync_text_values,
                 )
                     .run_if(in_state(AppRoute::ProxySettings)),
             )
@@ -112,8 +113,9 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     register_input_interaction,
+                    register_sync_focus,
+                    register_sync_text_values,
                     register_keyboard_input,
-                    register_ime_input,
                     register_gender_interaction,
                     back_to_login_interaction,
                     register_submit_interaction,
@@ -263,6 +265,7 @@ impl Plugin for UiPlugin {
                     download_path_keyboard_input,
                     sync_download_path_value,
                     download_path_picker_interaction,
+                    handle_download_path_picker_result,
                     clear_cache_button_interaction,
                     auto_save_settings,
                     update_settings_save_status,
@@ -275,6 +278,7 @@ impl Plugin for UiPlugin {
                     proxy_host_input_interaction,
                     proxy_port_input_interaction,
                     proxy_input_keyboard,
+                    sync_proxy_input_values,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
@@ -298,7 +302,7 @@ impl Plugin for UiPlugin {
                     remove_keyword_interaction,
                     new_keyword_input_interaction,
                     new_keyword_keyboard_input,
-                    new_keyword_ime_input,
+                    sync_keyword_input_value,
                     add_keyword_button_interaction,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
@@ -321,6 +325,7 @@ impl Plugin for UiPlugin {
                     image_channel_button_interaction,
                     custom_cdn_ip_input_interaction,
                     custom_cdn_ip_keyboard_input,
+                    sync_cdn_ip_input_values,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
