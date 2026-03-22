@@ -97,6 +97,19 @@ fn detect_bundled_font_path() -> Option<String> {
             tracing::debug!("检测到内置字体（生产环境）: {}", path.display());
             return Some(path.to_string_lossy().to_string());
         }
+
+        // 2.1 macOS .app Bundle: 可执行文件在 Contents/MacOS/，
+        //     资源在 Contents/Resources/
+        #[cfg(target_os = "macos")]
+        if exe_dir.ends_with("Contents/MacOS")
+            && let Some(contents_dir) = exe_dir.parent()
+        {
+            let path = contents_dir.join("Resources").join(BUNDLED_FONT_RELATIVE);
+            if path.exists() {
+                tracing::debug!("检测到内置字体（macOS Bundle）: {}", path.display());
+                return Some(path.to_string_lossy().to_string());
+            }
+        }
     }
 
     // 3. 相对于当前工作目录

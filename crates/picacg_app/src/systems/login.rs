@@ -12,6 +12,19 @@ use picacg_config::AppSettings;
 use super::font_loader::get_font;
 use crate::{components::*, events::*, resources::*};
 
+/// 输入框内文本标记（用于原地更新文本内容）
+#[derive(Component)]
+pub struct LoginInputText {
+    pub input_type: LoginInputType,
+}
+
+/// 光标闪烁计时器资源
+#[derive(Resource)]
+pub struct LoginCursorBlink {
+    pub timer: Timer,
+    pub visible: bool,
+}
+
 /// 应用颜色常量
 pub struct AppColors;
 
@@ -51,7 +64,17 @@ pub struct LoginInputField {
 #[derive(Resource, Default)]
 pub struct LoginInputFocus {
     pub focused: Option<LoginInputType>,
+    /// 是否显示密码明文
+    pub show_password: bool,
 }
+
+/// 显示/隐藏密码切换按钮
+#[derive(Component)]
+pub struct ShowPasswordToggle;
+
+/// 显示/隐藏密码按钮内的图标文本
+#[derive(Component)]
+pub struct ShowPasswordIcon;
 
 /// 创建登录界面
 pub fn setup_login_ui(
@@ -308,11 +331,15 @@ pub fn setup_login_ui(
                 },
             ));
 
-            // 错误信息
-            if let Some(ref error) = login_state.error {
+            // 错误信息（始终创建，按需显示/隐藏）
+            {
+                let (error_text, error_display) = match login_state.error {
+                    Some(ref error) => (error.clone(), Display::Flex),
+                    None => (String::new(), Display::None),
+                };
                 parent.spawn((
                     LoginErrorText,
-                    Text::new(error.clone()),
+                    Text::new(error_text),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -321,6 +348,7 @@ pub fn setup_login_ui(
                     TextColor(AppColors::ERROR),
                     Node {
                         margin: UiRect::top(Val::Px(10.0)),
+                        display: error_display,
                         ..default()
                     },
                 ));
@@ -329,6 +357,11 @@ pub fn setup_login_ui(
 
     // 初始化焦点资源
     commands.insert_resource(LoginInputFocus::default());
+    // 初始化光标闪烁计时器
+    commands.insert_resource(LoginCursorBlink {
+        timer: Timer::from_seconds(0.53, TimerMode::Repeating),
+        visible: true,
+    });
 }
 
 /// 创建输入行
@@ -354,7 +387,7 @@ fn spawn_input_row(
                 column_gap: Val::Px(10.0),
                 ..default()
             },
-            Transform::default(), // 必须添加
+            Transform::default(),
         ))
         .with_children(|row| {
             // 标签
@@ -390,6 +423,7 @@ fn spawn_input_row(
             ))
             .with_children(|input| {
                 input.spawn((
+                    LoginInputText { input_type },
                     Text::new(if display_value.is_empty() {
                         "点击输入..."
                     } else {
@@ -407,6 +441,38 @@ fn spawn_input_row(
                     }),
                 ));
             });
+
+            // 密码行：追加显示/隐藏按钮
+            if is_password {
+                row.spawn((
+                    ShowPasswordToggle,
+                    Button,
+                    Interaction::default(),
+                    Node {
+                        width: Val::Px(40.0),
+                        height: Val::Px(40.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(2.0)),
+                        ..default()
+                    },
+                    BorderColor::all(AppColors::BORDER),
+                    BackgroundColor(AppColors::SURFACE),
+                    Transform::default(),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        ShowPasswordIcon,
+                        Text::new("◉"), // 隐藏状态图标
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 16.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                });
+            }
         });
 }
 
@@ -466,6 +532,7 @@ pub fn cleanup_login_ui(mut commands: Commands, query: Query<Entity, With<LoginR
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<LoginInputFocus>();
+    commands.remove_resource::<LoginCursorBlink>();
 }
 
 /// 输入框和按钮点击交互
@@ -504,8 +571,7 @@ pub fn login_keyboard_input(
     mut keyboard_events: MessageReader<KeyboardInput>,
     mut focus: ResMut<LoginInputFocus>,
     mut login_state: ResMut<LoginFormState>,
-    mut input_query: Query<(&LoginInputField, &Children, &mut BorderColor)>,
-    mut text_query: Query<(&mut Text, &mut TextColor)>,
+    mut input_query: Query<(&LoginInputField, &mut BorderColor)>,
     mut login_messages: MessageWriter<LoginRequestEvent>,
     mut next_route: ResMut<NextState<AppRoute>>,
 ) {
@@ -528,11 +594,10 @@ pub fn login_keyboard_input(
                 focus.focused = new_focus;
 
                 // 更新所有可聚焦元素的边框颜色
-                for (input, _children, mut border) in &mut input_query {
+                for (input, mut border) in &mut input_query {
                     if Some(input.input_type) == new_focus {
                         *border = BorderColor::all(AppColors::PRIMARY);
                     } else {
-                        // 输入框使用边框颜色，按钮使用透明
                         let default_border = match input.input_type {
                             LoginInputType::Email | LoginInputType::Password => AppColors::BORDER,
                             LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {
@@ -544,30 +609,26 @@ pub fn login_keyboard_input(
                 }
             }
             // Enter 键触发登录或导航
-            Key::Enter => {
-                match focus.focused {
-                    Some(LoginInputType::LoginButton)
-                    | Some(LoginInputType::Email)
-                    | Some(LoginInputType::Password)
-                    | None => {
-                        // 触发登录
-                        let email = login_state.email.clone();
-                        let password = login_state.password.clone();
+            Key::Enter => match focus.focused {
+                Some(LoginInputType::LoginButton)
+                | Some(LoginInputType::Email)
+                | Some(LoginInputType::Password)
+                | None => {
+                    let email = login_state.email.clone();
+                    let password = login_state.password.clone();
 
-                        if email.is_empty() || password.is_empty() {
-                            login_state.error = Some("请输入用户名和密码".to_string());
-                        } else {
-                            login_state.is_loading = true;
-                            login_state.error = None;
-                            login_messages.write(LoginRequestEvent { email, password });
-                        }
-                    }
-                    Some(LoginInputType::ProxySettingsButton) => {
-                        // 导航到代理设置页面
-                        next_route.set(AppRoute::ProxySettings);
+                    if email.is_empty() || password.is_empty() {
+                        login_state.error = Some("请输入用户名和密码".to_string());
+                    } else {
+                        login_state.is_loading = true;
+                        login_state.error = None;
+                        login_messages.write(LoginRequestEvent { email, password });
                     }
                 }
-            }
+                Some(LoginInputType::ProxySettingsButton) => {
+                    next_route.set(AppRoute::ProxySettings);
+                }
+            },
             Key::Backspace => {
                 let Some(focused_type) = focus.focused else {
                     continue;
@@ -575,23 +636,10 @@ pub fn login_keyboard_input(
                 match focused_type {
                     LoginInputType::Email => {
                         login_state.email.pop();
-                        update_login_input_text(
-                            &mut input_query,
-                            &mut text_query,
-                            &login_state,
-                            focused_type,
-                        );
                     }
                     LoginInputType::Password => {
                         login_state.password.pop();
-                        update_login_input_text(
-                            &mut input_query,
-                            &mut text_query,
-                            &login_state,
-                            focused_type,
-                        );
                     }
-                    // 按钮不处理退格
                     LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {}
                 }
             }
@@ -599,7 +647,6 @@ pub fn login_keyboard_input(
                 let Some(focused_type) = focus.focused else {
                     continue;
                 };
-                // 跳过控制字符
                 if input.chars().any(|c| c.is_control()) {
                     continue;
                 }
@@ -607,64 +654,14 @@ pub fn login_keyboard_input(
                 match focused_type {
                     LoginInputType::Email => {
                         login_state.email.push_str(input);
-                        update_login_input_text(
-                            &mut input_query,
-                            &mut text_query,
-                            &login_state,
-                            focused_type,
-                        );
                     }
                     LoginInputType::Password => {
                         login_state.password.push_str(input);
-                        update_login_input_text(
-                            &mut input_query,
-                            &mut text_query,
-                            &login_state,
-                            focused_type,
-                        );
                     }
-                    // 按钮不处理字符输入
                     LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {}
                 }
             }
             _ => {}
-        }
-    }
-}
-
-fn update_login_input_text(
-    input_query: &mut Query<(&LoginInputField, &Children, &mut BorderColor)>,
-    text_query: &mut Query<(&mut Text, &mut TextColor)>,
-    login_state: &LoginFormState,
-    field_type: LoginInputType,
-) {
-    // 只处理输入框类型，按钮不需要更新文本
-    let (value, is_password) = match field_type {
-        LoginInputType::Email => (&login_state.email, false),
-        LoginInputType::Password => (&login_state.password, true),
-        // 按钮不需要更新文本
-        LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => return,
-    };
-
-    for (input, children, _border) in input_query.iter() {
-        if input.input_type == field_type {
-            let display_value = if is_password && !value.is_empty() {
-                "*".repeat(value.len())
-            } else {
-                value.clone()
-            };
-
-            for child in children.iter() {
-                if let Ok((mut text, mut color)) = text_query.get_mut(child) {
-                    if display_value.is_empty() {
-                        **text = "点击输入...".to_string();
-                        *color = TextColor(AppColors::TEXT_SECONDARY);
-                    } else {
-                        **text = display_value.clone();
-                        *color = TextColor(AppColors::TEXT);
-                    }
-                }
-            }
         }
     }
 }
@@ -780,6 +777,114 @@ pub fn login_checkbox_interaction(
 
             // 保存设置到配置文件
             save_login_settings(&login_state);
+        }
+    }
+}
+
+/// 显示/隐藏密码切换按钮交互
+pub fn show_password_toggle_interaction(
+    mut interaction_query: Query<&Interaction, (Changed<Interaction>, With<ShowPasswordToggle>)>,
+    mut focus: ResMut<LoginInputFocus>,
+    mut icon_query: Query<(&mut Text, &mut TextColor), With<ShowPasswordIcon>>,
+) {
+    for interaction in &mut interaction_query {
+        if *interaction == Interaction::Pressed {
+            focus.show_password = !focus.show_password;
+            // 更新图标：◎ 显示明文，◉ 隐藏密码
+            for (mut text, mut color) in icon_query.iter_mut() {
+                if focus.show_password {
+                    **text = "◎".to_string();
+                    *color = TextColor(AppColors::PRIMARY);
+                } else {
+                    **text = "◉".to_string();
+                    *color = TextColor(AppColors::TEXT_SECONDARY);
+                }
+            }
+        }
+    }
+}
+
+/// 监听 LoginFormState 变化，动态更新错误提示
+pub fn update_login_error(
+    login_state: Res<LoginFormState>,
+    mut error_query: Query<(&mut Text, &mut Node), With<LoginErrorText>>,
+) {
+    if !login_state.is_changed() {
+        return;
+    }
+
+    for (mut text, mut node) in error_query.iter_mut() {
+        match &login_state.error {
+            Some(error) => {
+                **text = error.clone();
+                node.display = Display::Flex;
+            }
+            None => {
+                node.display = Display::None;
+            }
+        }
+    }
+}
+
+/// 光标闪烁系统 —— 在聚焦的输入框文本末尾显示/隐藏闪烁光标
+pub fn login_cursor_blink(
+    time: Res<Time>,
+    mut blink: ResMut<LoginCursorBlink>,
+    focus: Res<LoginInputFocus>,
+    login_state: Res<LoginFormState>,
+    mut text_query: Query<(&LoginInputText, &mut Text, &mut TextColor)>,
+) {
+    let prev_visible = blink.visible;
+    blink.timer.tick(time.delta());
+    if blink.timer.just_finished() {
+        blink.visible = !blink.visible;
+    }
+
+    // 输入内容变化时，重置光标为可见状态（打字时光标常亮）
+    if login_state.is_changed() {
+        blink.visible = true;
+        blink.timer.reset();
+    }
+
+    // 焦点变化时也重置光标
+    if focus.is_changed() {
+        blink.visible = true;
+        blink.timer.reset();
+    }
+
+    // 判断是否需要更新文本
+    let blink_changed = prev_visible != blink.visible;
+    if !focus.is_changed() && !blink_changed && !login_state.is_changed() {
+        return;
+    }
+
+    for (input_text, mut text, mut color) in text_query.iter_mut() {
+        let is_focused = focus.focused == Some(input_text.input_type);
+        let (value, should_mask) = match input_text.input_type {
+            LoginInputType::Email => (&login_state.email, false),
+            LoginInputType::Password => (&login_state.password, !focus.show_password),
+            _ => continue,
+        };
+
+        let display_value = if should_mask && !value.is_empty() {
+            "*".repeat(value.len())
+        } else {
+            value.clone()
+        };
+
+        if display_value.is_empty() && !is_focused {
+            // 无焦点且为空 → 显示占位符
+            **text = "点击输入...".to_string();
+            *color = TextColor(AppColors::TEXT_SECONDARY);
+        } else if is_focused {
+            // 有焦点 → 显示内容 + 闪烁光标
+            let cursor = if blink.visible { "|" } else { " " };
+            **text = format!("{}{}", display_value, cursor);
+            *color = TextColor(AppColors::TEXT);
+        } else {
+            // 无焦点但有内容 → 显示内容（无光标）
+            **text = display_value;
+            *color = TextColor(AppColors::TEXT);
         }
     }
 }
