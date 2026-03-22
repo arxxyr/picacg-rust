@@ -6,11 +6,23 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    window::PrimaryWindow,
 };
 use picacg_config::AppSettings;
 
 use super::font_loader::get_font;
 use crate::{components::*, events::*, resources::*};
+
+/// 等宽字符宽度估算（SarasaTermSCNerd, font_size 14.0）
+const MONO_CHAR_WIDTH: f32 = 8.4;
+
+/// 获取字符索引对应的字节偏移
+fn char_to_byte_index(s: &str, char_idx: usize) -> usize {
+    s.char_indices()
+        .nth(char_idx)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
 
 /// 输入框内文本标记（用于原地更新文本内容）
 #[derive(Component)]
@@ -66,6 +78,30 @@ pub struct LoginInputFocus {
     pub focused: Option<LoginInputType>,
     /// 是否显示密码明文
     pub show_password: bool,
+    /// 用户名光标位置（字符索引）
+    pub email_cursor: usize,
+    /// 密码光标位置（字符索引）
+    pub password_cursor: usize,
+}
+
+impl LoginInputFocus {
+    /// 获取当前聚焦字段的光标位置
+    fn cursor_pos(&self) -> usize {
+        match self.focused {
+            Some(LoginInputType::Email) => self.email_cursor,
+            Some(LoginInputType::Password) => self.password_cursor,
+            _ => 0,
+        }
+    }
+
+    /// 设置当前聚焦字段的光标位置
+    fn set_cursor_pos(&mut self, pos: usize) {
+        match self.focused {
+            Some(LoginInputType::Email) => self.email_cursor = pos,
+            Some(LoginInputType::Password) => self.password_cursor = pos,
+            _ => {}
+        }
+    }
 }
 
 /// 显示/隐藏密码切换按钮
@@ -420,6 +456,7 @@ fn spawn_input_row(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
+                Transform::default(), // 必须！点击定位需要 GlobalTransform
             ))
             .with_children(|input| {
                 input.spawn((
@@ -538,21 +575,59 @@ pub fn cleanup_login_ui(mut commands: Commands, query: Query<Entity, With<LoginR
 /// 输入框和按钮点击交互
 pub fn login_input_interaction(
     mut interaction_query: Query<
-        (&Interaction, &LoginInputField, &mut BorderColor),
+        (
+            &Interaction,
+            &LoginInputField,
+            &mut BorderColor,
+            &GlobalTransform,
+            &ComputedNode,
+        ),
         Changed<Interaction>,
     >,
     mut focus: ResMut<LoginInputFocus>,
     mut all_inputs: Query<(&LoginInputField, &mut BorderColor), Without<Interaction>>,
+    login_state: Res<LoginFormState>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, input, mut border) in &mut interaction_query {
+    for (interaction, input, mut border, transform, computed) in &mut interaction_query {
         if *interaction == Interaction::Pressed {
             focus.focused = Some(input.input_type);
             *border = BorderColor::all(AppColors::PRIMARY);
 
+            // 点击输入框时，根据鼠标位置计算光标位置
+            if matches!(
+                input.input_type,
+                LoginInputType::Email | LoginInputType::Password
+            ) {
+                let text_len = match input.input_type {
+                    LoginInputType::Email => login_state.email.chars().count(),
+                    LoginInputType::Password => login_state.password.chars().count(),
+                    _ => 0,
+                };
+
+                let cursor_pos = window_query
+                    .single()
+                    .ok()
+                    .and_then(|window| {
+                        let cursor = window.cursor_position()?;
+                        let scale = window.scale_factor();
+                        let node_w = computed.size().x / scale;
+                        let node_cx = transform.translation().x;
+                        let node_left = node_cx - node_w / 2.0;
+                        // 屏幕 X → Bevy UI X，减去左侧 padding(10) + border(2)
+                        let click_x = cursor.x - window.width() / 2.0;
+                        let relative_x = (click_x - node_left - 12.0).max(0.0);
+                        let char_pos = (relative_x / MONO_CHAR_WIDTH).round() as usize;
+                        Some(char_pos.min(text_len))
+                    })
+                    .unwrap_or(text_len); // 无法获取位置时定位到末尾
+
+                focus.set_cursor_pos(cursor_pos);
+            }
+
             // 取消其他元素的焦点
             for (other_input, mut other_border) in &mut all_inputs {
                 if other_input.input_type != input.input_type {
-                    // 输入框使用边框颜色，按钮使用透明
                     let default_border = match other_input.input_type {
                         LoginInputType::Email | LoginInputType::Password => AppColors::BORDER,
                         LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {
@@ -576,7 +651,6 @@ pub fn login_keyboard_input(
     mut next_route: ResMut<NextState<AppRoute>>,
 ) {
     for event in keyboard_events.read() {
-        // 只处理按下事件
         if event.state != ButtonState::Pressed {
             continue;
         }
@@ -593,7 +667,17 @@ pub fn login_keyboard_input(
                 };
                 focus.focused = new_focus;
 
-                // 更新所有可聚焦元素的边框颜色
+                // Tab 切换时光标移到末尾
+                match new_focus {
+                    Some(LoginInputType::Email) => {
+                        focus.email_cursor = login_state.email.chars().count();
+                    }
+                    Some(LoginInputType::Password) => {
+                        focus.password_cursor = login_state.password.chars().count();
+                    }
+                    _ => {}
+                }
+
                 for (input, mut border) in &mut input_query {
                     if Some(input.input_type) == new_focus {
                         *border = BorderColor::all(AppColors::PRIMARY);
@@ -629,20 +713,90 @@ pub fn login_keyboard_input(
                     next_route.set(AppRoute::ProxySettings);
                 }
             },
+            // 退格：删除光标前一个字符
             Key::Backspace => {
+                let Some(focused_type) = focus.focused else {
+                    continue;
+                };
+                let (text, cursor) = match focused_type {
+                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
+                    LoginInputType::Password => {
+                        (&mut login_state.password, &mut focus.password_cursor)
+                    }
+                    _ => continue,
+                };
+                if *cursor > 0 {
+                    let start = char_to_byte_index(text, *cursor - 1);
+                    let end = char_to_byte_index(text, *cursor);
+                    text.replace_range(start..end, "");
+                    *cursor -= 1;
+                }
+            }
+            // Delete：删除光标后一个字符
+            Key::Delete => {
+                let Some(focused_type) = focus.focused else {
+                    continue;
+                };
+                let (text, cursor) = match focused_type {
+                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
+                    LoginInputType::Password => {
+                        (&mut login_state.password, &mut focus.password_cursor)
+                    }
+                    _ => continue,
+                };
+                let len = text.chars().count();
+                if *cursor < len {
+                    let start = char_to_byte_index(text, *cursor);
+                    let end = char_to_byte_index(text, *cursor + 1);
+                    text.replace_range(start..end, "");
+                }
+            }
+            // 方向键
+            Key::ArrowLeft => {
                 let Some(focused_type) = focus.focused else {
                     continue;
                 };
                 match focused_type {
                     LoginInputType::Email => {
-                        login_state.email.pop();
+                        focus.email_cursor = focus.email_cursor.saturating_sub(1);
                     }
                     LoginInputType::Password => {
-                        login_state.password.pop();
+                        focus.password_cursor = focus.password_cursor.saturating_sub(1);
                     }
-                    LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {}
+                    _ => {}
                 }
             }
+            Key::ArrowRight => {
+                let Some(focused_type) = focus.focused else {
+                    continue;
+                };
+                match focused_type {
+                    LoginInputType::Email => {
+                        focus.email_cursor =
+                            (focus.email_cursor + 1).min(login_state.email.chars().count());
+                    }
+                    LoginInputType::Password => {
+                        focus.password_cursor =
+                            (focus.password_cursor + 1).min(login_state.password.chars().count());
+                    }
+                    _ => {}
+                }
+            }
+            Key::Home => match focus.focused {
+                Some(LoginInputType::Email) => focus.email_cursor = 0,
+                Some(LoginInputType::Password) => focus.password_cursor = 0,
+                _ => {}
+            },
+            Key::End => match focus.focused {
+                Some(LoginInputType::Email) => {
+                    focus.email_cursor = login_state.email.chars().count();
+                }
+                Some(LoginInputType::Password) => {
+                    focus.password_cursor = login_state.password.chars().count();
+                }
+                _ => {}
+            },
+            // 字符输入：在光标位置插入
             Key::Character(input) => {
                 let Some(focused_type) = focus.focused else {
                     continue;
@@ -651,15 +805,16 @@ pub fn login_keyboard_input(
                     continue;
                 }
 
-                match focused_type {
-                    LoginInputType::Email => {
-                        login_state.email.push_str(input);
-                    }
+                let (text, cursor) = match focused_type {
+                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
                     LoginInputType::Password => {
-                        login_state.password.push_str(input);
+                        (&mut login_state.password, &mut focus.password_cursor)
                     }
-                    LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {}
-                }
+                    _ => continue,
+                };
+                let byte_idx = char_to_byte_index(text, *cursor);
+                text.insert_str(byte_idx, input);
+                *cursor += input.chars().count();
             }
             _ => {}
         }
@@ -877,9 +1032,16 @@ pub fn login_cursor_blink(
             **text = "点击输入...".to_string();
             *color = TextColor(AppColors::TEXT_SECONDARY);
         } else if is_focused {
-            // 有焦点 → 显示内容 + 闪烁光标
-            let cursor = if blink.visible { "|" } else { " " };
-            **text = format!("{}{}", display_value, cursor);
+            // 有焦点 → 在光标位置插入闪烁光标
+            let cursor_char = if blink.visible { "|" } else { " " };
+            let cursor_pos = focus.cursor_pos().min(display_value.chars().count());
+            let byte_idx = display_value
+                .char_indices()
+                .nth(cursor_pos)
+                .map(|(i, _)| i)
+                .unwrap_or(display_value.len());
+            let (before, after) = display_value.split_at(byte_idx);
+            **text = format!("{}{}{}", before, cursor_char, after);
             *color = TextColor(AppColors::TEXT);
         } else {
             // 无焦点但有内容 → 显示内容（无光标）
