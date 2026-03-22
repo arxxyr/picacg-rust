@@ -6,36 +6,16 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
-    window::PrimaryWindow,
 };
 use picacg_config::AppSettings;
 
 use super::font_loader::get_font;
-use crate::{components::*, events::*, resources::*};
-
-/// 等宽字符宽度估算（SarasaTermSCNerd, font_size 14.0）
-const MONO_CHAR_WIDTH: f32 = 8.4;
-
-/// 获取字符索引对应的字节偏移
-fn char_to_byte_index(s: &str, char_idx: usize) -> usize {
-    s.char_indices()
-        .nth(char_idx)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
-}
-
-/// 输入框内文本标记（用于原地更新文本内容）
-#[derive(Component)]
-pub struct LoginInputText {
-    pub input_type: LoginInputType,
-}
-
-/// 光标闪烁计时器资源
-#[derive(Resource)]
-pub struct LoginCursorBlink {
-    pub timer: Timer,
-    pub visible: bool,
-}
+use crate::{
+    components::*,
+    events::*,
+    resources::*,
+    utils::text_input::{TextInput, TextInputDisplay},
+};
 
 /// 应用颜色常量
 pub struct AppColors;
@@ -78,30 +58,6 @@ pub struct LoginInputFocus {
     pub focused: Option<LoginInputType>,
     /// 是否显示密码明文
     pub show_password: bool,
-    /// 用户名光标位置（字符索引）
-    pub email_cursor: usize,
-    /// 密码光标位置（字符索引）
-    pub password_cursor: usize,
-}
-
-impl LoginInputFocus {
-    /// 获取当前聚焦字段的光标位置
-    fn cursor_pos(&self) -> usize {
-        match self.focused {
-            Some(LoginInputType::Email) => self.email_cursor,
-            Some(LoginInputType::Password) => self.password_cursor,
-            _ => 0,
-        }
-    }
-
-    /// 设置当前聚焦字段的光标位置
-    fn set_cursor_pos(&mut self, pos: usize) {
-        match self.focused {
-            Some(LoginInputType::Email) => self.email_cursor = pos,
-            Some(LoginInputType::Password) => self.password_cursor = pos,
-            _ => {}
-        }
-    }
 }
 
 /// 显示/隐藏密码切换按钮
@@ -393,11 +349,6 @@ pub fn setup_login_ui(
 
     // 初始化焦点资源
     commands.insert_resource(LoginInputFocus::default());
-    // 初始化光标闪烁计时器
-    commands.insert_resource(LoginCursorBlink {
-        timer: Timer::from_seconds(0.53, TimerMode::Repeating),
-        visible: true,
-    });
 }
 
 /// 创建输入行
@@ -409,10 +360,12 @@ fn spawn_input_row(
     input_type: LoginInputType,
 ) {
     let is_password = input_type == LoginInputType::Password;
-    let display_value = if is_password && !value.is_empty() {
-        "*".repeat(value.len())
+    let text_input = if is_password {
+        TextInput::new("点击输入...")
+            .with_value(value)
+            .with_password()
     } else {
-        value.to_string()
+        TextInput::new("点击输入...").with_value(value)
     };
 
     parent
@@ -441,10 +394,12 @@ fn spawn_input_row(
                 },
             ));
 
-            // 输入框（使用按钮模拟点击）
+            // 输入框（TextInput 通用组件）
             row.spawn((
                 LoginInputField { input_type },
+                text_input,
                 Button,
+                Interaction::default(),
                 Node {
                     flex_grow: 1.0,
                     height: Val::Px(40.0),
@@ -456,22 +411,26 @@ fn spawn_input_row(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
-                Transform::default(), // 必须！点击定位需要 GlobalTransform
+                Transform::default(),
             ))
             .with_children(|input| {
+                let display = if value.is_empty() {
+                    "点击输入..."
+                } else if is_password {
+                    // 初始显示用掩码（后续由通用系统更新）
+                    ""
+                } else {
+                    value
+                };
                 input.spawn((
-                    LoginInputText { input_type },
-                    Text::new(if display_value.is_empty() {
-                        "点击输入..."
-                    } else {
-                        &display_value
-                    }),
+                    TextInputDisplay,
+                    Text::new(display),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
                         ..default()
                     },
-                    TextColor(if display_value.is_empty() {
+                    TextColor(if value.is_empty() {
                         AppColors::TEXT_SECONDARY
                     } else {
                         AppColors::TEXT
@@ -500,7 +459,7 @@ fn spawn_input_row(
                 .with_children(|btn| {
                     btn.spawn((
                         ShowPasswordIcon,
-                        Text::new("◉"), // 隐藏状态图标
+                        Text::new("◉"),
                         TextFont {
                             font: font.clone(),
                             font_size: 16.0,
@@ -569,63 +528,23 @@ pub fn cleanup_login_ui(mut commands: Commands, query: Query<Entity, With<LoginR
         commands.entity(entity).despawn();
     }
     commands.remove_resource::<LoginInputFocus>();
-    commands.remove_resource::<LoginCursorBlink>();
 }
 
 /// 输入框和按钮点击交互
 pub fn login_input_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &LoginInputField,
-            &mut BorderColor,
-            &GlobalTransform,
-            &ComputedNode,
-        ),
+        (&Interaction, &LoginInputField, &mut BorderColor),
         Changed<Interaction>,
     >,
     mut focus: ResMut<LoginInputFocus>,
     mut all_inputs: Query<(&LoginInputField, &mut BorderColor), Without<Interaction>>,
-    login_state: Res<LoginFormState>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, input, mut border, transform, computed) in &mut interaction_query {
+    for (interaction, input, mut border) in &mut interaction_query {
         if *interaction == Interaction::Pressed {
             focus.focused = Some(input.input_type);
             *border = BorderColor::all(AppColors::PRIMARY);
 
-            // 点击输入框时，根据鼠标位置计算光标位置
-            if matches!(
-                input.input_type,
-                LoginInputType::Email | LoginInputType::Password
-            ) {
-                let text_len = match input.input_type {
-                    LoginInputType::Email => login_state.email.chars().count(),
-                    LoginInputType::Password => login_state.password.chars().count(),
-                    _ => 0,
-                };
-
-                let cursor_pos = window_query
-                    .single()
-                    .ok()
-                    .and_then(|window| {
-                        let cursor = window.cursor_position()?;
-                        let scale = window.scale_factor();
-                        let node_w = computed.size().x / scale;
-                        let node_cx = transform.translation().x;
-                        let node_left = node_cx - node_w / 2.0;
-                        // 屏幕 X → Bevy UI X，减去左侧 padding(10) + border(2)
-                        let click_x = cursor.x - window.width() / 2.0;
-                        let relative_x = (click_x - node_left - 12.0).max(0.0);
-                        let char_pos = (relative_x / MONO_CHAR_WIDTH).round() as usize;
-                        Some(char_pos.min(text_len))
-                    })
-                    .unwrap_or(text_len); // 无法获取位置时定位到末尾
-
-                focus.set_cursor_pos(cursor_pos);
-            }
-
-            // 取消其他元素的焦点
+            // 取消其他元素的焦点边框
             for (other_input, mut other_border) in &mut all_inputs {
                 if other_input.input_type != input.input_type {
                     let default_border = match other_input.input_type {
@@ -641,12 +560,47 @@ pub fn login_input_interaction(
     }
 }
 
-/// 处理登录页面键盘输入
+/// 同步 LoginInputFocus → TextInput.focused / show_password
+pub fn login_sync_focus(
+    focus: Res<LoginInputFocus>,
+    mut query: Query<(&LoginInputField, &mut TextInput)>,
+) {
+    if !focus.is_changed() {
+        return;
+    }
+    for (field, mut input) in query.iter_mut() {
+        input.focused = focus.focused == Some(field.input_type);
+        if field.input_type == LoginInputType::Password {
+            input.show_password = focus.show_password;
+        }
+    }
+}
+
+/// 同步 TextInput.value → LoginFormState（保持 LoginFormState
+/// 与输入框内容一致）
+pub fn login_sync_text_values(
+    mut login_state: ResMut<LoginFormState>,
+    query: Query<(&LoginInputField, &TextInput), Changed<TextInput>>,
+) {
+    for (field, input) in query.iter() {
+        match field.input_type {
+            LoginInputType::Email if login_state.email != input.value => {
+                login_state.email.clone_from(&input.value);
+            }
+            LoginInputType::Password if login_state.password != input.value => {
+                login_state.password.clone_from(&input.value);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// 处理登录页面键盘输入（仅 Tab/Enter，编辑由通用 TextInput 系统处理）
 pub fn login_keyboard_input(
     mut keyboard_events: MessageReader<KeyboardInput>,
     mut focus: ResMut<LoginInputFocus>,
     mut login_state: ResMut<LoginFormState>,
-    mut input_query: Query<(&LoginInputField, &mut BorderColor)>,
+    mut input_query: Query<(&LoginInputField, &mut BorderColor, Option<&mut TextInput>)>,
     mut login_messages: MessageWriter<LoginRequestEvent>,
     mut next_route: ResMut<NextState<AppRoute>>,
 ) {
@@ -656,7 +610,6 @@ pub fn login_keyboard_input(
         }
 
         match &event.logical_key {
-            // Tab 键切换焦点
             Key::Tab => {
                 let new_focus = match focus.focused {
                     None => Some(LoginInputType::Email),
@@ -667,22 +620,15 @@ pub fn login_keyboard_input(
                 };
                 focus.focused = new_focus;
 
-                // Tab 切换时光标移到末尾
-                match new_focus {
-                    Some(LoginInputType::Email) => {
-                        focus.email_cursor = login_state.email.chars().count();
-                    }
-                    Some(LoginInputType::Password) => {
-                        focus.password_cursor = login_state.password.chars().count();
-                    }
-                    _ => {}
-                }
-
-                for (input, mut border) in &mut input_query {
-                    if Some(input.input_type) == new_focus {
+                for (field, mut border, text_input) in &mut input_query {
+                    if Some(field.input_type) == new_focus {
                         *border = BorderColor::all(AppColors::PRIMARY);
+                        // Tab 切换时光标移到末尾
+                        if let Some(mut ti) = text_input {
+                            ti.cursor = ti.value.chars().count();
+                        }
                     } else {
-                        let default_border = match input.input_type {
+                        let default_border = match field.input_type {
                             LoginInputType::Email | LoginInputType::Password => AppColors::BORDER,
                             LoginInputType::LoginButton | LoginInputType::ProxySettingsButton => {
                                 Color::NONE
@@ -692,7 +638,6 @@ pub fn login_keyboard_input(
                     }
                 }
             }
-            // Enter 键触发登录或导航
             Key::Enter => match focus.focused {
                 Some(LoginInputType::LoginButton)
                 | Some(LoginInputType::Email)
@@ -713,109 +658,6 @@ pub fn login_keyboard_input(
                     next_route.set(AppRoute::ProxySettings);
                 }
             },
-            // 退格：删除光标前一个字符
-            Key::Backspace => {
-                let Some(focused_type) = focus.focused else {
-                    continue;
-                };
-                let (text, cursor) = match focused_type {
-                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
-                    LoginInputType::Password => {
-                        (&mut login_state.password, &mut focus.password_cursor)
-                    }
-                    _ => continue,
-                };
-                if *cursor > 0 {
-                    let start = char_to_byte_index(text, *cursor - 1);
-                    let end = char_to_byte_index(text, *cursor);
-                    text.replace_range(start..end, "");
-                    *cursor -= 1;
-                }
-            }
-            // Delete：删除光标后一个字符
-            Key::Delete => {
-                let Some(focused_type) = focus.focused else {
-                    continue;
-                };
-                let (text, cursor) = match focused_type {
-                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
-                    LoginInputType::Password => {
-                        (&mut login_state.password, &mut focus.password_cursor)
-                    }
-                    _ => continue,
-                };
-                let len = text.chars().count();
-                if *cursor < len {
-                    let start = char_to_byte_index(text, *cursor);
-                    let end = char_to_byte_index(text, *cursor + 1);
-                    text.replace_range(start..end, "");
-                }
-            }
-            // 方向键
-            Key::ArrowLeft => {
-                let Some(focused_type) = focus.focused else {
-                    continue;
-                };
-                match focused_type {
-                    LoginInputType::Email => {
-                        focus.email_cursor = focus.email_cursor.saturating_sub(1);
-                    }
-                    LoginInputType::Password => {
-                        focus.password_cursor = focus.password_cursor.saturating_sub(1);
-                    }
-                    _ => {}
-                }
-            }
-            Key::ArrowRight => {
-                let Some(focused_type) = focus.focused else {
-                    continue;
-                };
-                match focused_type {
-                    LoginInputType::Email => {
-                        focus.email_cursor =
-                            (focus.email_cursor + 1).min(login_state.email.chars().count());
-                    }
-                    LoginInputType::Password => {
-                        focus.password_cursor =
-                            (focus.password_cursor + 1).min(login_state.password.chars().count());
-                    }
-                    _ => {}
-                }
-            }
-            Key::Home => match focus.focused {
-                Some(LoginInputType::Email) => focus.email_cursor = 0,
-                Some(LoginInputType::Password) => focus.password_cursor = 0,
-                _ => {}
-            },
-            Key::End => match focus.focused {
-                Some(LoginInputType::Email) => {
-                    focus.email_cursor = login_state.email.chars().count();
-                }
-                Some(LoginInputType::Password) => {
-                    focus.password_cursor = login_state.password.chars().count();
-                }
-                _ => {}
-            },
-            // 字符输入：在光标位置插入
-            Key::Character(input) => {
-                let Some(focused_type) = focus.focused else {
-                    continue;
-                };
-                if input.chars().any(|c| c.is_control()) {
-                    continue;
-                }
-
-                let (text, cursor) = match focused_type {
-                    LoginInputType::Email => (&mut login_state.email, &mut focus.email_cursor),
-                    LoginInputType::Password => {
-                        (&mut login_state.password, &mut focus.password_cursor)
-                    }
-                    _ => continue,
-                };
-                let byte_idx = char_to_byte_index(text, *cursor);
-                text.insert_str(byte_idx, input);
-                *cursor += input.chars().count();
-            }
             _ => {}
         }
     }
@@ -977,76 +819,6 @@ pub fn update_login_error(
             None => {
                 node.display = Display::None;
             }
-        }
-    }
-}
-
-/// 光标闪烁系统 —— 在聚焦的输入框文本末尾显示/隐藏闪烁光标
-pub fn login_cursor_blink(
-    time: Res<Time>,
-    mut blink: ResMut<LoginCursorBlink>,
-    focus: Res<LoginInputFocus>,
-    login_state: Res<LoginFormState>,
-    mut text_query: Query<(&LoginInputText, &mut Text, &mut TextColor)>,
-) {
-    let prev_visible = blink.visible;
-    blink.timer.tick(time.delta());
-    if blink.timer.just_finished() {
-        blink.visible = !blink.visible;
-    }
-
-    // 输入内容变化时，重置光标为可见状态（打字时光标常亮）
-    if login_state.is_changed() {
-        blink.visible = true;
-        blink.timer.reset();
-    }
-
-    // 焦点变化时也重置光标
-    if focus.is_changed() {
-        blink.visible = true;
-        blink.timer.reset();
-    }
-
-    // 判断是否需要更新文本
-    let blink_changed = prev_visible != blink.visible;
-    if !focus.is_changed() && !blink_changed && !login_state.is_changed() {
-        return;
-    }
-
-    for (input_text, mut text, mut color) in text_query.iter_mut() {
-        let is_focused = focus.focused == Some(input_text.input_type);
-        let (value, should_mask) = match input_text.input_type {
-            LoginInputType::Email => (&login_state.email, false),
-            LoginInputType::Password => (&login_state.password, !focus.show_password),
-            _ => continue,
-        };
-
-        let display_value = if should_mask && !value.is_empty() {
-            "*".repeat(value.len())
-        } else {
-            value.clone()
-        };
-
-        if display_value.is_empty() && !is_focused {
-            // 无焦点且为空 → 显示占位符
-            **text = "点击输入...".to_string();
-            *color = TextColor(AppColors::TEXT_SECONDARY);
-        } else if is_focused {
-            // 有焦点 → 在光标位置插入闪烁光标
-            let cursor_char = if blink.visible { "|" } else { " " };
-            let cursor_pos = focus.cursor_pos().min(display_value.chars().count());
-            let byte_idx = display_value
-                .char_indices()
-                .nth(cursor_pos)
-                .map(|(i, _)| i)
-                .unwrap_or(display_value.len());
-            let (before, after) = display_value.split_at(byte_idx);
-            **text = format!("{}{}{}", before, cursor_char, after);
-            *color = TextColor(AppColors::TEXT);
-        } else {
-            // 无焦点但有内容 → 显示内容（无光标）
-            **text = display_value;
-            *color = TextColor(AppColors::TEXT);
         }
     }
 }

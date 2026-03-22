@@ -82,6 +82,10 @@ mimalloc = { version = "0.1", default-features = false }
 opt-level = 0
 debug = true
 
+[profile.ci-dev]
+inherits = "dev"
+incremental = false
+
 [profile.release]
 opt-level = 3
 strip = true

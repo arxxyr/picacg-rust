@@ -4,7 +4,13 @@
 
 use bevy::prelude::*;
 
-use crate::{components::*, events::*, resources::*, systems::*};
+use crate::{
+    components::*,
+    events::*,
+    resources::*,
+    systems::*,
+    utils::text_input::{self, TextInputCursorBlink},
+};
 
 /// UI 插件
 pub struct UiPlugin;
@@ -51,6 +57,17 @@ impl Plugin for UiPlugin {
             .add_message::<NextPageEvent>()
             .add_message::<ShowErrorEvent>()
             .add_message::<ShowSuccessEvent>()
+            // 通用文本输入框系统（全局注册，所有页面共享）
+            .init_resource::<TextInputCursorBlink>()
+            .add_systems(
+                Update,
+                (
+                    text_input::text_input_keyboard,
+                    text_input::text_input_ime,
+                    text_input::text_input_click_position,
+                    text_input::text_input_cursor_blink,
+                ),
+            )
             // 启动系统 (字体在 PreStartup 加载确保先于 UI)
             .add_systems(PreStartup, setup_fonts)
             .add_systems(Startup, setup_camera)
@@ -63,12 +80,13 @@ impl Plugin for UiPlugin {
                     login_button_interaction,
                     proxy_settings_button_interaction,
                     login_input_interaction,
+                    login_sync_focus,
+                    login_sync_text_values,
                     login_keyboard_input,
                     login_checkbox_interaction,
                     register_button_interaction,
                     show_password_toggle_interaction,
                     update_login_error,
-                    login_cursor_blink,
                 )
                     .run_if(in_state(AppRoute::Login)),
             )
