@@ -136,7 +136,6 @@ pub fn setup_favorites_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏
@@ -150,7 +149,6 @@ pub fn setup_favorites_ui(
                     ..default()
                 },
                 BorderColor::all(AppColors::BORDER),
-                Transform::default(),
             ))
             .with_children(|header| {
                 header.spawn((
@@ -165,76 +163,73 @@ pub fn setup_favorites_ui(
             });
 
             // 滚动区域包装器
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|wrapper| {
-                // 收藏网格（可滚动）
-                let scroll_container_id = wrapper
-                    .spawn((
-                        FavoritesScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::FlexStart,
-                            align_content: AlignContent::FlexStart,
-                            padding: UiRect {
-                                left: Val::Px(favorites_layout::PADDING_LEFT),
-                                right: Val::Px(favorites_layout::PADDING_RIGHT),
-                                top: Val::Px(favorites_layout::PADDING_TOP),
-                                bottom: Val::Px(favorites_layout::PADDING_BOTTOM),
+            root.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                position_type: PositionType::Relative,
+                ..default()
+            },))
+                .with_children(|wrapper| {
+                    // 收藏网格（可滚动）
+                    let scroll_container_id = wrapper
+                        .spawn((
+                            FavoritesScrollContainer,
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                justify_content: JustifyContent::FlexStart,
+                                align_content: AlignContent::FlexStart,
+                                padding: UiRect {
+                                    left: Val::Px(favorites_layout::PADDING_LEFT),
+                                    right: Val::Px(favorites_layout::PADDING_RIGHT),
+                                    top: Val::Px(favorites_layout::PADDING_TOP),
+                                    bottom: Val::Px(favorites_layout::PADDING_BOTTOM),
+                                },
+                                column_gap: Val::Px(favorites_layout::COLUMN_GAP),
+                                row_gap: Val::Px(favorites_layout::ROW_GAP),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
                             },
-                            column_gap: Val::Px(favorites_layout::COLUMN_GAP),
-                            row_gap: Val::Px(favorites_layout::ROW_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|grid| {
-                        if favorites_state.is_loading {
-                            grid.spawn((
-                                LoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        } else if favorites_state.comics.is_empty()
-                            && favorites_state.error.is_none()
-                        {
-                            // 空状态提示（初始状态，数据加载后会被移除）
-                            grid.spawn((
-                                FavoritesEmptyHint,
-                                Text::new("暂无收藏，去添加一些喜欢的漫画吧~"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        }
-                    })
-                    .id();
+                            ScrollPosition::default(),
+                            ContentSizeInfo::default(),
+                        ))
+                        .with_children(|grid| {
+                            if favorites_state.is_loading {
+                                grid.spawn((
+                                    LoadingIndicator,
+                                    Text::new("加载中..."),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 16.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT),
+                                ));
+                            } else if favorites_state.comics.is_empty()
+                                && favorites_state.error.is_none()
+                            {
+                                // 空状态提示（初始状态，数据加载后会被移除）
+                                grid.spawn((
+                                    FavoritesEmptyHint,
+                                    Text::new("暂无收藏，去添加一些喜欢的漫画吧~"),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 16.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT_SECONDARY),
+                                ));
+                            }
+                        })
+                        .id();
 
-                // 创建滚动条
-                spawn_scrollbar(wrapper, scroll_container_id);
-            });
+                    // 创建滚动条
+                    spawn_scrollbar(wrapper, scroll_container_id);
+                });
 
             // 分页控件（使用通用分页组件）
             spawn_pagination_controls::<FavoritesPage>(
@@ -356,27 +351,24 @@ fn spawn_favorite_card(
 
             // 分类和标签容器
             if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 分类（蓝色）
-                    for category in comic.categories.iter().take(2) {
-                        spawn_tag_badge(tags_container, category, font, TagColor::Category);
-                    }
-                    // 标签（绿色）
-                    for tag in comic.tags.iter().take(2) {
-                        spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
-                    }
-                });
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 分类（蓝色）
+                        for category in comic.categories.iter().take(2) {
+                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
+                        }
+                        // 标签（绿色）
+                        for tag in comic.tags.iter().take(2) {
+                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
+                        }
+                    });
             }
 
             // 创建/更新时间

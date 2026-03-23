@@ -72,7 +72,6 @@ pub fn spawn_pagination_controls_with_theme<T: Send + Sync + 'static>(
             },
             BorderColor::all(theme.border),
             BackgroundColor(theme.surface),
-            Transform::default(),
         ))
         .with_children(|pagination| {
             // 上一页按钮

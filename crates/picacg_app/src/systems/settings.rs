@@ -2,7 +2,12 @@
 //!
 //! 实现应用设置页面
 
-use bevy::{prelude::*, time::Timer, ui::FocusPolicy, window::PrimaryWindow};
+use bevy::{
+    prelude::*,
+    time::Timer,
+    ui::{FocusPolicy, RelativeCursorPosition},
+    window::PrimaryWindow,
+};
 use picacg_config::{
     AppSettings, ChannelType, FilterSettings, LogLevel, ProxyType, update_log_level,
 };
@@ -13,7 +18,10 @@ use crate::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
     },
     systems::{login::AppColors, scrollbar::scrollbar_config::*},
-    utils::text_input::{TextInput, TextInputDisplay},
+    utils::{
+        icons::*,
+        text_input::{TextInput, TextInputDisplay},
+    },
 };
 
 /// 设置滚动容器组件（本地定义）
@@ -345,6 +353,7 @@ pub fn setup_settings_ui(
     _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     categories_state: Res<crate::resources::CategoriesState>,
+    cached_tags: Res<crate::resources::CachedTagsState>,
 ) {
     let font: Handle<Font> = get_font();
     let settings = AppSettings::global().read();
@@ -427,126 +436,124 @@ pub fn setup_settings_ui(
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
-                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ))
             .with_children(|root| {
                 // 标题栏
                 spawn_settings_header(root, &font);
 
                 // 设置内容（可滚动）- 包装器需要 Relative 定位以支持 Absolute 子元素
-                root.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_grow: 1.0,
-                        flex_shrink: 1.0,
-                        flex_basis: Val::Px(0.0),
-                        min_height: Val::Px(0.0),
-                        position_type: PositionType::Relative,
-                        overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
-                        ..default()
-                    },
-                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-                ))
-                .with_children(|content_wrapper| {
-                    // 滚动容器
-                    let scroll_container = content_wrapper
-                        .spawn((
-                            SettingsScrollContainer,
-                            ScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect::all(Val::Px(20.0)),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|scroll| {
-                            // 代理设置分组
-                            spawn_settings_section(scroll, &font, "代理设置", |section| {
-                                spawn_proxy_setting(section, &font, &settings);
-                            });
-
-                            // 分流设置分组
-                            spawn_settings_section(scroll, &font, "分流设置", |section| {
-                                spawn_channel_setting(section, &font, &settings);
-                            });
-
-                            // 日志设置分组
-                            spawn_settings_section(scroll, &font, "日志设置", |section| {
-                                spawn_log_level_setting(section, &font, settings.log_level);
-                            });
-
-                            // 下载设置分组
-                            spawn_settings_section(scroll, &font, "下载设置", |section| {
-                                spawn_download_path_setting(
-                                    section,
-                                    &font,
-                                    &settings.download_path,
-                                );
-                                spawn_max_concurrent_downloads_setting(
-                                    section,
-                                    &font,
-                                    settings.max_concurrent_downloads,
-                                );
-                                spawn_auto_resume_downloads_setting(
-                                    section,
-                                    &font,
-                                    settings.auto_resume_downloads,
-                                );
-                                spawn_auto_pack_cbz_setting(section, &font, settings.auto_pack_cbz);
-                                spawn_delete_images_after_cbz_setting(
-                                    section,
-                                    &font,
-                                    settings.delete_images_after_cbz,
-                                );
-                            });
-
-                            // 内容过滤分组
-                            let category_titles: Vec<String> = categories_state
-                                .categories
-                                .iter()
-                                .map(|c| c.title.clone())
-                                .collect();
-                            spawn_settings_section(scroll, &font, "内容过滤", |section| {
-                                spawn_filter_settings(
-                                    section,
-                                    &font,
-                                    &settings.filter,
-                                    &category_titles,
-                                );
-                            });
-
-                            // 缓存设置分组
-                            spawn_settings_section(scroll, &font, "缓存设置", |section| {
-                                spawn_cache_setting(section, &font);
-                            });
-
-                            // 关于分组
-                            spawn_settings_section(scroll, &font, "关于", |section| {
-                                spawn_about_section(section, &font);
-                            });
-
-                            // 底部间距（确保最后的内容可以完全滚动到可见区域）
-                            scroll.spawn((
+                root.spawn((Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
+                    ..default()
+                },))
+                    .with_children(|content_wrapper| {
+                        // 滚动容器
+                        let scroll_container = content_wrapper
+                            .spawn((
+                                SettingsScrollContainer,
+                                ScrollContainer,
                                 Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                    padding: UiRect::all(Val::Px(20.0)),
+                                    overflow: Overflow::scroll_y(),
+                                    ..default()
+                                },
+                                ScrollPosition::default(),
+                                ContentSizeInfo::default(),
+                            ))
+                            .with_children(|scroll| {
+                                // 代理设置分组
+                                spawn_settings_section(scroll, &font, "代理设置", |section| {
+                                    spawn_proxy_setting(section, &font, &settings);
+                                });
+
+                                // 分流设置分组
+                                spawn_settings_section(scroll, &font, "分流设置", |section| {
+                                    spawn_channel_setting(section, &font, &settings);
+                                });
+
+                                // 日志设置分组
+                                spawn_settings_section(scroll, &font, "日志设置", |section| {
+                                    spawn_log_level_setting(section, &font, settings.log_level);
+                                });
+
+                                // 下载设置分组
+                                spawn_settings_section(scroll, &font, "下载设置", |section| {
+                                    spawn_download_path_setting(
+                                        section,
+                                        &font,
+                                        &settings.download_path,
+                                    );
+                                    spawn_max_concurrent_downloads_setting(
+                                        section,
+                                        &font,
+                                        settings.max_concurrent_downloads,
+                                    );
+                                    spawn_auto_resume_downloads_setting(
+                                        section,
+                                        &font,
+                                        settings.auto_resume_downloads,
+                                    );
+                                    spawn_auto_pack_cbz_setting(
+                                        section,
+                                        &font,
+                                        settings.auto_pack_cbz,
+                                    );
+                                    spawn_delete_images_after_cbz_setting(
+                                        section,
+                                        &font,
+                                        settings.delete_images_after_cbz,
+                                    );
+                                });
+
+                                // 内容过滤分组
+                                let category_titles: Vec<String> = categories_state
+                                    .categories
+                                    .iter()
+                                    .map(|c| c.title.clone())
+                                    .collect();
+                                let tag_titles: Vec<String> = cached_tags.tags.clone();
+                                spawn_settings_section(scroll, &font, "内容过滤", |section| {
+                                    spawn_filter_settings(
+                                        section,
+                                        &font,
+                                        &settings.filter,
+                                        &category_titles,
+                                        &tag_titles,
+                                    );
+                                });
+
+                                // 缓存设置分组
+                                spawn_settings_section(scroll, &font, "缓存设置", |section| {
+                                    spawn_cache_setting(section, &font);
+                                });
+
+                                // 关于分组
+                                spawn_settings_section(scroll, &font, "关于", |section| {
+                                    spawn_about_section(section, &font);
+                                });
+
+                                // 底部间距（确保最后的内容可以完全滚动到可见区域）
+                                scroll.spawn((Node {
                                     width: Val::Percent(100.0),
                                     height: Val::Px(120.0),
                                     min_height: Val::Px(120.0),
                                     ..default()
-                                },
-                                Transform::default(), /* 必须添加，否则子实体的 GlobalTransform
-                                                       * 会报警告 */
-                            ));
-                        })
-                        .id();
+                                },));
+                            })
+                            .id();
 
-                    // 滚动条
-                    spawn_settings_scrollbar(content_wrapper, scroll_container);
-                });
+                        // 滚动条
+                        spawn_settings_scrollbar(content_wrapper, scroll_container);
+                    });
 
                 // 底部状态栏（固定在页面底部，显示保存状态提示）
                 spawn_status_bar(root, &font);
@@ -573,7 +580,7 @@ fn spawn_settings_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
         ))
         .with_children(|header| {
             header.spawn((
-                Text::new("⚙️ 设置"),
+                Text::new(format!("{ICON_COG} 设置")),
                 TextFont {
                     font: font.clone(),
                     font_size: 20.0,
@@ -636,15 +643,12 @@ fn spawn_download_path_setting(
 ) {
     // 标签行
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 标签
             row.spawn((
@@ -669,90 +673,86 @@ fn spawn_download_path_setting(
             ));
 
             // 输入框 + 选择目录按钮 行
-            row.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(8.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|input_row| {
-                // 输入框（TextInput 通用组件）
-                let display_text = if current_path.is_empty() {
-                    "（使用默认路径）".to_string()
-                } else {
-                    current_path.to_string()
-                };
-                input_row
-                    .spawn((
-                        DownloadPathInput,
-                        TextInput::new("（使用默认路径）").with_value(current_path),
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            flex_grow: 1.0,
-                            height: Val::Px(36.0),
-                            padding: UiRect::horizontal(Val::Px(12.0)),
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                        BorderColor::all(AppColors::BORDER),
-                        Transform::default(),
-                    ))
-                    .with_children(|input| {
-                        input.spawn((
-                            TextInputDisplay,
-                            Text::new(display_text),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
+            row.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(8.0),
+                align_items: AlignItems::Center,
+                ..default()
+            },))
+                .with_children(|input_row| {
+                    // 输入框（TextInput 通用组件）
+                    let display_text = if current_path.is_empty() {
+                        "（使用默认路径）".to_string()
+                    } else {
+                        current_path.to_string()
+                    };
+                    input_row
+                        .spawn((
+                            DownloadPathInput,
+                            TextInput::new("（使用默认路径）").with_value(current_path),
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                flex_grow: 1.0,
+                                height: Val::Px(36.0),
+                                padding: UiRect::horizontal(Val::Px(12.0)),
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
-                            TextColor(if current_path.is_empty() {
-                                AppColors::TEXT_SECONDARY
-                            } else {
-                                AppColors::TEXT
-                            }),
-                        ));
-                    });
+                            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+                            BorderColor::all(AppColors::BORDER),
+                            RelativeCursorPosition::default(),
+                        ))
+                        .with_children(|input| {
+                            input.spawn((
+                                TextInputDisplay,
+                                Text::new(display_text),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(if current_path.is_empty() {
+                                    AppColors::TEXT_SECONDARY
+                                } else {
+                                    AppColors::TEXT
+                                }),
+                            ));
+                        });
 
-                // 选择目录按钮
-                input_row
-                    .spawn((
-                        DownloadPathPickerButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(36.0),
-                            height: Val::Px(36.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::SECONDARY),
-                        BorderColor::all(AppColors::BORDER),
-                        Transform::default(),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("📂"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 16.0,
+                    // 选择目录按钮
+                    input_row
+                        .spawn((
+                            DownloadPathPickerButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                width: Val::Px(36.0),
+                                height: Val::Px(36.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
+                            BackgroundColor(AppColors::SECONDARY),
+                            BorderColor::all(AppColors::BORDER),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(ICON_FOLDER_OPEN),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 16.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                        });
+                });
         });
 }
 
@@ -763,17 +763,14 @@ fn spawn_max_concurrent_downloads_setting(
     current_value: usize,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                margin: UiRect::top(Val::Px(16.0)),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(16.0)),
+            ..default()
+        },))
         .with_children(|row| {
             // 左侧标签和说明
             row.spawn((Node {
@@ -830,7 +827,7 @@ fn spawn_max_concurrent_downloads_setting(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("-"),
+                                Text::new(ICON_MINUS),
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 16.0,
@@ -877,7 +874,7 @@ fn spawn_max_concurrent_downloads_setting(
                         ))
                         .with_children(|btn| {
                             btn.spawn((
-                                Text::new("+"),
+                                Text::new(ICON_PLUS),
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 16.0,
@@ -897,17 +894,14 @@ fn spawn_auto_resume_downloads_setting(
     is_enabled: bool,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                margin: UiRect::top(Val::Px(16.0)),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(16.0)),
+            ..default()
+        },))
         .with_children(|row| {
             // 左侧标签和说明
             row.spawn((Node {
@@ -964,7 +958,7 @@ fn spawn_auto_resume_downloads_setting(
             .with_children(|checkbox| {
                 // 勾选标记（使用 Nerd Font 图标）
                 checkbox.spawn((
-                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -983,17 +977,14 @@ fn spawn_auto_pack_cbz_setting(
     is_enabled: bool,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                margin: UiRect::top(Val::Px(16.0)),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(16.0)),
+            ..default()
+        },))
         .with_children(|row| {
             // 左侧标签和说明
             row.spawn((Node {
@@ -1049,7 +1040,7 @@ fn spawn_auto_pack_cbz_setting(
             ))
             .with_children(|checkbox| {
                 checkbox.spawn((
-                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -1068,17 +1059,14 @@ fn spawn_delete_images_after_cbz_setting(
     is_enabled: bool,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                margin: UiRect::top(Val::Px(16.0)),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(16.0)),
+            ..default()
+        },))
         .with_children(|row| {
             // 左侧标签和说明
             row.spawn((Node {
@@ -1134,7 +1122,7 @@ fn spawn_delete_images_after_cbz_setting(
             ))
             .with_children(|checkbox| {
                 checkbox.spawn((
-                    Text::new(if is_enabled { "✓" } else { "" }), // 󰄬 nf-md-check
+                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
                     TextFont {
                         font: font.clone(),
                         font_size: 16.0,
@@ -1152,21 +1140,19 @@ fn spawn_filter_settings(
     font: &Handle<Font>,
     filter: &FilterSettings,
     category_titles: &[String],
+    tag_titles: &[String],
 ) {
     // 屏蔽模式复选框行
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(16.0),
-                flex_wrap: FlexWrap::Wrap,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(16.0),
+            flex_wrap: FlexWrap::Wrap,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },))
         .with_children(|row| {
             spawn_filter_mode_checkbox(
                 row,
@@ -1218,7 +1204,6 @@ fn spawn_filter_settings(
                 margin: UiRect::top(Val::Px(6.0)),
                 ..default()
             },
-            Transform::default(),
         ))
         .with_children(|list| {
             spawn_blocked_keyword_tags(list, font, &filter.blocked_keywords);
@@ -1226,16 +1211,13 @@ fn spawn_filter_settings(
 
     // 新增屏蔽词输入行
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                margin: UiRect::top(Val::Px(10.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            margin: UiRect::top(Val::Px(10.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 输入框（TextInput 通用组件）
             row.spawn((
@@ -1254,7 +1236,7 @@ fn spawn_filter_settings(
                 },
                 BackgroundColor(AppColors::CARD_BG),
                 BorderColor::all(AppColors::BORDER),
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ))
             .with_children(|input| {
                 input.spawn((
@@ -1296,8 +1278,8 @@ fn spawn_filter_settings(
                 ));
             });
 
-            // "选择分类" 展开/折叠按钮
-            if !category_titles.is_empty() {
+            // "选择分类/标签" 展开/折叠按钮
+            if !category_titles.is_empty() || !tag_titles.is_empty() {
                 row.spawn((
                     KeywordSuggestionToggle,
                     Button,
@@ -1316,7 +1298,7 @@ fn spawn_filter_settings(
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("选择分类 ▼"), // nf-md-chevron_down
+                        Text::new(format!("选择分类/标签 {ICON_CHEVRON_DOWN}")),
                         TextFont {
                             font: font.clone(),
                             font_size: 12.0,
@@ -1328,8 +1310,8 @@ fn spawn_filter_settings(
             }
         });
 
-    // 分类建议面板（初始隐藏）
-    if !category_titles.is_empty() {
+    // 分类/标签建议面板（初始隐藏）
+    if !category_titles.is_empty() || !tag_titles.is_empty() {
         parent
             .spawn((
                 KeywordSuggestionPanel,
@@ -1337,9 +1319,8 @@ fn spawn_filter_settings(
                     width: Val::Percent(100.0),
                     margin: UiRect::top(Val::Px(6.0)),
                     padding: UiRect::all(Val::Px(8.0)),
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(6.0),
-                    row_gap: Val::Px(6.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
                     display: Display::None, // 初始隐藏
@@ -1347,61 +1328,130 @@ fn spawn_filter_settings(
                 },
                 BackgroundColor(Color::srgba(0.12, 0.12, 0.18, 0.9)),
                 BorderColor::all(AppColors::BORDER),
-                Transform::default(),
             ))
             .with_children(|panel| {
-                for title in category_titles {
-                    let already_blocked = filter.blocked_keywords.contains(title);
-                    let bg = if already_blocked {
-                        Color::srgba(0.2, 0.2, 0.25, 0.4)
-                    } else {
-                        Color::srgba(0.2, 0.2, 0.3, 0.7)
-                    };
-                    let text_color = if already_blocked {
-                        AppColors::TEXT_SECONDARY
-                    } else {
-                        AppColors::TEXT
-                    };
-
+                // 分类区域
+                if !category_titles.is_empty() {
+                    // 分类标题
+                    panel.spawn((
+                        Text::new("分类"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                    // 分类标签列表
                     panel
-                        .spawn((
-                            KeywordSuggestionItem {
-                                keyword: title.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(10.0),
-                                    Val::Px(10.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BackgroundColor(bg),
-                            BorderColor::all(if already_blocked {
-                                Color::srgba(0.3, 0.3, 0.35, 0.3)
-                            } else {
-                                AppColors::BORDER
-                            }),
-                        ))
-                        .with_children(|item| {
-                            item.spawn((
-                                Text::new(title),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 12.0,
-                                    ..default()
-                                },
-                                TextColor(text_color),
-                            ));
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(6.0),
+                            row_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for title in category_titles {
+                                spawn_suggestion_item(
+                                    row,
+                                    font,
+                                    title,
+                                    filter,
+                                    Color::srgba(0.2, 0.2, 0.3, 0.7),
+                                );
+                            }
+                        });
+                }
+
+                // 标签区域
+                if !tag_titles.is_empty() {
+                    // 标签标题
+                    panel.spawn((
+                        Text::new("标签"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+                    // 标签列表
+                    panel
+                        .spawn(Node {
+                            width: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            column_gap: Val::Px(6.0),
+                            row_gap: Val::Px(6.0),
+                            ..default()
+                        })
+                        .with_children(|row| {
+                            for title in tag_titles {
+                                spawn_suggestion_item(
+                                    row,
+                                    font,
+                                    title,
+                                    filter,
+                                    Color::srgba(0.15, 0.25, 0.2, 0.7),
+                                );
+                            }
                         });
                 }
             });
     }
+}
+
+/// 创建建议面板中的单个建议项
+fn spawn_suggestion_item(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    keyword: &str,
+    filter: &FilterSettings,
+    base_color: Color,
+) {
+    let already_blocked = filter.blocked_keywords.contains(&keyword.to_string());
+    let bg = if already_blocked {
+        Color::srgba(0.2, 0.2, 0.25, 0.4)
+    } else {
+        base_color
+    };
+    let text_color = if already_blocked {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
+    parent
+        .spawn((
+            KeywordSuggestionItem {
+                keyword: keyword.to_string(),
+            },
+            Button,
+            Interaction::default(),
+            Node {
+                padding: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(4.0), Val::Px(4.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+                ..default()
+            },
+            BackgroundColor(bg),
+            BorderColor::all(if already_blocked {
+                Color::srgba(0.3, 0.3, 0.35, 0.3)
+            } else {
+                AppColors::BORDER
+            }),
+        ))
+        .with_children(|item| {
+            item.spawn((
+                Text::new(keyword),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 12.0,
+                    ..default()
+                },
+                TextColor(text_color),
+            ));
+        });
 }
 
 /// 创建屏蔽词标签列表（可复用）
@@ -1470,7 +1520,7 @@ fn spawn_blocked_keyword_tags(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("✕"), // nf-md-close
+                            Text::new(ICON_CLOSE),
                             TextFont {
                                 font: font.clone(),
                                 font_size: 10.0,
@@ -1572,14 +1622,11 @@ fn spawn_filter_mode_checkbox(
     };
 
     parent
-        .spawn((
-            Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(6.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 复选框
             let mut checkbox_entity = row.spawn((
@@ -1613,7 +1660,7 @@ fn spawn_filter_mode_checkbox(
 
             checkbox_entity.with_children(|cb| {
                 cb.spawn((
-                    Text::new(if checked { "✓" } else { "" }),
+                    Text::new(if checked { ICON_CHECK } else { "" }),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -1639,16 +1686,13 @@ fn spawn_filter_mode_checkbox(
 /// 创建缓存设置
 fn spawn_cache_setting(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        },))
         .with_children(|row| {
             // 左侧标签和说明
             row.spawn((Node {
@@ -1750,53 +1794,62 @@ fn spawn_proxy_setting(
     settings: &picacg_config::AppSettings,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(12.0),
+            ..default()
+        },))
         .with_children(|col| {
             // 启用代理复选框
-            col.spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|row| {
-                row.spawn((
-                    ProxyEnabledCheckbox,
-                    Button,
-                    Node {
-                        width: Val::Px(20.0),
-                        height: Val::Px(20.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(if settings.proxy.enabled {
-                        AppColors::PRIMARY
-                    } else {
-                        Color::srgb(0.12, 0.12, 0.16)
-                    }),
-                    BorderColor::all(if settings.proxy.enabled {
-                        AppColors::PRIMARY
-                    } else {
-                        AppColors::BORDER
-                    }),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new(if settings.proxy.enabled { "✓" } else { "" }),
+            col.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },))
+                .with_children(|row| {
+                    row.spawn((
+                        ProxyEnabledCheckbox,
+                        Button,
+                        Node {
+                            width: Val::Px(20.0),
+                            height: Val::Px(20.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(if settings.proxy.enabled {
+                            AppColors::PRIMARY
+                        } else {
+                            Color::srgb(0.12, 0.12, 0.16)
+                        }),
+                        BorderColor::all(if settings.proxy.enabled {
+                            AppColors::PRIMARY
+                        } else {
+                            AppColors::BORDER
+                        }),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new(if settings.proxy.enabled {
+                                ICON_CHECK
+                            } else {
+                                ""
+                            }),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT),
+                        ));
+                    });
+
+                    row.spawn((
+                        Text::new("启用代理"),
                         TextFont {
                             font: font.clone(),
                             font_size: 14.0,
@@ -1806,227 +1859,202 @@ fn spawn_proxy_setting(
                     ));
                 });
 
-                row.spawn((
-                    Text::new("启用代理"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-
             // 代理类型选择
-            col.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|type_col| {
-                type_col.spawn((
-                    Text::new("代理类型"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
+            col.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },))
+                .with_children(|type_col| {
+                    type_col.spawn((
+                        Text::new("代理类型"),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 14.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
 
-                type_col
-                    .spawn((
-                        Node {
+                    type_col
+                        .spawn((Node {
                             flex_direction: FlexDirection::Row,
                             column_gap: Val::Px(10.0),
                             ..default()
-                        },
-                        Transform::default(),
-                    ))
-                    .with_children(|btn_row| {
-                        for (proxy_type, label) in [
-                            (ProxyType::Http, "HTTP"),
-                            (ProxyType::Https, "HTTPS"),
-                            (ProxyType::Socks5, "SOCKS5"),
-                        ] {
-                            let is_selected = settings.proxy.proxy_type == proxy_type;
-                            btn_row
+                        },))
+                        .with_children(|btn_row| {
+                            for (proxy_type, label) in [
+                                (ProxyType::Http, "HTTP"),
+                                (ProxyType::Https, "HTTPS"),
+                                (ProxyType::Socks5, "SOCKS5"),
+                            ] {
+                                let is_selected = settings.proxy.proxy_type == proxy_type;
+                                btn_row
+                                    .spawn((
+                                        ProxyTypeButton { proxy_type },
+                                        Button,
+                                        Node {
+                                            padding: UiRect::new(
+                                                Val::Px(12.0),
+                                                Val::Px(12.0),
+                                                Val::Px(6.0),
+                                                Val::Px(6.0),
+                                            ),
+                                            border: UiRect::all(Val::Px(1.0)),
+                                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(if is_selected {
+                                            AppColors::PRIMARY
+                                        } else {
+                                            Color::srgb(0.12, 0.12, 0.16)
+                                        }),
+                                        BorderColor::all(if is_selected {
+                                            AppColors::PRIMARY
+                                        } else {
+                                            AppColors::BORDER
+                                        }),
+                                    ))
+                                    .with_children(|btn| {
+                                        btn.spawn((
+                                            Text::new(label),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 13.0,
+                                                ..default()
+                                            },
+                                            TextColor(AppColors::TEXT),
+                                        ));
+                                    });
+                            }
+                        });
+                });
+
+            // 代理地址和端口
+            col.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                column_gap: Val::Px(10.0),
+                ..default()
+            },))
+                .with_children(|row| {
+                    // 主机地址
+                    row.spawn((Node {
+                        flex_grow: 1.0,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(4.0),
+                        ..default()
+                    },))
+                        .with_children(|host_col| {
+                            host_col.spawn((
+                                Text::new("主机地址"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+                            host_col
                                 .spawn((
-                                    ProxyTypeButton { proxy_type },
+                                    ProxyHostInput,
+                                    TextInput::new("127.0.0.1").with_value(&settings.proxy.host),
                                     Button,
+                                    Interaction::default(),
                                     Node {
-                                        padding: UiRect::new(
-                                            Val::Px(12.0),
-                                            Val::Px(12.0),
-                                            Val::Px(6.0),
-                                            Val::Px(6.0),
-                                        ),
+                                        width: Val::Percent(100.0),
+                                        height: Val::Px(32.0),
+                                        padding: UiRect::horizontal(Val::Px(10.0)),
+                                        align_items: AlignItems::Center,
                                         border: UiRect::all(Val::Px(1.0)),
                                         border_radius: BorderRadius::all(Val::Px(4.0)),
                                         ..default()
                                     },
-                                    BackgroundColor(if is_selected {
-                                        AppColors::PRIMARY
-                                    } else {
-                                        Color::srgb(0.12, 0.12, 0.16)
-                                    }),
-                                    BorderColor::all(if is_selected {
-                                        AppColors::PRIMARY
-                                    } else {
-                                        AppColors::BORDER
-                                    }),
+                                    BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+                                    BorderColor::all(AppColors::BORDER),
+                                    RelativeCursorPosition::default(),
                                 ))
-                                .with_children(|btn| {
-                                    btn.spawn((
-                                        Text::new(label),
+                                .with_children(|input| {
+                                    input.spawn((
+                                        TextInputDisplay,
+                                        Text::new(if settings.proxy.host.is_empty() {
+                                            "127.0.0.1".to_string()
+                                        } else {
+                                            settings.proxy.host.clone()
+                                        }),
                                         TextFont {
                                             font: font.clone(),
                                             font_size: 13.0,
                                             ..default()
                                         },
-                                        TextColor(AppColors::TEXT),
+                                        TextColor(if settings.proxy.host.is_empty() {
+                                            AppColors::TEXT_SECONDARY
+                                        } else {
+                                            AppColors::TEXT
+                                        }),
                                     ));
                                 });
-                        }
-                    });
-            });
-
-            // 代理地址和端口
-            col.spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|row| {
-                // 主机地址
-                row.spawn((
-                    Node {
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|host_col| {
-                    host_col.spawn((
-                        Text::new("主机地址"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    host_col
-                        .spawn((
-                            ProxyHostInput,
-                            TextInput::new("127.0.0.1").with_value(&settings.proxy.host),
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Px(32.0),
-                                padding: UiRect::horizontal(Val::Px(10.0)),
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                            BorderColor::all(AppColors::BORDER),
-                            Transform::default(),
-                        ))
-                        .with_children(|input| {
-                            input.spawn((
-                                TextInputDisplay,
-                                Text::new(if settings.proxy.host.is_empty() {
-                                    "127.0.0.1".to_string()
-                                } else {
-                                    settings.proxy.host.clone()
-                                }),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(if settings.proxy.host.is_empty() {
-                                    AppColors::TEXT_SECONDARY
-                                } else {
-                                    AppColors::TEXT
-                                }),
-                            ));
                         });
-                });
 
-                // 端口
-                row.spawn((
-                    Node {
+                    // 端口
+                    row.spawn((Node {
                         width: Val::Px(100.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(4.0),
                         ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|port_col| {
-                    port_col.spawn((
-                        Text::new("端口"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    port_col
-                        .spawn((
-                            ProxyPortInput,
-                            TextInput::new("7890").with_value(settings.proxy.port.to_string()),
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Px(32.0),
-                                padding: UiRect::horizontal(Val::Px(10.0)),
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                            BorderColor::all(AppColors::BORDER),
-                            Transform::default(),
-                        ))
-                        .with_children(|input| {
-                            let port_str = settings.proxy.port.to_string();
-                            input.spawn((
-                                TextInputDisplay,
-                                Text::new(if port_str.is_empty() {
-                                    "7890".to_string()
-                                } else {
-                                    port_str.clone()
-                                }),
+                    },))
+                        .with_children(|port_col| {
+                            port_col.spawn((
+                                Text::new("端口"),
                                 TextFont {
                                     font: font.clone(),
-                                    font_size: 13.0,
+                                    font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(if port_str.is_empty() {
-                                    AppColors::TEXT_SECONDARY
-                                } else {
-                                    AppColors::TEXT
-                                }),
+                                TextColor(AppColors::TEXT),
                             ));
+                            port_col
+                                .spawn((
+                                    ProxyPortInput,
+                                    TextInput::new("7890")
+                                        .with_value(settings.proxy.port.to_string()),
+                                    Button,
+                                    Interaction::default(),
+                                    Node {
+                                        width: Val::Percent(100.0),
+                                        height: Val::Px(32.0),
+                                        padding: UiRect::horizontal(Val::Px(10.0)),
+                                        align_items: AlignItems::Center,
+                                        border: UiRect::all(Val::Px(1.0)),
+                                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+                                    BorderColor::all(AppColors::BORDER),
+                                    RelativeCursorPosition::default(),
+                                ))
+                                .with_children(|input| {
+                                    let port_str = settings.proxy.port.to_string();
+                                    input.spawn((
+                                        TextInputDisplay,
+                                        Text::new(if port_str.is_empty() {
+                                            "7890".to_string()
+                                        } else {
+                                            port_str.clone()
+                                        }),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 13.0,
+                                            ..default()
+                                        },
+                                        TextColor(if port_str.is_empty() {
+                                            AppColors::TEXT_SECONDARY
+                                        } else {
+                                            AppColors::TEXT
+                                        }),
+                                    ));
+                                });
                         });
                 });
-            });
         });
 }
 
@@ -2037,15 +2065,12 @@ fn spawn_channel_setting(
     settings: &picacg_config::AppSettings,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(12.0),
+            ..default()
+        },))
         .with_children(|col| {
             // API 分流选择
             spawn_channel_row(col, font, "API 分流", settings.channel.api_channel, true);
@@ -2084,14 +2109,11 @@ fn spawn_channel_row(
     is_api: bool,
 ) {
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },))
         .with_children(|type_col| {
             type_col.spawn((
                 Text::new(label),
@@ -2104,16 +2126,13 @@ fn spawn_channel_row(
             ));
 
             type_col
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(8.0),
-                        flex_wrap: FlexWrap::Wrap,
-                        row_gap: Val::Px(8.0),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },))
                 .with_children(|btn_row| {
                     for channel_type in ChannelType::all() {
                         let is_selected = current == *channel_type;
@@ -2176,20 +2195,17 @@ fn spawn_custom_ip_row(
     is_api: bool,
     visible: bool,
 ) {
-    let mut row = parent.spawn((
-        Node {
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(10.0),
-            display: if visible {
-                Display::Flex
-            } else {
-                Display::None
-            },
-            ..default()
+    let mut row = parent.spawn((Node {
+        flex_direction: FlexDirection::Row,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(10.0),
+        display: if visible {
+            Display::Flex
+        } else {
+            Display::None
         },
-        Transform::default(),
-    ));
+        ..default()
+    },));
     if is_api {
         row.insert(CustomCdnApiIpRow);
     } else {
@@ -2233,7 +2249,7 @@ fn spawn_custom_ip_row(
             },
             BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
             BorderColor::all(AppColors::BORDER),
-            Transform::default(),
+            RelativeCursorPosition::default(),
         ));
         if is_api {
             input.insert(CustomCdnApiIpInput);
@@ -2262,15 +2278,12 @@ fn spawn_log_level_setting(
     current_level: LogLevel,
 ) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            ..default()
+        },))
         .with_children(|col| {
             col.spawn((
                 Text::new("日志等级"),
@@ -2293,65 +2306,62 @@ fn spawn_log_level_setting(
             ));
 
             // 日志等级按钮组
-            col.spawn((
-                Node {
-                    flex_direction: FlexDirection::Row,
-                    flex_wrap: FlexWrap::Wrap,
-                    column_gap: Val::Px(8.0),
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|btn_row| {
-                for level in [
-                    LogLevel::Trace,
-                    LogLevel::Debug,
-                    LogLevel::Info,
-                    LogLevel::Warn,
-                    LogLevel::Error,
-                ] {
-                    let is_selected = current_level == level;
-                    btn_row
-                        .spawn((
-                            LogLevelButton { level },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(12.0),
-                                    Val::Px(12.0),
-                                    Val::Px(6.0),
-                                    Val::Px(6.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(if is_selected {
-                                AppColors::PRIMARY
-                            } else {
-                                Color::srgb(0.12, 0.12, 0.16)
-                            }),
-                            BorderColor::all(if is_selected {
-                                AppColors::PRIMARY
-                            } else {
-                                AppColors::BORDER
-                            }),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(level.display_name()),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
+            col.spawn((Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(8.0),
+                row_gap: Val::Px(8.0),
+                ..default()
+            },))
+                .with_children(|btn_row| {
+                    for level in [
+                        LogLevel::Trace,
+                        LogLevel::Debug,
+                        LogLevel::Info,
+                        LogLevel::Warn,
+                        LogLevel::Error,
+                    ] {
+                        let is_selected = current_level == level;
+                        btn_row
+                            .spawn((
+                                LogLevelButton { level },
+                                Button,
+                                Interaction::default(),
+                                Node {
+                                    padding: UiRect::new(
+                                        Val::Px(12.0),
+                                        Val::Px(12.0),
+                                        Val::Px(6.0),
+                                        Val::Px(6.0),
+                                    ),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
                                     ..default()
                                 },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                }
-            });
+                                BackgroundColor(if is_selected {
+                                    AppColors::PRIMARY
+                                } else {
+                                    Color::srgb(0.12, 0.12, 0.16)
+                                }),
+                                BorderColor::all(if is_selected {
+                                    AppColors::PRIMARY
+                                } else {
+                                    AppColors::BORDER
+                                }),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new(level.display_name()),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 13.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT),
+                                ));
+                            });
+                    }
+                });
         });
 }
 
@@ -2409,7 +2419,6 @@ fn spawn_settings_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container:
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|scrollbar| {
             // 滚动条轨道（与滑块同级，ZIndex 较低）
@@ -2427,8 +2436,7 @@ fn spawn_settings_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container:
                 },
                 BackgroundColor(TRACK_COLOR),
                 ZIndex(0),
-                // 添加 Transform 以获得 GlobalTransform（滚动条点击需要）
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ));
 
             // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
@@ -2936,7 +2944,7 @@ pub fn proxy_enabled_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if proxy_state.enabled {
-                            "✓".to_string()
+                            ICON_CHECK.to_string()
                         } else {
                             String::new()
                         };
@@ -3256,7 +3264,7 @@ pub fn auto_resume_downloads_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "✓".to_string()
+                            ICON_CHECK.to_string()
                         } else {
                             String::new()
                         };
@@ -3389,7 +3397,7 @@ pub fn auto_pack_cbz_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "✓".to_string()
+                            ICON_CHECK.to_string()
                         } else {
                             String::new()
                         };
@@ -3449,7 +3457,7 @@ pub fn delete_images_after_cbz_checkbox_interaction(
                 for child in children.iter() {
                     if let Ok(mut text) = text_query.get_mut(child) {
                         **text = if is_enabled {
-                            "✓".to_string()
+                            ICON_CHECK.to_string()
                         } else {
                             String::new()
                         };
@@ -3490,7 +3498,7 @@ fn toggle_filter_checkbox(
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
             **text = if is_enabled {
-                "✓".to_string()
+                ICON_CHECK.to_string()
             } else {
                 String::new()
             };

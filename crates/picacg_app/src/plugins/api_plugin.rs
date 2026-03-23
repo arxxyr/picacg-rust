@@ -159,6 +159,8 @@ impl Plugin for ApiPlugin {
             )
             // API 客户端重载（通道/代理变更）
             .add_systems(Update, handle_reload_api_client)
+            // 自动收集标签到缓存
+            .add_systems(Update, update_cached_tags)
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
@@ -1260,15 +1262,15 @@ fn get_download_base_path() -> std::path::PathBuf {
 }
 
 /// 获取原图下载保存路径
-/// 新结构：Downloads/Images/<漫画标题>
+/// 结构：base/image/<漫画标题>/<章节>/
 fn get_images_download_path() -> std::path::PathBuf {
-    get_download_base_path().join("Images")
+    get_download_base_path().join("image")
 }
 
 /// 获取 CBZ 文件保存目录
-/// 新结构：Downloads/CBZ/<漫画标题>.cbz
+/// 结构：base/cbz/<漫画标题>.cbz
 fn get_cbz_output_path() -> std::path::PathBuf {
-    get_download_base_path().join("CBZ")
+    get_download_base_path().join("cbz")
 }
 
 /// 清理文件名中的非法字符（代理到 utils::sanitize_filename）
@@ -1401,6 +1403,7 @@ fn handle_download_comic(
             runtime.as_ref(),
             client,
             comic_id,
+            comic_title,
             save_path,
             episodes_to_download,
             total_episodes,
@@ -1414,6 +1417,7 @@ fn spawn_download_task(
     runtime: &TokioTasksRuntime,
     client: ApiClient,
     comic_id: String,
+    comic_title: String,
     save_path: String,
     episodes_to_download: Vec<i32>,
     total_episodes: i32,
@@ -1424,6 +1428,7 @@ fn spawn_download_task(
             &mut ctx,
             client,
             comic_id,
+            comic_title,
             save_path,
             episodes_to_download,
             total_episodes,
@@ -1440,12 +1445,14 @@ async fn execute_download_task(
     ctx: &mut crate::utils::TaskContext,
     client: ApiClient,
     comic_id: String,
+    comic_title: String,
     save_path: String,
     episodes_to_download: Vec<i32>,
     total_episodes: i32,
     control: std::sync::Arc<SharedTaskControl>,
 ) {
     let download_path = std::path::PathBuf::from(&save_path);
+    let comic_start = tokio::time::Instant::now();
 
     // 创建下载目录
     if let Err(e) = tokio::fs::create_dir_all(&download_path).await {
@@ -1463,6 +1470,7 @@ async fn execute_download_task(
     // 逐章节下载
     for (ep_idx, episode_order) in episodes_to_download.iter().enumerate() {
         let episode_order = *episode_order;
+        let episode_start = tokio::time::Instant::now();
 
         // 检查是否已暂停
         if control.is_pause_requested() {
@@ -1527,7 +1535,10 @@ async fn execute_download_task(
                 }
                 Err(e) => {
                     let comic_id_clone = comic_id.clone();
-                    let error = format!("获取第 {} 章图片列表失败: {}", episode_order, e);
+                    let error = format!(
+                        "[{}] 获取第 {} 章图片列表失败: {}",
+                        comic_title, episode_order, e
+                    );
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(DownloadFailedEvent {
                             comic_id: comic_id_clone,
@@ -1541,7 +1552,12 @@ async fn execute_download_task(
         }
 
         let total_pages = all_pictures.len() as i32;
-        tracing::info!("第 {} 章共 {} 张图片", episode_order, total_pages);
+        tracing::info!(
+            "[{}] 第 {} 章共 {} 张图片",
+            comic_title,
+            episode_order,
+            total_pages
+        );
 
         // 收集 API 返回的所有 original_name
         let required_files: std::collections::HashSet<String> = all_pictures
@@ -1601,7 +1617,8 @@ async fn execute_download_task(
             continue; // 跳过该章节，继续下一章
         } else {
             tracing::info!(
-                "第 {} 章缺少 {} 张图片，开始下载",
+                "[{}] 第 {} 章缺少 {} 张图片，开始下载",
+                comic_title,
                 episode_order,
                 missing_files.len()
             );
@@ -1909,18 +1926,22 @@ async fn execute_download_task(
         let final_fail_count = failed_images.len();
         if final_fail_count > 0 {
             tracing::error!(
-                "✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
+                "[{}] ✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
+                comic_title,
                 episode_order,
                 final_fail_count
             );
         }
 
+        let episode_elapsed = episode_start.elapsed();
         tracing::info!(
-            "第 {} 章下载完成: 成功={}, 跳过={}, 失败={}",
+            "[{}] 第 {} 章下载完成: 成功={}, 跳过={}, 失败={}, 耗时 {:.1}s",
+            comic_title,
             episode_order,
             success_count,
             skip_count,
-            final_fail_count
+            final_fail_count,
+            episode_elapsed.as_secs_f64()
         );
 
         // 如果没有失败的图片，在数据库中标记章节完成
@@ -1941,6 +1962,17 @@ async fn execute_download_task(
     }
 
     // 下载完成
+    let comic_elapsed = comic_start.elapsed();
+    let minutes = comic_elapsed.as_secs() / 60;
+    let seconds = comic_elapsed.as_secs() % 60;
+    tracing::info!(
+        "[{}] 全部下载完成，共 {} 章，总耗时 {}m{}s",
+        comic_title,
+        episodes_to_download.len(),
+        minutes,
+        seconds
+    );
+
     let comic_id_clone = comic_id.clone();
     let save_path_clone = save_path.clone();
     ctx.run_on_main_thread(move |ctx| {
@@ -1999,7 +2031,6 @@ async fn download_image_to_file(
 
     // 添加代理配置
     if let Some(ref proxy_url_str) = proxy_url {
-        tracing::debug!("下载使用代理: {}", proxy_url_str);
         let proxy = Proxy::all(proxy_url_str).map_err(|e| format!("代理配置错误: {}", e))?;
         builder = builder.proxy(proxy);
     }
@@ -2194,6 +2225,14 @@ fn handle_resume_download(
             continue;
         }
 
+        // 跳过已完成的任务（防止重复下载）
+        if let Some(fsm) = download_state.find_task(&comic_id) {
+            if matches!(fsm.meta.state, DownloadState::Completed) {
+                tracing::debug!("漫画 {} 已完成，跳过恢复", comic_title);
+                continue;
+            }
+        }
+
         // 检查是否已达到最大并发数
         let max_concurrent = AppSettings::global().read().max_concurrent_downloads;
         if download_state.downloading_ids.len() >= max_concurrent {
@@ -2237,6 +2276,7 @@ fn handle_resume_download(
             runtime.as_ref(),
             client,
             comic_id,
+            comic_title,
             save_path,
             episode_orders,
             total_episodes,
@@ -2278,7 +2318,7 @@ fn handle_redownload(
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| old_meta.comic_title.clone());
             let new_save = std::path::Path::new(base_path)
-                .join("Images")
+                .join("image")
                 .join(&folder_name);
             tracing::info!(
                 "使用用户选择的新目录: {} -> {}",
@@ -2474,6 +2514,7 @@ fn handle_redownload(
                 &mut ctx,
                 client,
                 comic_id_clone,
+                comic.title.clone(),
                 save_path_clone,
                 episode_orders,
                 total_episodes,
@@ -2933,12 +2974,12 @@ fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, St
     }
 
     // 创建 CBZ 输出目录
-    // 从 source_path 推导：source_path = base/Images/漫画名 → CBZ 目录 = base/CBZ
+    // 从 source_path 推导：source_path = base/image/漫画名 → CBZ 目录 = base/cbz
     // 这样自定义下载路径的 CBZ 也会保存在同一基础目录下
     let cbz_dir = source_dir
-        .parent() // base/Images
+        .parent() // base/image
         .and_then(|p| p.parent()) // base
-        .map(|p| p.join("CBZ"))
+        .map(|p| p.join("cbz"))
         .unwrap_or_else(get_cbz_output_path);
     if let Err(e) = std::fs::create_dir_all(&cbz_dir) {
         return Err(format!("创建 CBZ 目录失败: {}", e));
@@ -3078,5 +3119,78 @@ fn handle_cbz_package_completed(mut messages: MessageReader<CbzPackageCompletedE
 fn handle_cbz_package_failed(mut messages: MessageReader<CbzPackageFailedEvent>) {
     for event in messages.read() {
         tracing::error!("CBZ 打包失败: {} - {}", event.comic_id, event.error);
+    }
+}
+
+/// 自动收集标签到缓存（监听所有漫画状态变化）
+fn update_cached_tags(
+    mut cached_tags: ResMut<CachedTagsState>,
+    comics_state: Res<ComicsListState>,
+    search_state: Res<SearchState>,
+    rankings_state: Res<RankingsState>,
+    favorites_state: Res<FavoritesState>,
+    detail_state: Res<ComicDetailState>,
+    mut initialized: Local<bool>,
+) {
+    let any_changed = comics_state.is_changed()
+        || search_state.is_changed()
+        || rankings_state.is_changed()
+        || favorites_state.is_changed()
+        || detail_state.is_changed();
+
+    // 首次运行从数据库加载历史标签
+    if !*initialized {
+        *initialized = true;
+        use picacg_db::{get_all_unique_tags_async, get_pool, run_db_operation};
+        let pool = get_pool();
+        run_db_operation(async move {
+            match get_all_unique_tags_async(&pool).await {
+                Ok(tags) => {
+                    tracing::info!("从数据库加载了 {} 个历史标签", tags.len());
+                    // 注：run_db_operation 无法回写到 Resource，后续由 API
+                    // 数据补充
+                }
+                Err(e) => tracing::warn!("加载历史标签失败: {}", e),
+            }
+        });
+        // 即使 DB 加载是异步的，也继续往下收集当前内存中的标签
+    }
+
+    if !any_changed && *initialized {
+        return;
+    }
+
+    let mut tags = std::collections::BTreeSet::new();
+    // 保留已有标签
+    for tag in &cached_tags.tags {
+        tags.insert(tag.clone());
+    }
+
+    // 从各页面收集
+    for comic in &comics_state.comics {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    for comic in &search_state.results {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    for comic in &rankings_state.h24_comics {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    for comic in &rankings_state.d7_comics {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    for comic in &rankings_state.d30_comics {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    for comic in &favorites_state.comics {
+        tags.extend(comic.tags.iter().cloned());
+    }
+    if let Some(ref comic) = detail_state.comic {
+        tags.extend(comic.tags.iter().cloned());
+    }
+
+    let new_tags: Vec<String> = tags.into_iter().collect();
+    if new_tags.len() != cached_tags.tags.len() {
+        cached_tags.tags = new_tags;
     }
 }

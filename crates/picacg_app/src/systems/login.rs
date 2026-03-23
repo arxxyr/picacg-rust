@@ -6,6 +6,7 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    ui::RelativeCursorPosition,
 };
 use picacg_config::AppSettings;
 
@@ -14,7 +15,10 @@ use crate::{
     components::*,
     events::*,
     resources::*,
-    utils::text_input::{TextInput, TextInputDisplay},
+    utils::{
+        icons::*,
+        text_input::{TextInput, TextInputDisplay},
+    },
 };
 
 /// 应用颜色常量
@@ -89,7 +93,6 @@ pub fn setup_login_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|parent| {
             // 标题
@@ -120,16 +123,13 @@ pub fn setup_login_ui(
 
             // 表单容器
             parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        width: Val::Px(400.0),
-                        padding: UiRect::all(Val::Px(20.0)),
-                        row_gap: Val::Px(15.0),
-                        ..default()
-                    },
-                    Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(400.0),
+                    padding: UiRect::all(Val::Px(20.0)),
+                    row_gap: Val::Px(15.0),
+                    ..default()
+                },))
                 .with_children(|form| {
                     // 用户名行
                     spawn_input_row(
@@ -150,45 +150,42 @@ pub fn setup_login_ui(
                     );
 
                     // 复选框行
-                    form.spawn((
-                        Node {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::FlexStart,
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(20.0),
-                            margin: UiRect::vertical(Val::Px(5.0)),
-                            ..default()
-                        },
-                        Transform::default(), // 必须添加
-                    ))
-                    .with_children(|row| {
-                        // 保存密码复选框
-                        spawn_checkbox(
-                            row,
-                            &font,
-                            "保存密码",
-                            login_state.save_password,
-                            LoginCheckboxType::SavePassword,
-                        );
+                    form.spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::FlexStart,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(20.0),
+                        margin: UiRect::vertical(Val::Px(5.0)),
+                        ..default()
+                    },))
+                        .with_children(|row| {
+                            // 保存密码复选框
+                            spawn_checkbox(
+                                row,
+                                &font,
+                                "保存密码",
+                                login_state.save_password,
+                                LoginCheckboxType::SavePassword,
+                            );
 
-                        // 自动登录复选框
-                        spawn_checkbox(
-                            row,
-                            &font,
-                            "自动登录",
-                            login_state.auto_login,
-                            LoginCheckboxType::AutoLogin,
-                        );
+                            // 自动登录复选框
+                            spawn_checkbox(
+                                row,
+                                &font,
+                                "自动登录",
+                                login_state.auto_login,
+                                LoginCheckboxType::AutoLogin,
+                            );
 
-                        // 自动打卡复选框
-                        spawn_checkbox(
-                            row,
-                            &font,
-                            "自动打卡",
-                            login_state.auto_punch_in,
-                            LoginCheckboxType::AutoPunchIn,
-                        );
-                    });
+                            // 自动打卡复选框
+                            spawn_checkbox(
+                                row,
+                                &font,
+                                "自动打卡",
+                                login_state.auto_punch_in,
+                                LoginCheckboxType::AutoPunchIn,
+                            );
+                        });
 
                     // 登录按钮
                     form.spawn((
@@ -208,7 +205,6 @@ pub fn setup_login_ui(
                         },
                         BorderColor::all(Color::NONE),
                         BackgroundColor(AppColors::PRIMARY),
-                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -244,7 +240,6 @@ pub fn setup_login_ui(
                         },
                         BorderColor::all(Color::NONE),
                         BackgroundColor(AppColors::SECONDARY),
-                        Transform::default(),
                     ))
                     .with_children(|btn| {
                         btn.spawn((
@@ -259,53 +254,49 @@ pub fn setup_login_ui(
                     });
 
                     // 注册提示行
-                    form.spawn((
-                        Node {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(5.0),
-                            margin: UiRect::top(Val::Px(10.0)),
-                            ..default()
-                        },
-                        Transform::default(),
-                    ))
-                    .with_children(|row| {
-                        // "还没有账号？" 文本
-                        row.spawn((
-                            Text::new("还没有账号？"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-
-                        // "立即注册" 链接按钮
-                        row.spawn((
-                            RegisterButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::NONE),
-                            Transform::default(),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new("立即注册"),
+                    form.spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(5.0),
+                        margin: UiRect::top(Val::Px(10.0)),
+                        ..default()
+                    },))
+                        .with_children(|row| {
+                            // "还没有账号？" 文本
+                            row.spawn((
+                                Text::new("还没有账号？"),
                                 TextFont {
                                     font: font.clone(),
                                     font_size: 14.0,
                                     ..default()
                                 },
-                                TextColor(AppColors::PRIMARY),
+                                TextColor(AppColors::TEXT_SECONDARY),
                             ));
+
+                            // "立即注册" 链接按钮
+                            row.spawn((
+                                RegisterButton,
+                                Button,
+                                Interaction::default(),
+                                Node {
+                                    padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::NONE),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("立即注册"),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::PRIMARY),
+                                ));
+                            });
                         });
-                    });
                 });
 
             // 提示信息
@@ -369,15 +360,12 @@ fn spawn_input_row(
     };
 
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 标签
             row.spawn((
@@ -411,7 +399,7 @@ fn spawn_input_row(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ))
             .with_children(|input| {
                 let display = if value.is_empty() {
@@ -454,12 +442,11 @@ fn spawn_input_row(
                     },
                     BorderColor::all(AppColors::BORDER),
                     BackgroundColor(AppColors::SURFACE),
-                    Transform::default(),
                 ))
                 .with_children(|btn| {
                     btn.spawn((
                         ShowPasswordIcon,
-                        Text::new("◉"),
+                        Text::new(ICON_EYE_OFF),
                         TextFont {
                             font: font.clone(),
                             font_size: 16.0,
@@ -787,13 +774,13 @@ pub fn show_password_toggle_interaction(
     for interaction in &mut interaction_query {
         if *interaction == Interaction::Pressed {
             focus.show_password = !focus.show_password;
-            // 更新图标：◎ 显示明文，◉ 隐藏密码
+            // 更新图标：ICON_EYE 显示明文，ICON_EYE_OFF 隐藏密码
             for (mut text, mut color) in icon_query.iter_mut() {
                 if focus.show_password {
-                    **text = "◎".to_string();
+                    **text = ICON_EYE.to_string();
                     *color = TextColor(AppColors::PRIMARY);
                 } else {
-                    **text = "◉".to_string();
+                    **text = ICON_EYE_OFF.to_string();
                     *color = TextColor(AppColors::TEXT_SECONDARY);
                 }
             }

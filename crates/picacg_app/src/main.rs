@@ -98,7 +98,9 @@ fn main() {
                         ..default()
                     }),
                     ..default()
-                }),
+                })
+                // 已在上方用 tracing_subscriber 初始化日志，禁用 Bevy 内置的 LogPlugin 避免冲突
+                .disable::<bevy::log::LogPlugin>(),
         )
         // Tokio 运行时集成
         .add_plugins(TokioTasksPlugin::default())

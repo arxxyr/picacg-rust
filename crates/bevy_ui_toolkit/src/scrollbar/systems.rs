@@ -1,6 +1,6 @@
 //! 滚动条系统函数
 
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{prelude::*, ui::RelativeCursorPosition, window::PrimaryWindow};
 
 use super::components::{
     ContentSizeInfo, ScrollbarDragState, ScrollbarThumb, ScrollbarTrack, TrackClickFilter,
@@ -141,14 +141,14 @@ pub fn scrollbar_thumb_interaction(
 }
 
 /// 轨道点击跳转系统
-/// 使用 GlobalTransform 和 ComputedNode 精确计算鼠标相对于轨道的位置
+/// 使用 RelativeCursorPosition 计算鼠标相对于轨道的位置，无需 GlobalTransform
 pub fn scrollbar_track_click(
     window_query: Query<&Window, With<PrimaryWindow>>,
     track_query: Query<
         (
             &ScrollbarTrack,
             &Interaction,
-            &GlobalTransform,
+            &RelativeCursorPosition,
             &ComputedNode,
         ),
         TrackClickFilter,
@@ -171,14 +171,9 @@ pub fn scrollbar_track_click(
         return;
     };
 
-    let Some(cursor_pos) = window.cursor_position() else {
-        return;
-    };
-
     let scale_factor = window.scale_factor();
-    let window_height = window.height();
 
-    for (track, interaction, track_transform, track_computed) in &track_query {
+    for (track, interaction, relative_cursor, track_computed) in &track_query {
         // 只处理刚变为 Pressed 状态的轨道
         if *interaction != Interaction::Pressed {
             continue;
@@ -190,22 +185,12 @@ pub fn scrollbar_track_click(
             continue;
         }
 
-        // GlobalTransform 在 Bevy UI 中可能返回物理像素坐标，需要转换为逻辑像素
-        let track_center_y = track_transform.translation().y / scale_factor;
-
-        // 将鼠标从屏幕坐标转换为 Bevy UI 坐标
-        // 屏幕坐标: (0, 0) 在左上角，Y向下
-        // Bevy UI 坐标: (0, 0) 在窗口中心，Y向上
-        let cursor_y_bevy = window_height / 2.0 - cursor_pos.y;
-
-        // 轨道顶部 Y 坐标（Bevy 坐标系中，Y 增大 = 向上，所以顶部 = 中心 + 高度/2）
-        let track_top_y = track_center_y + track_height / 2.0;
-
-        // 点击位置相对于轨道顶部的偏移（向下为正）
-        let click_offset_from_top = track_top_y - cursor_y_bevy;
-
-        // 计算点击比例（0.0 = 顶部，1.0 = 底部）
-        let click_ratio = (click_offset_from_top / track_height).clamp(0.0, 1.0);
+        // 使用 RelativeCursorPosition 直接获取点击比例
+        // normalized.y: 0.0 = 顶部, 1.0 = 底部
+        let click_ratio = match relative_cursor.normalized {
+            Some(n) => n.y.clamp(0.0, 1.0),
+            None => continue,
+        };
 
         let scroll_container = track.scroll_container;
 

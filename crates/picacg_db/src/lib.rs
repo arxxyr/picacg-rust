@@ -17,6 +17,7 @@ pub use database::{
     db_runtime,
     delete_download_task_async,
     get_all_download_tasks_async,
+    get_all_unique_tags_async,
     get_completed_download_tasks_async,
     get_download_task_async,
     get_incomplete_download_tasks_async,

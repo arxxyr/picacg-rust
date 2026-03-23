@@ -18,8 +18,11 @@ use crate::{
         },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
-    utils::content_filter::{
-        FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+    utils::{
+        content_filter::{
+            FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
+        },
+        icons::*,
     },
 };
 
@@ -115,61 +118,57 @@ pub fn setup_rankings_ui(
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
-                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ))
             .with_children(|root| {
                 // Tab 栏
                 spawn_tab_bar(root, &font, &rankings_state);
 
                 // 滚动区域包装器（与收藏/分类一致的结构）
-                root.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_grow: 1.0,
-                        flex_shrink: 1.0,
-                        flex_basis: Val::Px(0.0),
-                        min_height: Val::Px(0.0),
-                        position_type: PositionType::Relative,
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|wrapper| {
-                    // 滚动容器（直接使用 Wrap，不嵌套 ContentContainer）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            RankingsScrollContainer,
-                            ScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                justify_content: JustifyContent::FlexStart,
-                                align_content: AlignContent::FlexStart,
-                                padding: UiRect {
-                                    left: Val::Px(layout::PADDING_LEFT),
-                                    right: Val::Px(layout::PADDING_RIGHT),
-                                    top: Val::Px(layout::PADDING_TOP),
-                                    bottom: Val::Px(layout::PADDING_BOTTOM),
+                root.spawn((Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    ..default()
+                },))
+                    .with_children(|wrapper| {
+                        // 滚动容器（直接使用 Wrap，不嵌套 ContentContainer）
+                        let scroll_container_id = wrapper
+                            .spawn((
+                                RankingsScrollContainer,
+                                ScrollContainer,
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Percent(100.0),
+                                    flex_wrap: FlexWrap::Wrap,
+                                    justify_content: JustifyContent::FlexStart,
+                                    align_content: AlignContent::FlexStart,
+                                    padding: UiRect {
+                                        left: Val::Px(layout::PADDING_LEFT),
+                                        right: Val::Px(layout::PADDING_RIGHT),
+                                        top: Val::Px(layout::PADDING_TOP),
+                                        bottom: Val::Px(layout::PADDING_BOTTOM),
+                                    },
+                                    column_gap: Val::Px(layout::COLUMN_GAP),
+                                    row_gap: Val::Px(layout::ROW_GAP),
+                                    overflow: Overflow::scroll_y(),
+                                    ..default()
                                 },
-                                column_gap: Val::Px(layout::COLUMN_GAP),
-                                row_gap: Val::Px(layout::ROW_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|grid| {
-                            if rankings_state.is_loading {
-                                spawn_loading_indicator(grid, &font);
-                            }
-                        })
-                        .id();
+                                ScrollPosition::default(),
+                                ContentSizeInfo::default(),
+                            ))
+                            .with_children(|grid| {
+                                if rankings_state.is_loading {
+                                    spawn_loading_indicator(grid, &font);
+                                }
+                            })
+                            .id();
 
-                    // 滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
+                        // 滚动条
+                        spawn_scrollbar(wrapper, scroll_container_id);
+                    });
             });
     });
 
@@ -192,12 +191,11 @@ fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, state: 
             },
             BorderColor::all(AppColors::BORDER),
             BackgroundColor(AppColors::CARD_BG),
-            Transform::default(),
         ))
         .with_children(|bar| {
             // 标题
             bar.spawn((
-                Text::new("🏆 排行榜"),
+                Text::new(format!("{ICON_TROPHY} 排行榜")),
                 TextFont {
                     font: font.clone(),
                     font_size: 18.0,
@@ -242,7 +240,6 @@ fn spawn_tab_button(
                 ..default()
             },
             BackgroundColor(bg_color),
-            Transform::default(),
         ))
         .with_children(|btn| {
             btn.spawn((
@@ -630,7 +627,7 @@ fn spawn_loading_indicator(parent: &mut ChildSpawnerCommands, font: &Handle<Font
         ))
         .with_children(|loading| {
             loading.spawn((
-                Text::new("⏳"),
+                Text::new(ICON_TIMER_SAND),
                 TextFont {
                     font: font.clone(),
                     font_size: 48.0,
@@ -653,18 +650,15 @@ fn spawn_loading_indicator(parent: &mut ChildSpawnerCommands, font: &Handle<Font
 /// 创建空状态
 fn spawn_empty_state(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, message: &str) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(200.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(200.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|empty| {
             empty.spawn((
                 Text::new("📋"),
@@ -720,169 +714,166 @@ fn spawn_comic_card(
         ))
         .with_children(|card| {
             // 封面区域（带排名标签）
-            card.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(layout::COVER_HEIGHT),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|cover_area| {
-                // 封面图片占位
-                cover_area
-                    .spawn((
-                        RankingsComicImage {
-                            comic_id: comic.id.clone(),
-                        },
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::top(Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 1.0)),
-                    ))
-                    .with_children(|img_area| {
-                        // 加载中文字
-                        img_area.spawn((
-                            Text::new("📖"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 32.0,
+            card.spawn((Node {
+                width: Val::Percent(100.0),
+                height: Val::Px(layout::COVER_HEIGHT),
+                position_type: PositionType::Relative,
+                ..default()
+            },))
+                .with_children(|cover_area| {
+                    // 封面图片占位
+                    cover_area
+                        .spawn((
+                            RankingsComicImage {
+                                comic_id: comic.id.clone(),
+                            },
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                border_radius: BorderRadius::top(Val::Px(8.0)),
                                 ..default()
                             },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
+                            BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 1.0)),
+                        ))
+                        .with_children(|img_area| {
+                            // 加载中文字
+                            img_area.spawn((
+                                Text::new(ICON_BOOK),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 32.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        });
 
-                // 排名标签
-                let (badge_color, badge_text_color) = match rank {
-                    1 => (Color::srgb(1.0, 0.84, 0.0), Color::BLACK), // 金色
-                    2 => (Color::srgb(0.75, 0.75, 0.75), Color::BLACK), // 银色
-                    3 => (Color::srgb(0.8, 0.5, 0.2), Color::WHITE),  // 铜色
-                    _ => (Color::srgba(0.0, 0.0, 0.0, 0.7), Color::WHITE),
-                };
+                    // 排名标签
+                    let (badge_color, badge_text_color) = match rank {
+                        1 => (Color::srgb(1.0, 0.84, 0.0), Color::BLACK), // 金色
+                        2 => (Color::srgb(0.75, 0.75, 0.75), Color::BLACK), // 银色
+                        3 => (Color::srgb(0.8, 0.5, 0.2), Color::WHITE),  // 铜色
+                        _ => (Color::srgba(0.0, 0.0, 0.0, 0.7), Color::WHITE),
+                    };
 
-                cover_area
-                    .spawn((
-                        RankBadge,
-                        Node {
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(8.0),
-                            left: Val::Px(8.0),
-                            padding: UiRect::new(
-                                Val::Px(8.0),
-                                Val::Px(8.0),
-                                Val::Px(4.0),
-                                Val::Px(4.0),
-                            ),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(badge_color),
-                    ))
-                    .with_children(|badge| {
-                        badge.spawn((
-                            Text::new(format!("#{}", rank)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 12.0,
+                    cover_area
+                        .spawn((
+                            RankBadge,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                top: Val::Px(8.0),
+                                left: Val::Px(8.0),
+                                padding: UiRect::new(
+                                    Val::Px(8.0),
+                                    Val::Px(8.0),
+                                    Val::Px(4.0),
+                                    Val::Px(4.0),
+                                ),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
                                 ..default()
                             },
-                            TextColor(badge_text_color),
-                        ));
-                    });
-            });
+                            BackgroundColor(badge_color),
+                        ))
+                        .with_children(|badge| {
+                            badge.spawn((
+                                Text::new(format!("#{}", rank)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 12.0,
+                                    ..default()
+                                },
+                                TextColor(badge_text_color),
+                            ));
+                        });
+                });
 
             // 信息区域
-            card.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(8.0)),
-                    row_gap: Val::Px(4.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|info| {
-                // 标题
-                info.spawn((
-                    Text::new(truncate_text(&comic.title, 12)),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 13.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 作者
-                info.spawn((
-                    Text::new(truncate_text(&comic.author, 10)),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 11.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                // 点赞数
-                info.spawn((
-                    Text::new(format!("❤️ {}", format_number(comic.likes_count))),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 11.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                // 分类和标签容器
-                if !comic.categories.is_empty() || !comic.tags.is_empty() {
+            card.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(8.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|info| {
+                    // 标题
                     info.spawn((
-                        Node {
+                        Text::new(truncate_text(&comic.title, 12)),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 13.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT),
+                    ));
+
+                    // 作者
+                    info.spawn((
+                        Text::new(truncate_text(&comic.author, 10)),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+
+                    // 点赞数
+                    info.spawn((
+                        Text::new(format!("❤️ {}", format_number(comic.likes_count))),
+                        TextFont {
+                            font: font.clone(),
+                            font_size: 11.0,
+                            ..default()
+                        },
+                        TextColor(AppColors::TEXT_SECONDARY),
+                    ));
+
+                    // 分类和标签容器
+                    if !comic.categories.is_empty() || !comic.tags.is_empty() {
+                        info.spawn((Node {
                             flex_wrap: FlexWrap::Wrap,
                             column_gap: Val::Px(3.0),
                             row_gap: Val::Px(2.0),
                             max_width: Val::Px(layout::CARD_WIDTH - 16.0),
                             overflow: Overflow::clip(),
                             ..default()
-                        },
-                        Transform::default(),
-                    ))
-                    .with_children(|tags_container| {
-                        // 分类（蓝色）
-                        for category in comic.categories.iter().take(2) {
-                            spawn_tag_badge_truncated(
-                                tags_container,
-                                category,
-                                font,
-                                TagColor::Category,
-                                6,
-                            );
-                        }
-                        // 标签（绿色）
-                        for tag in comic.tags.iter().take(2) {
-                            spawn_tag_badge_truncated(tags_container, tag, font, TagColor::Tag, 6);
-                        }
-                    });
-                }
+                        },))
+                            .with_children(|tags_container| {
+                                // 分类（蓝色）
+                                for category in comic.categories.iter().take(2) {
+                                    spawn_tag_badge_truncated(
+                                        tags_container,
+                                        category,
+                                        font,
+                                        TagColor::Category,
+                                        6,
+                                    );
+                                }
+                                // 标签（绿色）
+                                for tag in comic.tags.iter().take(2) {
+                                    spawn_tag_badge_truncated(
+                                        tags_container,
+                                        tag,
+                                        font,
+                                        TagColor::Tag,
+                                        6,
+                                    );
+                                }
+                            });
+                    }
 
-                // 创建/更新时间
-                spawn_comic_time_info(
-                    info,
-                    font,
-                    comic.created_at.as_deref(),
-                    comic.updated_at.as_deref(),
-                );
-            });
+                    // 创建/更新时间
+                    spawn_comic_time_info(
+                        info,
+                        font,
+                        comic.created_at.as_deref(),
+                        comic.updated_at.as_deref(),
+                    );
+                });
         })
         .id()
 }

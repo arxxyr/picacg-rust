@@ -164,6 +164,13 @@ pub struct CategoriesState {
     pub error: Option<String>,
 }
 
+/// 缓存的标签列表（从数据库 book 表聚合，用于屏蔽词建议）
+#[derive(Resource, Default)]
+pub struct CachedTagsState {
+    /// 去重排序后的所有标签
+    pub tags: Vec<String>,
+}
+
 /// 漫画列表状态
 #[derive(Resource)]
 pub struct ComicsListState {
@@ -1072,6 +1079,9 @@ impl DownloadManagerState {
 
     /// 添加新任务
     pub fn add_task(&mut self, meta: DownloadTaskMeta) -> &mut DownloadTaskFSM {
+        // 移除同 comic_id 的旧任务，避免重复
+        let comic_id = meta.comic_id.clone();
+        self.fsm_tasks.retain(|t| t.meta.comic_id != comic_id);
         let fsm = DownloadTaskFSM::new(meta);
         self.fsm_tasks.push(fsm);
         self.fsm_tasks.last_mut().unwrap()

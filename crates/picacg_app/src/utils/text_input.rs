@@ -9,6 +9,7 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    ui::RelativeCursorPosition,
     window::{Ime, PrimaryWindow},
 };
 
@@ -235,37 +236,39 @@ pub fn text_input_ime(mut ime_events: MessageReader<Ime>, mut input_query: Query
 }
 
 /// 点击定位光标（仅更新已聚焦输入框的光标位置）
+/// 使用 RelativeCursorPosition 计算点击位置，无需 GlobalTransform
 pub fn text_input_click_position(
     mut interaction_query: Query<
         (
             &Interaction,
             &mut TextInput,
-            &GlobalTransform,
+            &RelativeCursorPosition,
             &ComputedNode,
         ),
         Changed<Interaction>,
     >,
     window_query: Query<&Window, With<PrimaryWindow>>,
 ) {
-    for (interaction, mut input, transform, computed) in interaction_query.iter_mut() {
+    let scale_factor = window_query
+        .single()
+        .ok()
+        .map(|w| w.scale_factor())
+        .unwrap_or(1.0);
+
+    for (interaction, mut input, relative_cursor, computed) in interaction_query.iter_mut() {
         if *interaction != Interaction::Pressed {
             continue;
         }
 
         let text_len = input.value.chars().count();
-        let cursor_pos = window_query
-            .single()
-            .ok()
-            .and_then(|window| {
-                let cursor = window.cursor_position()?;
-                let scale = window.scale_factor();
-                let node_w = computed.size().x / scale;
-                let node_cx = transform.translation().x;
-                let node_left = node_cx - node_w / 2.0;
-                let click_x = cursor.x - window.width() / 2.0;
-                let relative_x = (click_x - node_left - 12.0).max(0.0);
+        let cursor_pos = relative_cursor
+            .normalized
+            .map(|n| {
+                let node_w = computed.size().x / scale_factor;
+                // 12.0 是输入框左侧 padding
+                let relative_x = (n.x * node_w - 12.0).max(0.0);
                 let char_pos = (relative_x / MONO_CHAR_WIDTH).round() as usize;
-                Some(char_pos.min(text_len))
+                char_pos.min(text_len)
             })
             .unwrap_or(text_len);
 

@@ -2,7 +2,10 @@
 //!
 //! 提取各页面共享的 UI 构建逻辑，避免代码重复。
 
-use bevy::{prelude::*, ui::FocusPolicy};
+use bevy::{
+    prelude::*,
+    ui::{FocusPolicy, RelativeCursorPosition},
+};
 
 use crate::systems::{
     ScrollbarContainer, ScrollbarThumb, ScrollbarTrack, login::AppColors,
@@ -117,7 +120,6 @@ pub fn spawn_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Enti
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
-            Transform::default(),
         ))
         .with_children(|scrollbar| {
             // 滚动条轨道
@@ -135,7 +137,7 @@ pub fn spawn_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Enti
                 },
                 BackgroundColor(TRACK_COLOR),
                 ZIndex(0),
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ));
 
             // 滚动条滑块

@@ -635,6 +635,25 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
     Ok(())
 }
 
+/// 获取所有唯一标签（从 book 表的 tags 字段提取，去重排序）
+pub async fn get_all_unique_tags_async(pool: &SqlitePool) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT DISTINCT tags FROM book WHERE tags IS NOT NULL AND tags != ''")
+            .fetch_all(pool)
+            .await?;
+
+    let mut tag_set = std::collections::BTreeSet::new();
+    for (tags_str,) in rows {
+        for tag in tags_str.split(',') {
+            let tag = tag.trim();
+            if !tag.is_empty() {
+                tag_set.insert(tag.to_string());
+            }
+        }
+    }
+    Ok(tag_set.into_iter().collect())
+}
+
 /// 获取所有下载任务
 pub async fn get_all_download_tasks_async(pool: &SqlitePool) -> Result<Vec<DbDownloadTask>> {
     let tasks =

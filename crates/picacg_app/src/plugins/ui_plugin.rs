@@ -24,6 +24,7 @@ impl Plugin for UiPlugin {
             .init_resource::<AuthState>()
             .init_resource::<LoginFormState>()
             .init_resource::<CategoriesState>()
+            .init_resource::<CachedTagsState>()
             .init_resource::<ComicsListState>()
             .init_resource::<ComicDetailState>()
             .init_resource::<ReaderState>()
@@ -173,6 +174,7 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     comic_card_interaction,
+                    breadcrumb_back_to_categories,
                     auto_load_more_comics,
                     refresh_comics_list_ui,
                     waterfall_create_comic_cards,

@@ -6,6 +6,7 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    ui::RelativeCursorPosition,
 };
 use picacg_config::{AppSettings, ProxyType};
 
@@ -77,7 +78,6 @@ pub fn setup_proxy_settings_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|parent| {
             // 标题
@@ -97,16 +97,13 @@ pub fn setup_proxy_settings_ui(
 
             // 设置容器
             parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Column,
-                        width: Val::Px(400.0),
-                        padding: UiRect::all(Val::Px(20.0)),
-                        row_gap: Val::Px(15.0),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Column,
+                    width: Val::Px(400.0),
+                    padding: UiRect::all(Val::Px(20.0)),
+                    row_gap: Val::Px(15.0),
+                    ..default()
+                },))
                 .with_children(|form| {
                     // 启用代理开关
                     spawn_toggle_row(form, &font, "启用代理:", proxy_state.enabled);
@@ -133,69 +130,66 @@ pub fn setup_proxy_settings_ui(
                     );
 
                     // 按钮行
-                    form.spawn((
-                        Node {
-                            flex_direction: FlexDirection::Row,
-                            justify_content: JustifyContent::SpaceBetween,
-                            column_gap: Val::Px(15.0),
-                            margin: UiRect::top(Val::Px(20.0)),
-                            ..default()
-                        },
-                        Transform::default(),
-                    ))
-                    .with_children(|buttons| {
-                        // 返回按钮
-                        buttons
-                            .spawn((
-                                BackToLoginButton,
-                                Button,
-                                Node {
-                                    width: Val::Px(180.0),
-                                    height: Val::Px(44.0),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(AppColors::SECONDARY),
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new("返回"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
+                    form.spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        justify_content: JustifyContent::SpaceBetween,
+                        column_gap: Val::Px(15.0),
+                        margin: UiRect::top(Val::Px(20.0)),
+                        ..default()
+                    },))
+                        .with_children(|buttons| {
+                            // 返回按钮
+                            buttons
+                                .spawn((
+                                    BackToLoginButton,
+                                    Button,
+                                    Node {
+                                        width: Val::Px(180.0),
+                                        height: Val::Px(44.0),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
+                                    BackgroundColor(AppColors::SECONDARY),
+                                ))
+                                .with_children(|btn| {
+                                    btn.spawn((
+                                        Text::new("返回"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 16.0,
+                                            ..default()
+                                        },
+                                        TextColor(AppColors::TEXT),
+                                    ));
+                                });
 
-                        // 保存按钮
-                        buttons
-                            .spawn((
-                                SaveProxyButton,
-                                Button,
-                                Node {
-                                    width: Val::Px(180.0),
-                                    height: Val::Px(44.0),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(AppColors::PRIMARY),
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new("保存"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
+                            // 保存按钮
+                            buttons
+                                .spawn((
+                                    SaveProxyButton,
+                                    Button,
+                                    Node {
+                                        width: Val::Px(180.0),
+                                        height: Val::Px(44.0),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    });
+                                    BackgroundColor(AppColors::PRIMARY),
+                                ))
+                                .with_children(|btn| {
+                                    btn.spawn((
+                                        Text::new("保存"),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 16.0,
+                                            ..default()
+                                        },
+                                        TextColor(AppColors::TEXT),
+                                    ));
+                                });
+                        });
                 });
 
             // 提示信息
@@ -225,15 +219,12 @@ fn spawn_toggle_row(
     enabled: bool,
 ) {
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
@@ -285,15 +276,12 @@ fn spawn_proxy_type_row(
     current: ProxyType,
 ) {
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             row.spawn((
                 Text::new("代理类型:"),
@@ -354,15 +342,12 @@ fn spawn_input_field(
     field_type: ProxyFieldType,
 ) {
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             row.spawn((
                 Text::new(label),
@@ -394,7 +379,7 @@ fn spawn_input_field(
                 },
                 BorderColor::all(AppColors::BORDER),
                 BackgroundColor(AppColors::SURFACE),
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ))
             .with_children(|input| {
                 input.spawn((

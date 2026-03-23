@@ -1,6 +1,7 @@
 //! 工具模块
 
 pub mod content_filter;
+pub mod icons;
 pub mod text_input;
 pub mod tokio_tasks;
 

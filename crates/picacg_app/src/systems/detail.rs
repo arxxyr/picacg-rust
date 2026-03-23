@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use bevy::prelude::*;
+use bevy::{prelude::*, ui::RelativeCursorPosition};
 use picacg_api::models::Episode;
 
 use super::font_loader::get_font;
@@ -13,6 +13,7 @@ use crate::{
     events::*,
     resources::*,
     systems::{login::AppColors, navigation::NavigationHistory, scrollbar::scrollbar_config::*},
+    utils::icons::*,
 };
 
 /// 滚动条宽度
@@ -87,7 +88,6 @@ pub fn setup_detail_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏
@@ -118,7 +118,7 @@ pub fn setup_detail_ui(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("◀"), // nf-md-arrow_left
+                            Text::new(ICON_CHEVRON_LEFT),
                             TextFont {
                                 font: font.clone(),
                                 font_size: 20.0,
@@ -363,17 +363,13 @@ pub fn setup_detail_ui(
 
                             // 操作按钮栏
                             content
-                                .spawn((
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        flex_direction: FlexDirection::Row,
-                                        column_gap: Val::Px(15.0),
-                                        margin: UiRect::bottom(Val::Px(20.0)),
-                                        ..default()
-                                    },
-                                    Transform::default(), /* 必须添加，否则子实体的
-                                                           * GlobalTransform 会报警告 */
-                                ))
+                                .spawn((Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Row,
+                                    column_gap: Val::Px(15.0),
+                                    margin: UiRect::bottom(Val::Px(20.0)),
+                                    ..default()
+                                },))
                                 .with_children(|buttons| {
                                     // 开始阅读按钮
                                     spawn_action_button(
@@ -464,23 +460,19 @@ pub fn setup_detail_ui(
 
                             // 章节网格
                             content
-                                .spawn((
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        flex_wrap: FlexWrap::Wrap,
-                                        column_gap: Val::Px(episode_layout::COLUMN_GAP),
-                                        row_gap: Val::Px(episode_layout::ROW_GAP),
-                                        padding: UiRect {
-                                            left: Val::Px(0.0),
-                                            right: Val::Px(0.0),
-                                            top: Val::Px(episode_layout::PADDING_TOP),
-                                            bottom: Val::Px(episode_layout::PADDING_BOTTOM),
-                                        },
-                                        ..default()
+                                .spawn((Node {
+                                    width: Val::Percent(100.0),
+                                    flex_wrap: FlexWrap::Wrap,
+                                    column_gap: Val::Px(episode_layout::COLUMN_GAP),
+                                    row_gap: Val::Px(episode_layout::ROW_GAP),
+                                    padding: UiRect {
+                                        left: Val::Px(0.0),
+                                        right: Val::Px(0.0),
+                                        top: Val::Px(episode_layout::PADDING_TOP),
+                                        bottom: Val::Px(episode_layout::PADDING_BOTTOM),
                                     },
-                                    Transform::default(), /* 必须添加，否则子实体的
-                                                           * GlobalTransform 会报警告 */
-                                ))
+                                    ..default()
+                                },))
                                 .with_children(|grid| {
                                     for episode in &detail_state.episodes {
                                         spawn_episode_card(grid, episode, &font);
@@ -541,7 +533,6 @@ fn spawn_action_button<M: Component>(
                 ..default()
             },
             BackgroundColor(color),
-            Transform::default(), // 必须添加！否则子节点 GlobalTransform 警告
         ))
         .with_children(|btn| {
             btn.spawn((
@@ -565,7 +556,6 @@ fn spawn_episode_card(parent: &mut ChildSpawnerCommands, episode: &Episode, font
             },
             Button,
             Interaction::default(), // 必须添加！否则卡片无法点击
-            Transform::default(),   // 必须添加！否则子节点 GlobalTransform 警告
             Node {
                 width: Val::Px(episode_layout::CARD_WIDTH),
                 height: Val::Px(episode_layout::CARD_HEIGHT),
@@ -605,7 +595,6 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                 ..default()
             },
             BackgroundColor(Color::NONE),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|scrollbar| {
             // 轨道
@@ -622,7 +611,7 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                     },
                     BackgroundColor(TRACK_COLOR),
                     ZIndex(0),
-                    Transform::default(),
+                    RelativeCursorPosition::default(),
                 ))
                 .with_children(|track| {
                     // 滑块
@@ -705,7 +694,6 @@ fn create_detail_ui_internal(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏
@@ -736,7 +724,7 @@ fn create_detail_ui_internal(
                     ))
                     .with_children(|btn| {
                         btn.spawn((
-                            Text::new("◀"), // nf-md-arrow_left
+                            Text::new(ICON_CHEVRON_LEFT),
                             TextFont {
                                 font: font.clone(),
                                 font_size: 20.0,
@@ -1136,16 +1124,13 @@ fn build_detail_content(
 
     // 操作按钮栏
     content
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(15.0),
-                margin: UiRect::bottom(Val::Px(20.0)),
-                ..default()
-            },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(15.0),
+            margin: UiRect::bottom(Val::Px(20.0)),
+            ..default()
+        },))
         .with_children(|buttons| {
             spawn_action_button(
                 buttons,
@@ -1215,22 +1200,19 @@ fn build_detail_content(
 
     // 章节网格
     content
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(episode_layout::COLUMN_GAP),
-                row_gap: Val::Px(episode_layout::ROW_GAP),
-                padding: UiRect {
-                    left: Val::Px(0.0),
-                    right: Val::Px(0.0),
-                    top: Val::Px(episode_layout::PADDING_TOP),
-                    bottom: Val::Px(episode_layout::PADDING_BOTTOM),
-                },
-                ..default()
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_wrap: FlexWrap::Wrap,
+            column_gap: Val::Px(episode_layout::COLUMN_GAP),
+            row_gap: Val::Px(episode_layout::ROW_GAP),
+            padding: UiRect {
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(episode_layout::PADDING_TOP),
+                bottom: Val::Px(episode_layout::PADDING_BOTTOM),
             },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+            ..default()
+        },))
         .with_children(|grid| {
             for episode in &detail_state.episodes {
                 spawn_episode_card(grid, episode, font);

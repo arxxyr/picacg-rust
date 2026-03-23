@@ -11,6 +11,7 @@ use crate::{
     events::*,
     resources::{ComicDetailState, ImageCache, ReadMode, ReaderState},
     systems::downloads::get_download_base_path,
+    utils::icons::*,
 };
 
 // ==================== 组件定义 ====================
@@ -250,7 +251,7 @@ fn spawn_toolbar(
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("◀"), // nf-md-arrow_left
+                        Text::new(ICON_CHEVRON_LEFT),
                         TextFont {
                             font: font.clone(),
                             font_size: 24.0,
@@ -274,15 +275,12 @@ fn spawn_toolbar(
 
             // 右侧：缩放显示 + 模式切换
             toolbar
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(10.0),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    ..default()
+                },))
                 .with_children(|right| {
                     // 缩放显示
                     right.spawn((
@@ -398,7 +396,7 @@ fn spawn_bottom_bar(
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("◀ 上一页"), // nf-md-arrow_left
+                    Text::new(format!("{ICON_CHEVRON_LEFT} 上一页")),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,
@@ -436,7 +434,7 @@ fn spawn_bottom_bar(
             ))
             .with_children(|btn| {
                 btn.spawn((
-                    Text::new("下一页 ▶"), // nf-md-arrow_right
+                    Text::new(format!("下一页 {ICON_CHEVRON_RIGHT}")),
                     TextFont {
                         font: font.clone(),
                         font_size: 14.0,

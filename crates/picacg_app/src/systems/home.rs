@@ -2,7 +2,12 @@
 //!
 //! 实现首页推荐漫画展示
 
-use bevy::{input::mouse::MouseWheel, prelude::*, ui::FocusPolicy, window::PrimaryWindow};
+use bevy::{
+    input::mouse::MouseWheel,
+    prelude::*,
+    ui::{FocusPolicy, RelativeCursorPosition},
+    window::PrimaryWindow,
+};
 
 use super::font_loader::get_font;
 use crate::{
@@ -123,7 +128,6 @@ pub fn setup_home_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏
@@ -137,7 +141,6 @@ pub fn setup_home_ui(
                     ..default()
                 },
                 BorderColor::all(AppColors::BORDER),
-                Transform::default(),
             ))
             .with_children(|header| {
                 // 标题
@@ -183,62 +186,59 @@ pub fn setup_home_ui(
             });
 
             // 滚动区域包装器
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|wrapper| {
-                // 内容网格（可滚动）
-                let scroll_container_id = wrapper
-                    .spawn((
-                        HomeScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::FlexStart,
-                            align_content: AlignContent::FlexStart,
-                            padding: UiRect {
-                                left: Val::Px(home_layout::PADDING_LEFT),
-                                right: Val::Px(home_layout::PADDING_RIGHT),
-                                top: Val::Px(home_layout::PADDING_TOP),
-                                bottom: Val::Px(home_layout::PADDING_BOTTOM),
-                            },
-                            column_gap: Val::Px(home_layout::COLUMN_GAP),
-                            row_gap: Val::Px(home_layout::ROW_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|grid| {
-                        if home_state.is_loading {
-                            grid.spawn((
-                                HomeLoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
+            root.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                position_type: PositionType::Relative,
+                ..default()
+            },))
+                .with_children(|wrapper| {
+                    // 内容网格（可滚动）
+                    let scroll_container_id = wrapper
+                        .spawn((
+                            HomeScrollContainer,
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                justify_content: JustifyContent::FlexStart,
+                                align_content: AlignContent::FlexStart,
+                                padding: UiRect {
+                                    left: Val::Px(home_layout::PADDING_LEFT),
+                                    right: Val::Px(home_layout::PADDING_RIGHT),
+                                    top: Val::Px(home_layout::PADDING_TOP),
+                                    bottom: Val::Px(home_layout::PADDING_BOTTOM),
                                 },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        }
-                    })
-                    .id();
+                                column_gap: Val::Px(home_layout::COLUMN_GAP),
+                                row_gap: Val::Px(home_layout::ROW_GAP),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
+                            },
+                            ScrollPosition::default(),
+                            ContentSizeInfo::default(),
+                        ))
+                        .with_children(|grid| {
+                            if home_state.is_loading {
+                                grid.spawn((
+                                    HomeLoadingIndicator,
+                                    Text::new("加载中..."),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 16.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT),
+                                ));
+                            }
+                        })
+                        .id();
 
-                // 创建滚动条
-                spawn_scrollbar_inline(wrapper, scroll_container_id);
-            });
+                    // 创建滚动条
+                    spawn_scrollbar_inline(wrapper, scroll_container_id);
+                });
         })
         .id();
 
@@ -273,7 +273,6 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
             },
             BackgroundColor(Color::NONE),
             ZIndex(10),
-            Transform::default(),
         ))
         .with_children(|scrollbar| {
             // 滚动条轨道
@@ -291,7 +290,7 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
                 },
                 BackgroundColor(TRACK_COLOR),
                 ZIndex(0),
-                Transform::default(),
+                RelativeCursorPosition::default(),
             ));
 
             // 滚动条滑块
@@ -406,27 +405,24 @@ fn spawn_home_card(
 
             // 分类和标签容器
             if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 分类（蓝色）
-                    for category in comic.categories.iter().take(2) {
-                        spawn_tag_badge(tags_container, category, font, TagColor::Category);
-                    }
-                    // 标签（绿色）
-                    for tag in comic.tags.iter().take(2) {
-                        spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
-                    }
-                });
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 分类（蓝色）
+                        for category in comic.categories.iter().take(2) {
+                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
+                        }
+                        // 标签（绿色）
+                        for tag in comic.tags.iter().take(2) {
+                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
+                        }
+                    });
             }
 
             // 创建/更新时间

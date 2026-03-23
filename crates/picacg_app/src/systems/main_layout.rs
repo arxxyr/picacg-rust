@@ -11,6 +11,7 @@ use crate::{
     components::*,
     resources::*,
     systems::{login::AppColors, navigation::NavigationHistory},
+    utils::icons::*,
 };
 
 /// 侧边栏宽度
@@ -37,45 +38,45 @@ const SIDEBAR_BUTTONS: &[SidebarButtonConfig] = &[
     SidebarButtonConfig {
         route: SidebarRoute::Favorites,
         label: "我的收藏",
-        icon: "⭐",
+        icon: ICON_HEART,
         section: SidebarSection::User,
     },
     // 导航分组
     SidebarButtonConfig {
         route: SidebarRoute::Home,
         label: "首页",
-        icon: "🏠",
+        icon: ICON_HOME,
         section: SidebarSection::Navigation,
     },
     SidebarButtonConfig {
         route: SidebarRoute::Categories,
         label: "分类",
-        icon: "📚",
+        icon: ICON_BOOKSHELF,
         section: SidebarSection::Navigation,
     },
     SidebarButtonConfig {
         route: SidebarRoute::Search,
         label: "搜索",
-        icon: "🔍",
+        icon: ICON_SEARCH,
         section: SidebarSection::Navigation,
     },
     SidebarButtonConfig {
         route: SidebarRoute::Rankings,
         label: "排行榜",
-        icon: "🏆",
+        icon: ICON_TROPHY,
         section: SidebarSection::Navigation,
     },
     // 其他分组
     SidebarButtonConfig {
         route: SidebarRoute::Downloads,
         label: "下载",
-        icon: "📥",
+        icon: ICON_DOWNLOAD,
         section: SidebarSection::Other,
     },
     SidebarButtonConfig {
         route: SidebarRoute::Settings,
         label: "设置",
-        icon: "⚙️",
+        icon: ICON_COG,
         section: SidebarSection::Other,
     },
 ];
@@ -95,7 +96,6 @@ pub fn setup_main_layout(mut commands: Commands, _asset_server: Res<AssetServer>
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|parent| {
             // 侧边栏
@@ -111,7 +111,6 @@ pub fn setup_main_layout(mut commands: Commands, _asset_server: Res<AssetServer>
                     ..default()
                 },
                 BackgroundColor(AppColors::BACKGROUND),
-                Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
             ));
         });
 }
@@ -133,7 +132,6 @@ fn spawn_sidebar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
             },
             BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
             BorderColor::all(AppColors::BORDER),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|sidebar| {
             // 用户信息区
@@ -173,16 +171,13 @@ fn spawn_sidebar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
 /// 创建用户信息区
 fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(15.0)),
-                ..default()
-            },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+        .spawn((Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(15.0)),
+            ..default()
+        },))
         .with_children(|area| {
             // 头像占位符 (100x100)
             area.spawn((
@@ -242,18 +237,15 @@ fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) 
 /// 创建菜单区域
 fn spawn_menu_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
-        .spawn((
-            Node {
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::horizontal(Val::Px(10.0)),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            },
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
-        ))
+        .spawn((Node {
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            flex_basis: Val::Px(0.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::horizontal(Val::Px(10.0)),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },))
         .with_children(|menu| {
             // 用户分组
             spawn_section_header(menu, "用户", font);

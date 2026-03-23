@@ -6,6 +6,7 @@ use bevy::{
         keyboard::{Key, KeyboardInput},
     },
     prelude::*,
+    ui::RelativeCursorPosition,
     window::PrimaryWindow,
 };
 
@@ -45,7 +46,6 @@ pub fn setup_register_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(),
         ))
         .with_children(|parent| {
             // 标题
@@ -92,7 +92,6 @@ pub fn setup_register_ui(
                         ..default()
                     },
                     BackgroundColor(AppColors::SURFACE),
-                    Transform::default(),
                 ))
                 .with_children(|form| {
                     // 基本信息区域
@@ -220,28 +219,22 @@ pub fn setup_register_ui(
                     );
 
                     // 底部间距
-                    form.spawn((
-                        Node {
-                            height: Val::Px(20.0),
-                            ..default()
-                        },
-                        Transform::default(),
-                    ));
+                    form.spawn(Node {
+                        height: Val::Px(20.0),
+                        ..default()
+                    });
                 });
 
             // 按钮区域
             parent
-                .spawn((
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(20.0),
-                        margin: UiRect::top(Val::Px(20.0)),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    flex_direction: FlexDirection::Row,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    margin: UiRect::top(Val::Px(20.0)),
+                    ..default()
+                },))
                 .with_children(|btns| {
                     // 返回登录按钮
                     btns.spawn((
@@ -379,15 +372,12 @@ fn spawn_register_input_row(
     };
 
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 标签
             row.spawn((
@@ -426,7 +416,7 @@ fn spawn_register_input_row(
                     },
                     BorderColor::all(AppColors::BORDER),
                     BackgroundColor(AppColors::CARD_BG),
-                    Transform::default(),
+                    RelativeCursorPosition::default(),
                 ))
                 .with_children(|input| {
                     input.spawn((
@@ -459,15 +449,12 @@ fn spawn_gender_row(
     current_gender: Gender,
 ) {
     parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-            Transform::default(),
-        ))
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        },))
         .with_children(|row| {
             // 标签
             row.spawn((

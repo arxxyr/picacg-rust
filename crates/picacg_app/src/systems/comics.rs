@@ -21,6 +21,10 @@ use crate::{
     },
 };
 
+/// 面包屑"分类"按钮，点击返回分类页
+#[derive(Component)]
+pub struct BreadcrumbBackToCategories;
+
 /// 漫画卡片布局常量
 mod comic_layout {
     /// 卡片宽度
@@ -65,7 +69,6 @@ pub fn setup_comics_list_ui(
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(), // 必须添加，否则子实体的 GlobalTransform 会报警告
         ))
         .with_children(|root| {
             // 标题栏（包含面包屑导航）
@@ -79,19 +82,28 @@ pub fn setup_comics_list_ui(
                     ..default()
                 },
                 BorderColor::all(AppColors::BORDER),
-                Transform::default(),
             ))
             .with_children(|header| {
-                // 面包屑: 分类 > 当前分类名
-                header.spawn((
-                    Text::new("分类"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
+                // 面包屑: 分类 > 当前分类名（"分类"可点击返回）
+                header
+                    .spawn((
+                        BreadcrumbBackToCategories,
+                        Button,
+                        Interaction::default(),
+                        Node::default(),
+                        BackgroundColor(Color::NONE),
+                    ))
+                    .with_children(|btn| {
+                        btn.spawn((
+                            Text::new("分类"),
+                            TextFont {
+                                font: font.clone(),
+                                font_size: 14.0,
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+                    });
 
                 header.spawn((
                     Text::new(">"),
@@ -115,63 +127,60 @@ pub fn setup_comics_list_ui(
             });
 
             // 滚动区域包装器（用于放置滚动条）
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_grow: 1.0,
-                    flex_shrink: 1.0,
-                    flex_basis: Val::Px(0.0),
-                    min_height: Val::Px(0.0),
-                    position_type: PositionType::Relative,
-                    ..default()
-                },
-                Transform::default(),
-            ))
-            .with_children(|wrapper| {
-                // 漫画网格（可滚动）
-                let scroll_container_id = wrapper
-                    .spawn((
-                        ComicsScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            justify_content: JustifyContent::FlexStart,
-                            align_content: AlignContent::FlexStart,
-                            padding: UiRect {
-                                left: Val::Px(comic_layout::PADDING_LEFT),
-                                right: Val::Px(comic_layout::PADDING_RIGHT),
-                                top: Val::Px(comic_layout::PADDING_TOP),
-                                bottom: Val::Px(comic_layout::PADDING_BOTTOM),
-                            },
-                            column_gap: Val::Px(comic_layout::COLUMN_GAP),
-                            row_gap: Val::Px(comic_layout::ROW_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        ScrollPosition(Vec2::new(0.0, comics_state.scroll_y)),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|grid| {
-                        if comics_state.is_loading {
-                            grid.spawn((
-                                LoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
+            root.spawn((Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                flex_shrink: 1.0,
+                flex_basis: Val::Px(0.0),
+                min_height: Val::Px(0.0),
+                position_type: PositionType::Relative,
+                ..default()
+            },))
+                .with_children(|wrapper| {
+                    // 漫画网格（可滚动）
+                    let scroll_container_id = wrapper
+                        .spawn((
+                            ComicsScrollContainer,
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Percent(100.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                justify_content: JustifyContent::FlexStart,
+                                align_content: AlignContent::FlexStart,
+                                padding: UiRect {
+                                    left: Val::Px(comic_layout::PADDING_LEFT),
+                                    right: Val::Px(comic_layout::PADDING_RIGHT),
+                                    top: Val::Px(comic_layout::PADDING_TOP),
+                                    bottom: Val::Px(comic_layout::PADDING_BOTTOM),
                                 },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        }
-                        // 漫画卡片通过瀑布式创建系统添加
-                    })
-                    .id();
+                                column_gap: Val::Px(comic_layout::COLUMN_GAP),
+                                row_gap: Val::Px(comic_layout::ROW_GAP),
+                                overflow: Overflow::scroll_y(),
+                                ..default()
+                            },
+                            ScrollPosition(Vec2::new(0.0, comics_state.scroll_y)),
+                            ContentSizeInfo::default(),
+                        ))
+                        .with_children(|grid| {
+                            if comics_state.is_loading {
+                                grid.spawn((
+                                    LoadingIndicator,
+                                    Text::new("加载中..."),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 16.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::TEXT),
+                                ));
+                            }
+                            // 漫画卡片通过瀑布式创建系统添加
+                        })
+                        .id();
 
-                // 创建滚动条
-                spawn_scrollbar(wrapper, scroll_container_id);
-            });
+                    // 创建滚动条
+                    spawn_scrollbar(wrapper, scroll_container_id);
+                });
 
             // 无限滚动不再需要分页控件
         })
@@ -278,93 +287,87 @@ fn spawn_comic_card(
 
             // 分类标签容器
             if !comic.categories.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 最多显示 3 个分类
-                    for category in comic.categories.iter().take(3) {
-                        tags_container
-                            .spawn((
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(4.0),
-                                        Val::Px(4.0),
-                                        Val::Px(1.0),
-                                        Val::Px(1.0),
-                                    ),
-                                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
-                            ))
-                            .with_children(|badge| {
-                                badge.spawn((
-                                    Text::new(category),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 10.0,
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 最多显示 3 个分类
+                        for category in comic.categories.iter().take(3) {
+                            tags_container
+                                .spawn((
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                            Val::Px(1.0),
+                                            Val::Px(1.0),
+                                        ),
+                                        border_radius: BorderRadius::all(Val::Px(2.0)),
                                         ..default()
                                     },
-                                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                                ));
-                            });
-                    }
-                });
+                                    BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
+                                ))
+                                .with_children(|badge| {
+                                    badge.spawn((
+                                        Text::new(category),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 10.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                                    ));
+                                });
+                        }
+                    });
             }
 
             // 标签容器
             if !comic.tags.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        margin: UiRect::top(Val::Px(2.0)),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 最多显示 3 个标签
-                    for tag in comic.tags.iter().take(3) {
-                        tags_container
-                            .spawn((
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(4.0),
-                                        Val::Px(4.0),
-                                        Val::Px(1.0),
-                                        Val::Px(1.0),
-                                    ),
-                                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
-                            ))
-                            .with_children(|badge| {
-                                badge.spawn((
-                                    Text::new(tag),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 10.0,
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    margin: UiRect::top(Val::Px(2.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 最多显示 3 个标签
+                        for tag in comic.tags.iter().take(3) {
+                            tags_container
+                                .spawn((
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                            Val::Px(1.0),
+                                            Val::Px(1.0),
+                                        ),
+                                        border_radius: BorderRadius::all(Val::Px(2.0)),
                                         ..default()
                                     },
-                                    TextColor(Color::srgb(0.9, 0.7, 0.9)),
-                                ));
-                            });
-                    }
-                });
+                                    BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
+                                ))
+                                .with_children(|badge| {
+                                    badge.spawn((
+                                        Text::new(tag),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 10.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.9, 0.7, 0.9)),
+                                    ));
+                                });
+                        }
+                    });
             }
 
             // 创建/更新时间
@@ -834,5 +837,20 @@ pub fn update_comics_images(
 
     if replaced_count > 0 {
         tracing::trace!("[Comics] 替换了 {} 个封面图片", replaced_count);
+    }
+}
+
+/// 面包屑"分类"按钮交互：点击返回分类列表页
+pub fn breadcrumb_back_to_categories(
+    interaction_query: Query<
+        &Interaction,
+        (Changed<Interaction>, With<BreadcrumbBackToCategories>),
+    >,
+    mut next_route: ResMut<NextState<AppRoute>>,
+) {
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            next_route.set(AppRoute::Categories);
+        }
     }
 }

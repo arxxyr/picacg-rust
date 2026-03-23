@@ -1,6 +1,6 @@
 //! 搜索界面系统
 
-use bevy::{input::keyboard::Key, prelude::*, window::PrimaryWindow};
+use bevy::{input::keyboard::Key, prelude::*, ui::RelativeCursorPosition, window::PrimaryWindow};
 
 use super::font_loader::get_font;
 use crate::{
@@ -18,6 +18,7 @@ use crate::{
         content_filter::{
             FilterConfig, filter_comic_indices, load_filter_flags, load_filter_keywords,
         },
+        icons::*,
         text_input::{TextInput, TextInputDisplay},
     },
 };
@@ -181,7 +182,6 @@ fn build_search_ui(commands: &mut Commands, params: &SearchUiBuildParams) -> Ent
                 ..default()
             },
             BackgroundColor(AppColors::BACKGROUND),
-            Transform::default(),
         ))
         .with_children(|root| {
             // 搜索头部（输入框 + 按钮）
@@ -217,7 +217,6 @@ fn spawn_search_header(
             ..default()
         },
         BorderColor::all(AppColors::BORDER),
-        Transform::default(),
     ))
     .with_children(|header| {
         // 搜索图标
@@ -263,7 +262,7 @@ fn spawn_search_header(
                     },
                     BorderColor::all(input_border_color),
                     BackgroundColor(AppColors::CARD_BG),
-                    Transform::default(),
+                    RelativeCursorPosition::default(),
                 ))
                 .with_children(|input| {
                     input.spawn((
@@ -294,7 +293,6 @@ fn spawn_search_header(
                     ..default()
                 },
                 BackgroundColor(AppColors::PRIMARY),
-                Transform::default(),
             ))
             .with_children(|btn| {
                 btn.spawn((
@@ -325,23 +323,19 @@ fn spawn_filter_toolbar(
             ..default()
         },
         BorderColor::all(AppColors::BORDER),
-        Transform::default(),
     ))
     .with_children(|toolbar| {
         // 排序按钮行
         toolbar
-            .spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(8.0), Val::Px(8.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(6.0),
-                    flex_wrap: FlexWrap::Wrap,
-                    row_gap: Val::Px(6.0),
-                    ..default()
-                },
-                Transform::default(),
-            ))
+            .spawn((Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::new(Val::Px(15.0), Val::Px(15.0), Val::Px(8.0), Val::Px(8.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(6.0),
+                ..default()
+            },))
             .with_children(|row| {
                 // 排序标签
                 row.spawn((
@@ -469,9 +463,9 @@ fn spawn_filter_toolbar(
                     ));
                     btn.spawn((
                         Text::new(if search_state.show_category_filter {
-                            "▲" // chevron_up
+                            ICON_CHEVRON_UP
                         } else {
-                            "▼" // chevron_down
+                            ICON_CHEVRON_DOWN
                         }),
                         TextFont {
                             font: font.clone(),
@@ -508,21 +502,17 @@ fn spawn_category_filter_panel(
                 ..default()
             },
             BackgroundColor(Color::srgba(0.1, 0.1, 0.14, 0.5)),
-            Transform::default(),
         ))
         .with_children(|panel| {
             // 分类复选框网格
             panel
-                .spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(6.0),
-                        row_gap: Val::Px(6.0),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                },))
                 .with_children(|grid| {
                     for category_name in available_categories {
                         let is_checked = search_state.selected_categories.contains(category_name);
@@ -532,14 +522,11 @@ fn spawn_category_filter_panel(
 
             // 全选/清空按钮行
             panel
-                .spawn((
-                    Node {
-                        column_gap: Val::Px(8.0),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
+                .spawn((Node {
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },))
                 .with_children(|btn_row| {
                     // 全选按钮
                     btn_row
@@ -663,7 +650,7 @@ fn spawn_category_checkbox(
         .with_children(|cb| {
             // 勾选图标
             cb.spawn((
-                Text::new(if checked { "✓" } else { "" }),
+                Text::new(if checked { ICON_CHECK } else { "" }),
                 TextFont {
                     font: font.clone(),
                     font_size: 11.0,
@@ -698,40 +685,37 @@ fn spawn_scroll_area(
     font: &Handle<Font>,
     search_state: &SearchState,
 ) {
-    root.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            flex_grow: 1.0,
-            flex_shrink: 1.0,
-            flex_basis: Val::Px(0.0),
-            min_height: Val::Px(0.0),
-            position_type: PositionType::Relative,
-            ..default()
-        },
-        Transform::default(),
-    ))
-    .with_children(|wrapper| {
-        let scroll_container = wrapper
-            .spawn((
-                SearchScrollContainer,
-                ScrollContainer,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                },
-                ScrollPosition::default(),
-                ContentSizeInfo::default(),
-            ))
-            .with_children(|scroll| {
-                spawn_scroll_content(scroll, font, search_state);
-            })
-            .id();
+    root.spawn((Node {
+        width: Val::Percent(100.0),
+        flex_grow: 1.0,
+        flex_shrink: 1.0,
+        flex_basis: Val::Px(0.0),
+        min_height: Val::Px(0.0),
+        position_type: PositionType::Relative,
+        ..default()
+    },))
+        .with_children(|wrapper| {
+            let scroll_container = wrapper
+                .spawn((
+                    SearchScrollContainer,
+                    ScrollContainer,
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    ScrollPosition::default(),
+                    ContentSizeInfo::default(),
+                ))
+                .with_children(|scroll| {
+                    spawn_scroll_content(scroll, font, search_state);
+                })
+                .id();
 
-        spawn_scrollbar(wrapper, scroll_container);
-    });
+            spawn_scrollbar(wrapper, scroll_container);
+        });
 }
 
 /// 创建滚动内容（根据状态显示不同内容）
@@ -856,7 +840,6 @@ fn spawn_pagination_controls(
         },
         BorderColor::all(AppColors::BORDER),
         BackgroundColor(AppColors::SURFACE),
-        Transform::default(),
     ))
     .with_children(|pagination| {
         // 上一页按钮
@@ -1033,7 +1016,6 @@ fn spawn_search_result_card(
                     ..default()
                 },
                 BackgroundColor(AppColors::SECONDARY),
-                Transform::default(),
             ))
             .with_children(|img_container| {
                 let cover_url = comic.thumb.url();
@@ -1102,93 +1084,87 @@ fn spawn_search_result_card(
 
             // 分类标签容器
             if !comic.categories.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 最多显示 3 个分类
-                    for category in comic.categories.iter().take(3) {
-                        tags_container
-                            .spawn((
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(4.0),
-                                        Val::Px(4.0),
-                                        Val::Px(1.0),
-                                        Val::Px(1.0),
-                                    ),
-                                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
-                            ))
-                            .with_children(|badge| {
-                                badge.spawn((
-                                    Text::new(category),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 10.0,
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 最多显示 3 个分类
+                        for category in comic.categories.iter().take(3) {
+                            tags_container
+                                .spawn((
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                            Val::Px(1.0),
+                                            Val::Px(1.0),
+                                        ),
+                                        border_radius: BorderRadius::all(Val::Px(2.0)),
                                         ..default()
                                     },
-                                    TextColor(Color::srgb(0.6, 0.8, 1.0)),
-                                ));
-                            });
-                    }
-                });
+                                    BackgroundColor(Color::srgba(0.2, 0.4, 0.8, 0.3)),
+                                ))
+                                .with_children(|badge| {
+                                    badge.spawn((
+                                        Text::new(category),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 10.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.6, 0.8, 1.0)),
+                                    ));
+                                });
+                        }
+                    });
             }
 
             // 标签容器
             if !comic.tags.is_empty() {
-                card.spawn((
-                    Node {
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        max_width: Val::Px(164.0),
-                        margin: UiRect::top(Val::Px(2.0)),
-                        overflow: Overflow::clip(),
-                        ..default()
-                    },
-                    Transform::default(),
-                ))
-                .with_children(|tags_container| {
-                    // 最多显示 3 个标签
-                    for tag in comic.tags.iter().take(3) {
-                        tags_container
-                            .spawn((
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(4.0),
-                                        Val::Px(4.0),
-                                        Val::Px(1.0),
-                                        Val::Px(1.0),
-                                    ),
-                                    border_radius: BorderRadius::all(Val::Px(2.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
-                            ))
-                            .with_children(|badge| {
-                                badge.spawn((
-                                    Text::new(tag),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 10.0,
+                card.spawn((Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    margin: UiRect::top(Val::Px(2.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },))
+                    .with_children(|tags_container| {
+                        // 最多显示 3 个标签
+                        for tag in comic.tags.iter().take(3) {
+                            tags_container
+                                .spawn((
+                                    Node {
+                                        padding: UiRect::new(
+                                            Val::Px(4.0),
+                                            Val::Px(4.0),
+                                            Val::Px(1.0),
+                                            Val::Px(1.0),
+                                        ),
+                                        border_radius: BorderRadius::all(Val::Px(2.0)),
                                         ..default()
                                     },
-                                    TextColor(Color::srgb(0.9, 0.7, 0.9)),
-                                ));
-                            });
-                    }
-                });
+                                    BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3)),
+                                ))
+                                .with_children(|badge| {
+                                    badge.spawn((
+                                        Text::new(tag),
+                                        TextFont {
+                                            font: font.clone(),
+                                            font_size: 10.0,
+                                            ..default()
+                                        },
+                                        TextColor(Color::srgb(0.9, 0.7, 0.9)),
+                                    ));
+                                });
+                        }
+                    });
             }
 
             // 创建/更新时间
