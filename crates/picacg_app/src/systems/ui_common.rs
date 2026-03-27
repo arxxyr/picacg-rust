@@ -288,19 +288,11 @@ pub fn global_scroll_dispatch(
             }
             let viewport_h = size.y / scale;
 
-            // flex-wrap 网格布局使用 ContentSizeInfo（子节点不是简单纵向排列）
-            // 普通 column 布局从子节点精确计算
+            // 优先使用 ContentSizeInfo（各模块精确计算），
+            // 没有时从子节点计算（仅适用于纵向布局）
             let content_h = match (content_info, children) {
-                (Some(info), _)
-                    if info.content_height > 0.0 && node.flex_wrap != FlexWrap::NoWrap =>
-                {
-                    // 网格布局：信任各模块计算的 ContentSizeInfo
-                    info.content_height
-                }
-                (_, Some(ch)) => {
-                    // 纵向布局：从子节点精确计算
-                    compute_content_height(node, ch, &children_query, scale)
-                }
+                (Some(info), _) if info.content_height > 0.0 => info.content_height,
+                (_, Some(ch)) => compute_content_height(node, ch, &children_query, scale),
                 (Some(info), None) if info.content_height > 0.0 => info.content_height,
                 _ => 0.0,
             };

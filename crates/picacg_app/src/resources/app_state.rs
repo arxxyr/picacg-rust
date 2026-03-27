@@ -891,11 +891,9 @@ impl DownloadTaskMeta {
         }
     }
 
-    /// 获取有效的下载路径（优先使用独立设置，回退到全局）
+    /// 获取实际保存路径（始终返回 save_path，即 base/image/漫画名）
     pub fn effective_download_path(&self) -> &str {
-        self.custom_download_path
-            .as_deref()
-            .unwrap_or(&self.save_path)
+        &self.save_path
     }
 
     /// 获取有效的 CBZ 打包开关（优先使用独立设置，回退到全局）
@@ -1076,6 +1074,63 @@ impl DownloadTaskMeta {
                 .await
                 .map_err(|e| format!("删除下载任务失败: {}", e))
         })
+    }
+}
+
+/// 自动修复被污染的 save_path
+///
+/// 之前错误的迁移可能把 save_path 设成了基础目录（如 `/repo/comic`）
+/// 而不是完整路径（如 `/repo/comic/image/漫画名`）。
+/// 修复方式：用 comic_title 重建正确的 save_path。
+pub fn repair_save_path(meta: &mut DownloadTaskMeta) {
+    let expected_suffix = format!(
+        "image/{}",
+        crate::utils::sanitize_filename(&meta.comic_title)
+    );
+    // 已经是正确格式就跳过
+    if meta.save_path.ends_with(&expected_suffix) {
+        return;
+    }
+
+    // 尝试从 save_path 推导基础目录，然后重建
+    let base = if let Some(base) = meta.custom_download_path.as_deref() {
+        base.to_string()
+    } else {
+        // save_path 本身可能就是基础目录，或者取其父级
+        let p = std::path::Path::new(&meta.save_path);
+        // 如果以 /image/xxx 结尾说明没被污染（但 file_name 不对）
+        if p.parent()
+            .and_then(|pp| pp.file_name())
+            .map(|n| n == "image")
+            == Some(true)
+        {
+            p.parent()
+                .unwrap()
+                .parent()
+                .unwrap_or(p)
+                .to_string_lossy()
+                .to_string()
+        } else {
+            meta.save_path.clone()
+        }
+    };
+
+    let new_path = std::path::Path::new(&base)
+        .join("image")
+        .join(crate::utils::sanitize_filename(&meta.comic_title))
+        .to_string_lossy()
+        .to_string();
+
+    if new_path != meta.save_path {
+        tracing::info!(
+            "修复路径: {} -> {} (漫画: {})",
+            meta.save_path,
+            new_path,
+            meta.comic_title
+        );
+        meta.save_path = new_path;
+        // 保存修复后的路径到数据库
+        let _ = meta.save();
     }
 }
 
@@ -1343,7 +1398,10 @@ impl DownloadManagerState {
                 .unwrap_or_default();
 
         for db_task in db_tasks {
-            let meta = DownloadTaskMeta::from_db_task(&db_task);
+            let mut meta = DownloadTaskMeta::from_db_task(&db_task);
+
+            // 自动修复被污染的 save_path（之前错误迁移可能把路径设成了基础目录）
+            repair_save_path(&mut meta);
 
             // 检查是否已经存在
             if self.find_task(&meta.comic_id).is_some() {

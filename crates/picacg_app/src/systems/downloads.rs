@@ -21,7 +21,7 @@ use crate::{
     },
     resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, DownloadState, SearchState},
     systems::{login::AppColors, navigation::NavigationHistory, ui_common::Scrollable},
-    utils::icons::*,
+    utils::{icons::*, tokio_tasks::TokioTasksRuntime},
 };
 
 /// 下载滚动容器组件（本地定义）
@@ -251,12 +251,10 @@ fn scan_completed_downloads(
             continue;
         }
 
-        // 计算有效下载路径（优先使用 custom_download_path）
-        let effective_path = db_task
-            .custom_download_path
-            .as_deref()
-            .unwrap_or(&db_task.save_path)
-            .to_string();
+        // 修复可能被污染的路径，然后使用
+        let mut meta = crate::resources::DownloadTaskMeta::from_db_task(&db_task);
+        crate::resources::repair_save_path(&mut meta);
+        let effective_path = meta.save_path.clone();
 
         // 从有效路径提取文件夹名称
         let folder_name = std::path::Path::new(&effective_path)
@@ -395,6 +393,18 @@ pub struct DownloadStatusText {
 /// 打开下载文件夹按钮标记
 #[derive(Component)]
 pub struct OpenDownloadFolderButton;
+
+/// "全部移动"按钮标记
+#[derive(Component)]
+pub struct MoveAllDownloadsButton;
+
+/// 标题栏"全部开始"按钮
+#[derive(Component)]
+pub struct StartAllHeaderButton;
+
+/// 标题栏"全部暂停"按钮
+#[derive(Component)]
+pub struct PauseAllHeaderButton;
 
 /// 打开 CBZ 文件夹按钮标记
 #[derive(Component)]
@@ -1299,6 +1309,41 @@ fn spawn_download_stats_panel(
 }
 
 /// 创建下载标题栏
+/// 创建标题栏小按钮
+fn spawn_header_button(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    marker: impl Component,
+    label: &str,
+    color: Color,
+) {
+    parent
+        .spawn((
+            marker,
+            Button,
+            Interaction::default(),
+            Node {
+                padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(color),
+            BorderColor::all(color),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
 fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
     parent
         .spawn((
@@ -1365,6 +1410,24 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                                 TextColor(Color::WHITE),
                             ));
                         });
+
+                    // 全部开始按钮
+                    spawn_header_button(
+                        btn_group,
+                        &font,
+                        StartAllHeaderButton,
+                        &format!("{ICON_PLAY} 全部开始"),
+                        Color::srgb(0.2, 0.5, 0.3),
+                    );
+
+                    // 全部暂停按钮
+                    spawn_header_button(
+                        btn_group,
+                        &font,
+                        PauseAllHeaderButton,
+                        &format!("{ICON_PAUSE} 全部暂停"),
+                        Color::srgb(0.7, 0.5, 0.2),
+                    );
 
                     // 打开原图文件夹按钮
                     btn_group
@@ -3469,6 +3532,7 @@ pub fn redownload_button_interaction(
     >,
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
+    runtime: ResMut<TokioTasksRuntime>,
 ) {
     use crate::resources::DownloadTaskMeta;
 
@@ -3478,36 +3542,46 @@ pub fn redownload_button_interaction(
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(redownload_color.with_alpha(0.4));
 
-                // 从数据库获取任务元数据，检查下载目录是否存在
-                let mut new_base_path: Option<String> = None;
-                if let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
-                    let effective_path = old_meta.effective_download_path().to_string();
-                    let path = std::path::Path::new(&effective_path);
-                    if !path.exists() {
-                        tracing::info!("原下载目录不存在: {}，弹出目录选择对话框", effective_path);
-                        // 弹出文件选择对话框
-                        let dialog = rfd::FileDialog::new();
-                        match dialog.pick_folder() {
-                            Some(selected) => {
-                                let selected_str = selected.to_string_lossy().to_string();
-                                tracing::info!("用户选择新下载目录: {}", selected_str);
-                                new_base_path = Some(selected_str);
-                            }
-                            None => {
-                                // 用户取消选择，不执行重新下载
-                                tracing::info!("用户取消选择目录，放弃重新下载");
-                                continue;
-                            }
-                        }
-                    }
-                }
+                // 检查路径是否存在，不存在时在后台弹对话框选择
+                let comic_id = btn.comic_id.clone();
+                let need_pick =
+                    if let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
+                        let path = std::path::Path::new(old_meta.effective_download_path());
+                        !path.exists()
+                    } else {
+                        false
+                    };
 
-                // 发送重新下载请求（带可选的新基础路径）
-                redownload_messages.write(RedownloadRequest {
-                    comic_id: btn.comic_id.clone(),
-                    new_base_path,
-                });
-                tracing::info!("请求重新下载/检查更新: {}", btn.comic_id);
+                if need_pick {
+                    // 需要选目录——放到后台避免卡死
+                    runtime.spawn_background_task(move |mut ctx| async move {
+                        let selected =
+                            tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+                                .await
+                                .ok()
+                                .flatten();
+
+                        let Some(path) = selected else {
+                            tracing::info!("用户取消选择目录，放弃重新下载");
+                            return;
+                        };
+                        let new_base = path.to_string_lossy().to_string();
+                        ctx.run_on_main_thread(move |ctx| {
+                            ctx.world.write_message(RedownloadRequest {
+                                comic_id,
+                                new_base_path: Some(new_base),
+                            });
+                        })
+                        .await;
+                    });
+                } else {
+                    // 路径存在，直接发送重新下载请求
+                    redownload_messages.write(RedownloadRequest {
+                        comic_id: comic_id.clone(),
+                        new_base_path: None,
+                    });
+                    tracing::info!("请求重新下载/检查更新: {}", comic_id);
+                }
 
                 // 从已下载列表中移除该项目（避免重复）
                 for (entity, item) in completed_item_query.iter() {
@@ -3580,17 +3654,13 @@ pub fn open_completed_folder_button_interaction(
 /// 弹出目录选择对话框，将 Images 目录和 CBZ 文件同时移动到新位置，
 /// 并更新数据库记录。移动完成后销毁旧的 UI 项并重建。
 pub fn move_completed_button_interaction(
-    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &MoveCompletedButton),
         Changed<Interaction>,
     >,
-    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
-    completed_list_query: Query<Entity, With<CompletedDownloadList>>,
     download_state: Res<DownloadManagerState>,
+    runtime: ResMut<TokioTasksRuntime>,
 ) {
-    use crate::resources::DownloadTaskMeta;
-
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
         let move_color = Color::srgb(0.5, 0.6, 0.8);
         match *interaction {
@@ -3603,121 +3673,24 @@ pub fn move_completed_button_interaction(
                     continue;
                 }
 
-                // 弹出目录选择对话框
-                let dialog = rfd::FileDialog::new();
-                let Some(selected_path) = dialog.pick_folder() else {
-                    continue;
-                };
-                let new_base = selected_path.to_string_lossy().to_string();
-                tracing::info!("用户选择移动目标目录: {}", new_base);
-
-                let old_images_path = std::path::Path::new(&btn.path);
-
-                // 从旧路径提取漫画文件夹名
-                let folder_name = old_images_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| btn.comic_title.clone());
-
-                // 新的 image 路径：new_base/image/漫画名
-                let new_images_dir = std::path::Path::new(&new_base)
-                    .join("image")
-                    .join(&folder_name);
-                let new_images_path = new_images_dir.to_string_lossy().to_string();
-
-                // ===== 移动 Images 目录 =====
-                if old_images_path.exists() && old_images_path.is_dir() {
-                    if new_images_dir.exists() {
-                        tracing::warn!("目标 Images 目录已存在: {}", new_images_path);
-                    } else if let Err(e) = move_dir_recursive(old_images_path, &new_images_dir) {
-                        tracing::error!("移动 Images 目录失败: {}", e);
-                        continue;
-                    } else {
-                        tracing::info!("Images 目录已移动: {} -> {}", btn.path, new_images_path);
-                    }
-                }
-
-                // ===== 移动 CBZ 文件 =====
-                // 旧 CBZ 路径：从 save_path 推导 base/cbz/漫画名.cbz
-                let old_cbz_dir = old_images_path
-                    .parent() // base/image
-                    .and_then(|p| p.parent()) // base
-                    .map(|p| p.join("cbz"));
-
-                let cbz_filename =
-                    format!("{}.cbz", crate::utils::sanitize_filename(&btn.comic_title));
-                let new_cbz_dir = std::path::Path::new(&new_base).join("cbz");
-
-                if let Some(ref old_cbz_parent) = old_cbz_dir {
-                    let old_cbz_file = old_cbz_parent.join(&cbz_filename);
-                    if old_cbz_file.exists() {
-                        if let Err(e) = std::fs::create_dir_all(&new_cbz_dir) {
-                            tracing::error!("创建 CBZ 目录失败: {}", e);
-                        } else {
-                            let new_cbz_file = new_cbz_dir.join(&cbz_filename);
-                            if new_cbz_file.exists() {
-                                tracing::warn!("目标 CBZ 文件已存在: {}", new_cbz_file.display());
-                            } else {
-                                // 先尝试 rename，失败则 copy + delete
-                                if std::fs::rename(&old_cbz_file, &new_cbz_file).is_err() {
-                                    match std::fs::copy(&old_cbz_file, &new_cbz_file) {
-                                        Ok(_) => {
-                                            let _ = std::fs::remove_file(&old_cbz_file);
-                                            tracing::info!(
-                                                "CBZ 文件已移动: {} -> {}",
-                                                old_cbz_file.display(),
-                                                new_cbz_file.display()
-                                            );
-                                        }
-                                        Err(e) => {
-                                            tracing::error!("复制 CBZ 文件失败: {}", e);
-                                        }
-                                    }
-                                } else {
-                                    tracing::info!(
-                                        "CBZ 文件已移动: {} -> {}",
-                                        old_cbz_file.display(),
-                                        new_cbz_file.display()
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ===== 更新数据库记录 =====
-                if let Ok(mut meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
-                    meta.save_path = new_images_path.clone();
-                    meta.custom_download_path = Some(new_base);
-                    if let Err(e) = meta.save() {
-                        tracing::error!("更新数据库下载路径失败: {}", e);
-                    } else {
-                        tracing::info!("数据库路径已更新: {}", new_images_path);
-                    }
-                }
-
-                // ===== 销毁旧 UI 项并重建 =====
-                // 找到该漫画的已下载列表项
                 let comic_id = btn.comic_id.clone();
-                for (entity, item) in completed_item_query.iter() {
-                    if item.comic_id == comic_id {
-                        commands.entity(entity).despawn();
-                        break;
-                    }
-                }
+                let comic_title = btn.comic_title.clone();
+                let old_path = btn.path.clone();
 
-                // 重建 UI 项（从数据库重新读取最新路径）
-                if let Ok(list_entity) = completed_list_query.single() {
-                    let active_ids = &download_state.downloading_ids;
-                    let font = get_font();
-                    // 重新从数据库扫描该漫画的信息
-                    let completed = scan_completed_downloads(active_ids);
-                    if let Some(dl) = completed.iter().find(|d| d.comic_id == comic_id) {
-                        commands.entity(list_entity).with_children(|list| {
-                            spawn_completed_download_item(list, &font, dl);
-                        });
-                    }
-                }
+                // 全部放到后台：对话框 + 文件移动
+                runtime.spawn_background_task(move |_ctx| async move {
+                    let selected =
+                        tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+                            .await
+                            .ok()
+                            .flatten();
+
+                    let Some(selected_path) = selected else {
+                        return;
+                    };
+                    let new_base = selected_path.to_string_lossy().to_string();
+                    move_comic_files_async(&comic_id, &comic_title, &old_path, &new_base).await;
+                });
             }
             Interaction::Hovered => {
                 *bg_color = BackgroundColor(move_color.with_alpha(0.3));
@@ -4246,66 +4219,155 @@ pub fn task_settings_button_interaction(
     }
 }
 
-/// 下载任务路径选择按钮交互
+/// 下载任务路径选择按钮交互（全异步：对话框 + 文件移动 + 路径更新）
 pub fn task_path_select_interaction(
     mut interaction_query: Query<(&Interaction, &TaskPathSelectButton), Changed<Interaction>>,
-    mut download_state: ResMut<DownloadManagerState>,
+    download_state: Res<DownloadManagerState>,
+    runtime: ResMut<TokioTasksRuntime>,
 ) {
     for (interaction, path_btn) in &mut interaction_query {
         if *interaction != Interaction::Pressed {
             continue;
         }
 
-        let comic_id = &path_btn.comic_id;
+        let comic_id = path_btn.comic_id.clone();
 
-        // 使用 rfd 文件对话框选择文件夹
-        let dialog = rfd::FileDialog::new();
-        let Some(selected_path) = dialog.pick_folder() else {
+        // 从内存获取当前任务信息
+        let Some(fsm) = download_state.find_task(&comic_id) else {
             continue;
         };
-        let new_path = selected_path.to_string_lossy().to_string();
-
-        // 获取当前任务
-        let Some(fsm) = download_state.find_task_mut(comic_id) else {
-            continue;
-        };
-
         let old_path = fsm.meta.save_path.clone();
+        let comic_title = fsm.meta.comic_title.clone();
 
-        // 从旧 save_path 提取漫画文件夹名（最后一级目录）
-        let folder_name = std::path::Path::new(&old_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| fsm.meta.comic_title.clone());
+        // 全部放到后台线程
+        runtime.spawn_background_task(move |mut ctx| async move {
+            // 弹出目录选择（spawn_blocking 不阻塞 tokio runtime）
+            let selected = tokio::task::spawn_blocking(|| rfd::FileDialog::new().pick_folder())
+                .await
+                .ok()
+                .flatten();
 
-        // 计算新的完整路径：新基础目录/image/漫画文件夹名
-        // 保持与默认下载路径相同的目录结构（base/image/漫画名）
-        let new_dir = std::path::Path::new(&new_path);
-        let target_dir = new_dir.join("image").join(&folder_name);
-        let new_full_path = target_dir.to_string_lossy().to_string();
+            let Some(selected_path) = selected else {
+                return;
+            };
+            let new_base = selected_path.to_string_lossy().to_string();
+            let folder_name = crate::utils::sanitize_filename(&comic_title);
+            let new_full_path = std::path::Path::new(&new_base)
+                .join("image")
+                .join(&folder_name)
+                .to_string_lossy()
+                .to_string();
 
-        // 更新路径（无论旧目录是否存在都要更新）
-        fsm.meta.custom_download_path = Some(new_path.clone());
-        fsm.meta.save_path = new_full_path.clone();
+            // 移动文件
+            move_comic_files_async(&comic_id, &comic_title, &old_path, &new_base).await;
 
-        // 如果旧路径存在，尝试移动文件到新位置
-        let old_dir = std::path::Path::new(&old_path);
-        if old_dir.exists() && old_dir.is_dir() && !target_dir.exists() {
-            if let Err(e) = move_dir_recursive(old_dir, &target_dir) {
-                tracing::error!("移动下载文件失败: {}", e);
-            } else {
-                tracing::info!("已移动下载文件: {} -> {}", old_path, new_full_path);
-            }
-        }
-
-        // 保存到数据库
-        if let Err(e) = fsm.meta.save() {
-            tracing::error!("保存独立路径设置失败: {}", e);
-        }
+            // 回主线程更新内存中的 FSM 路径
+            let cid = comic_id.clone();
+            let nfp = new_full_path.clone();
+            let nb = new_base.clone();
+            ctx.run_on_main_thread(move |ctx| {
+                let mut state = ctx
+                    .world
+                    .get_resource_mut::<DownloadManagerState>()
+                    .unwrap();
+                if let Some(fsm) = state.find_task_mut(&cid) {
+                    fsm.meta.save_path = nfp;
+                    fsm.meta.custom_download_path = Some(nb);
+                }
+            })
+            .await;
+        });
     }
 }
 
 /// 递归移动目录
+/// 异步移动漫画文件（Images 目录 + CBZ 文件 + 更新数据库）
+async fn move_comic_files_async(comic_id: &str, comic_title: &str, old_path: &str, new_base: &str) {
+    use crate::resources::DownloadTaskMeta;
+
+    let old_images_path = std::path::Path::new(old_path);
+    // 始终用漫画标题构建文件夹名（不依赖旧路径，防止历史数据污染）
+    let folder_name = crate::utils::sanitize_filename(comic_title);
+
+    let new_images_dir = std::path::Path::new(new_base)
+        .join("image")
+        .join(&folder_name);
+    let new_images_path = new_images_dir.to_string_lossy().to_string();
+
+    // 移动 Images 目录（在 blocking 线程中执行）
+    let old_img = old_images_path.to_path_buf();
+    let new_img = new_images_dir.clone();
+    if old_img.exists() && old_img.is_dir() {
+        if new_img.exists() {
+            tracing::warn!("目标 Images 目录已存在: {}", new_images_path);
+        } else {
+            let result =
+                tokio::task::spawn_blocking(move || move_dir_recursive(&old_img, &new_img)).await;
+            match result {
+                Ok(Ok(())) => {
+                    tracing::info!("Images 目录已移动: {} -> {}", old_path, new_images_path)
+                }
+                Ok(Err(e)) => tracing::error!("移动 Images 目录失败: {}", e),
+                Err(e) => tracing::error!("移动任务 panic: {}", e),
+            }
+        }
+    }
+
+    // 移动 CBZ 文件
+    let old_cbz_dir = std::path::Path::new(old_path)
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.join("cbz"));
+    let cbz_filename = format!("{}.cbz", crate::utils::sanitize_filename(comic_title));
+    let new_cbz_dir = std::path::Path::new(new_base).join("cbz");
+
+    if let Some(ref old_cbz_parent) = old_cbz_dir {
+        let old_cbz_file = old_cbz_parent.join(&cbz_filename);
+        if old_cbz_file.exists() {
+            let _ = tokio::fs::create_dir_all(&new_cbz_dir).await;
+            let new_cbz_file = new_cbz_dir.join(&cbz_filename);
+            if new_cbz_file.exists() {
+                tracing::warn!("目标 CBZ 文件已存在: {}", new_cbz_file.display());
+            } else if let Err(e) = tokio::fs::rename(&old_cbz_file, &new_cbz_file).await {
+                // rename 失败（跨文件系统），用 copy + delete
+                match tokio::fs::copy(&old_cbz_file, &new_cbz_file).await {
+                    Ok(_) => {
+                        let _ = tokio::fs::remove_file(&old_cbz_file).await;
+                        tracing::info!(
+                            "CBZ 文件已移动: {} -> {}",
+                            old_cbz_file.display(),
+                            new_cbz_file.display()
+                        );
+                    }
+                    Err(copy_err) => {
+                        tracing::error!("复制 CBZ 文件失败: {} (rename: {})", copy_err, e);
+                    }
+                }
+            } else {
+                tracing::info!(
+                    "CBZ 文件已移动: {} -> {}",
+                    old_cbz_file.display(),
+                    new_cbz_file.display()
+                );
+            }
+        }
+    }
+
+    // 更新数据库记录
+    let cid = comic_id.to_string();
+    let nip = new_images_path.clone();
+    let nb = new_base.to_string();
+    if let Ok(mut meta) = DownloadTaskMeta::load_by_comic_id(&cid) {
+        meta.save_path = nip;
+        meta.custom_download_path = Some(nb);
+        if let Err(e) = meta.save() {
+            tracing::error!("更新数据库下载路径失败: {}", e);
+        } else {
+            tracing::info!("数据库路径已更新: {}", new_images_path);
+        }
+    }
+}
+
 fn move_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     // 先尝试 rename（同文件系统的情况下最快）
     if std::fs::rename(src, dst).is_ok() {
@@ -4710,12 +4772,11 @@ pub fn cancel_delete_button_interaction(
 
 /// "全部更新"按钮交互：对所有已下载漫画发送重新下载请求（检查新章节）
 pub fn update_all_downloads_button_interaction(
-    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor),
         (Changed<Interaction>, With<UpdateAllDownloadsButton>),
     >,
-    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    download_state: Res<DownloadManagerState>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
@@ -4723,23 +4784,229 @@ pub fn update_all_downloads_button_interaction(
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.7));
 
-                let mut count = 0;
-                for (entity, item) in completed_item_query.iter() {
+                // 从数据库获取所有已完成下载（不依赖 UI 实体）
+                let active_ids: std::collections::HashSet<String> =
+                    download_state.downloading_ids.clone();
+                let completed = scan_completed_downloads(&active_ids);
+
+                for dl in &completed {
                     redownload_messages.write(RedownloadRequest {
-                        comic_id: item.comic_id.clone(),
+                        comic_id: dl.comic_id.clone(),
                         new_base_path: None,
                     });
-                    // 从已下载列表中移除（避免重复显示）
-                    commands.entity(entity).despawn();
-                    count += 1;
                 }
-                tracing::info!("全部更新：已对 {} 个已下载漫画发送检查更新请求", count);
+                tracing::info!(
+                    "全部更新：已对 {} 个已下载漫画发送检查更新请求",
+                    completed.len()
+                );
             }
             Interaction::Hovered => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY);
+            }
+        }
+    }
+}
+
+/// 标题栏"全部开始"按钮交互：恢复所有已暂停/已失败的任务
+pub fn start_all_header_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<StartAllHeaderButton>),
+    >,
+    download_state: Res<DownloadManagerState>,
+    mut resume_messages: MessageWriter<ResumeDownloadRequest>,
+) {
+    let btn_color = Color::srgb(0.2, 0.5, 0.3);
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.1));
+                let mut count = 0;
+                for task in download_state.active_tasks() {
+                    if task.meta.state.can_resume() {
+                        resume_messages.write(ResumeDownloadRequest {
+                            comic_id: task.meta.comic_id.clone(),
+                        });
+                        count += 1;
+                    }
+                }
+                tracing::info!("全部开始：恢复 {} 个任务", count);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.05));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(btn_color);
+            }
+        }
+    }
+}
+
+/// 标题栏"全部暂停"按钮交互：暂停所有下载中的任务
+pub fn pause_all_header_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<PauseAllHeaderButton>),
+    >,
+    mut download_state: ResMut<DownloadManagerState>,
+) {
+    let btn_color = Color::srgb(0.7, 0.5, 0.2);
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.1));
+                let mut count = 0;
+                let ids: Vec<String> = download_state
+                    .active_tasks()
+                    .iter()
+                    .filter(|t| t.meta.state.is_downloading())
+                    .map(|t| t.meta.comic_id.clone())
+                    .collect();
+                for id in &ids {
+                    if let Some(fsm) = download_state.find_task_mut(id) {
+                        fsm.request_pause();
+                        let _ = fsm.pause();
+                        count += 1;
+                    }
+                }
+                tracing::info!("全部暂停：暂停 {} 个任务", count);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(btn_color.lighter(0.05));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(btn_color);
+            }
+        }
+    }
+}
+
+/// "迁移全部"按钮交互：暂停活跃任务，弹出目录选择，后台串行迁移
+pub fn move_all_downloads_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<MoveAllDownloadsButton>),
+    >,
+    mut download_state: ResMut<DownloadManagerState>,
+    runtime: ResMut<TokioTasksRuntime>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.3, 0.3, 0.4));
+
+                // 1. 暂停所有正在下载的任务，收集 control 句柄
+                let mut controls = Vec::new();
+                let active_ids: Vec<String> = download_state
+                    .active_tasks()
+                    .iter()
+                    .filter(|t| t.meta.state.is_downloading())
+                    .map(|t| t.meta.comic_id.clone())
+                    .collect();
+                for id in &active_ids {
+                    if let Some(fsm) = download_state.find_task_mut(id) {
+                        fsm.request_pause(); // 通知后台线程停止
+                        let _ = fsm.pause(); // 更新状态为 Paused
+                        controls.push(fsm.get_control());
+                    }
+                }
+
+                // 记住需要恢复的任务 ID
+                let paused_ids = active_ids.clone();
+
+                // 2. 全部放到后台：等待停止 + 数据库查询 + 目录选择 + 文件迁移
+                runtime.spawn_background_task(move |mut ctx| async move {
+                    // 等待下载线程响应暂停（每张图片下载后会检查 pause_requested）
+                    if !controls.is_empty() {
+                        tracing::info!("等待 {} 个下载任务停止...", controls.len());
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        tracing::info!("下载任务已停止");
+                    }
+                    // 从数据库获取所有任务
+                    let all_tasks = {
+                        use picacg_db::{get_all_download_tasks_async, get_pool};
+                        let pool = get_pool();
+                        let db_tasks = get_all_download_tasks_async(&pool)
+                            .await
+                            .unwrap_or_default();
+                        let tasks: Vec<(String, String, String)> = db_tasks
+                            .into_iter()
+                            .filter_map(|t| {
+                                // 使用 save_path（完整图片路径，如 /base/image/漫画名）
+                                // 不用 custom_download_path（只是基础目录）
+                                if t.save_path.is_empty() {
+                                    None
+                                } else {
+                                    Some((t.comic_id, t.comic_title, t.save_path))
+                                }
+                            })
+                            .collect();
+                        tasks
+                    };
+
+                    if all_tasks.is_empty() {
+                        tracing::info!("没有下载任务可迁移");
+                        return;
+                    }
+
+                    // 使用设置中已配置的下载路径
+                    let new_base = AppSettings::global().read().download_path.clone();
+                    if new_base.is_empty() {
+                        tracing::warn!("下载路径未设置，请先在上方选择目录");
+                        return;
+                    }
+
+                    // 串行迁移
+                    let total = all_tasks.len();
+                    tracing::info!("开始迁移 {} 个漫画到 {}", total, new_base);
+                    for (i, (comic_id, comic_title, old_path)) in all_tasks.into_iter().enumerate()
+                    {
+                        tracing::info!("迁移 [{}/{}]: {}", i + 1, total, comic_title);
+                        move_comic_files_async(&comic_id, &comic_title, &old_path, &new_base).await;
+                    }
+                    tracing::info!("迁移全部完成：共 {} 个", total);
+
+                    // 更新内存中 FSM 的 save_path + 恢复下载
+                    let nb2 = new_base.clone();
+                    let paused = paused_ids;
+                    ctx.run_on_main_thread(move |ctx| {
+                        // 更新所有 FSM 任务的 save_path
+                        let mut state = ctx
+                            .world
+                            .get_resource_mut::<DownloadManagerState>()
+                            .unwrap();
+                        for fsm in &mut state.fsm_tasks {
+                            let new_save = std::path::Path::new(&nb2)
+                                .join("image")
+                                .join(crate::utils::sanitize_filename(&fsm.meta.comic_title))
+                                .to_string_lossy()
+                                .to_string();
+                            fsm.meta.save_path = new_save;
+                            fsm.meta.custom_download_path = Some(nb2.clone());
+                        }
+
+                        // 恢复之前暂停的下载任务
+                        if !paused.is_empty() {
+                            tracing::info!("恢复 {} 个之前暂停的下载任务", paused.len());
+                            for id in paused {
+                                ctx.world
+                                    .write_message(crate::events::ResumeDownloadRequest {
+                                        comic_id: id,
+                                    });
+                            }
+                        }
+                    })
+                    .await;
+                });
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.28));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
             }
         }
     }

@@ -326,6 +326,7 @@ impl Plugin for UiPlugin {
                     sync_download_path_value,
                     download_path_picker_interaction,
                     handle_download_path_picker_result,
+                    move_all_downloads_button_interaction,
                     clear_cache_button_interaction,
                     auto_save_settings,
                     update_settings_save_status,
@@ -442,6 +443,8 @@ impl Plugin for UiPlugin {
                     retry_download_button_interaction,
                     delete_download_button_interaction,
                     start_all_downloads_button_interaction,
+                    start_all_header_button_interaction,
+                    pause_all_header_button_interaction,
                     update_all_downloads_button_interaction,
                     // 已下载项按钮交互
                     redownload_button_interaction,

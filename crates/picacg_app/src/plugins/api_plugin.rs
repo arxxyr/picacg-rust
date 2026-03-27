@@ -1705,6 +1705,8 @@ async fn execute_download_task(
     total_episodes: i32,
     control: std::sync::Arc<SharedTaskControl>,
 ) {
+    // clone 一份用于闭包，原始值留给函数末尾的日志
+    let comic_title_for_log = comic_title.clone();
     let download_path = std::path::PathBuf::from(&save_path);
     let comic_start = tokio::time::Instant::now();
 
@@ -1963,6 +1965,7 @@ async fn execute_download_task(
             let control = control.clone();
             let completed_count = completed_count.clone();
             let failed_images = failed_images.clone();
+            let comic_title = comic_title.clone();
 
             // 启动并发下载任务
             let handle = tokio::spawn(async move {
@@ -1983,7 +1986,8 @@ async fn execute_download_task(
                         // 记录失败的图片，稍后重试
                         failed_images.lock().push((pic_idx, url, file_path));
                         tracing::warn!(
-                            "⚠ 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
+                            "⚠ [{}] 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
+                            comic_title,
                             episode_order,
                             pic_idx + 1,
                             total_pages,
@@ -2130,6 +2134,7 @@ async fn execute_download_task(
                 let control = control.clone();
                 let retry_success_count = retry_success_count.clone();
                 let still_failed = still_failed.clone();
+                let comic_title = comic_title.clone();
 
                 let handle = tokio::spawn(async move {
                     let _permit = semaphore.acquire().await.unwrap();
@@ -2152,7 +2157,8 @@ async fn execute_download_task(
                         Err(e) => {
                             still_failed.lock().push((pic_idx, url, file_path));
                             tracing::warn!(
-                                "⚠ 第{}章 {}/{} 重试失败: {}",
+                                "⚠ [{}] 第{}章 {}/{} 重试失败: {}",
+                                comic_title,
                                 episode_order,
                                 pic_idx + 1,
                                 total_pages,
@@ -2221,7 +2227,7 @@ async fn execute_download_task(
     let seconds = comic_elapsed.as_secs() % 60;
     tracing::info!(
         "[{}] 全部下载完成，共 {} 章，总耗时 {}m{}s",
-        comic_title,
+        comic_title_for_log,
         episodes_to_download.len(),
         minutes,
         seconds

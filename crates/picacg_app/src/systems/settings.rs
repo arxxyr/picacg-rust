@@ -18,7 +18,10 @@ use crate::{
     components::{
         ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
     },
-    systems::{login::AppColors, scrollbar::scrollbar_config::*, ui_common::Scrollable},
+    systems::{
+        downloads::MoveAllDownloadsButton, login::AppColors, scrollbar::scrollbar_config::*,
+        ui_common::Scrollable,
+    },
     utils::{
         icons::*,
         text_input::{TextInput, TextInputDisplay},
@@ -956,6 +959,33 @@ fn spawn_download_path_setting(
                             ));
                         });
                 });
+
+            // "全部移动已下载漫画"按钮
+            row.spawn((
+                MoveAllDownloadsButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(8.0), Val::Px(8.0)),
+                    margin: UiRect::top(Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
+                BorderColor::all(AppColors::BORDER),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new(format!("{ICON_FILE_MOVE} 迁移全部")),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 13.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
         });
 }
 
