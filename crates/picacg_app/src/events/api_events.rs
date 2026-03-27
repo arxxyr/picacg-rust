@@ -4,8 +4,8 @@
 
 use bevy::prelude::*;
 use picacg_api::{
-    endpoints::RankTimeType,
-    models::{Category, Comic, Episode, Picture},
+    endpoints::{RankTimeType, rank::KnightUser},
+    models::{Category, Comic, Comment, Episode, Game, Picture},
 };
 
 // ==================== 登录消息 ====================
@@ -198,6 +198,24 @@ pub struct SearchFailedEvent {
     pub error: String,
 }
 
+// ==================== 热词消息 ====================
+
+/// 加载热词请求
+#[derive(Message)]
+pub struct LoadKeywordsRequest;
+
+/// 热词加载完成
+#[derive(Message)]
+pub struct KeywordsLoadedEvent {
+    pub keywords: Vec<String>,
+}
+
+/// 热词加载失败
+#[derive(Message)]
+pub struct KeywordsLoadFailedEvent {
+    pub error: String,
+}
+
 // ==================== 点赞/收藏消息 ====================
 
 /// 点赞漫画请求
@@ -209,6 +227,7 @@ pub struct LikeComicRequest {
 /// 点赞漫画响应
 #[derive(Message)]
 pub struct LikeComicResponse {
+    pub comic_id: String,
     pub action: String,
 }
 
@@ -372,6 +391,24 @@ pub struct RankingsLoadFailedEvent {
     pub error: String,
 }
 
+// ==================== 骑士榜消息 ====================
+
+/// 加载骑士榜请求
+#[derive(Message)]
+pub struct LoadKnightRankingsRequest;
+
+/// 骑士榜加载完成
+#[derive(Message)]
+pub struct KnightRankingsLoadedEvent {
+    pub users: Vec<KnightUser>,
+}
+
+/// 骑士榜加载失败
+#[derive(Message)]
+pub struct KnightRankingsLoadFailedEvent {
+    pub error: String,
+}
+
 // ==================== API 客户端重载消息 ====================
 
 /// 重新加载 API 客户端配置（通道/代理变更时触发）
@@ -408,3 +445,461 @@ pub struct CbzPackageFailedEvent {
     /// 错误信息
     pub error: String,
 }
+
+// ==================== 历史记录消息 ====================
+
+/// 加载历史记录请求
+#[derive(Message)]
+pub struct LoadHistoryRequest;
+
+/// 历史记录加载完成
+#[derive(Message)]
+pub struct HistoryLoadedEvent {
+    pub records: Vec<picacg_db::DbHistory>,
+    pub total_count: i64,
+}
+
+/// 历史记录加载失败
+#[derive(Message)]
+pub struct HistoryLoadFailedEvent {
+    pub error: String,
+}
+
+/// 保存历史记录请求（阅读器发出）
+#[derive(Message)]
+pub struct SaveHistoryRequest {
+    pub comic_id: String,
+    pub comic_title: String,
+    pub thumb_url: String,
+    pub last_eps_order: i32,
+    pub last_eps_title: String,
+    pub last_page: i32,
+}
+
+/// 删除历史记录请求
+#[derive(Message)]
+pub struct DeleteHistoryRequest {
+    pub comic_id: String,
+}
+
+/// 清空所有历史记录请求
+#[derive(Message)]
+pub struct ClearAllHistoryRequest;
+
+// ==================== 点赞记录消息 ====================
+
+/// 加载点赞记录请求
+#[derive(Message)]
+pub struct LoadLikeRecordsRequest;
+
+/// 点赞记录加载完成
+#[derive(Message)]
+pub struct LikeRecordsLoadedEvent {
+    pub records: Vec<picacg_db::DbLikeRecord>,
+    pub total_count: i64,
+}
+
+/// 点赞记录加载失败
+#[derive(Message)]
+pub struct LikeRecordsLoadFailedEvent {
+    pub error: String,
+}
+
+/// 保存点赞记录请求（点赞成功时触发）
+#[derive(Message)]
+pub struct SaveLikeRecordRequest {
+    pub comic_id: String,
+    pub comic_title: String,
+    pub thumb_url: String,
+}
+
+/// 删除点赞记录请求（取消点赞时触发）
+#[derive(Message)]
+pub struct DeleteLikeRecordRequest {
+    pub comic_id: String,
+}
+
+// ==================== 评论消息 ====================
+
+/// 加载评论列表请求
+#[derive(Message)]
+pub struct LoadCommentsRequest {
+    pub comic_id: String,
+    pub page: i32,
+}
+
+/// 评论列表加载完成
+#[derive(Message)]
+pub struct CommentsLoadedEvent {
+    pub comments: Vec<Comment>,
+    pub total_pages: i32,
+    pub page: i32,
+}
+
+/// 评论列表加载失败
+#[derive(Message)]
+pub struct CommentsLoadFailedEvent {
+    pub error: String,
+}
+
+/// 发表评论请求
+#[derive(Message)]
+pub struct PostCommentRequest {
+    pub comic_id: String,
+    pub content: String,
+}
+
+/// 发表评论响应
+#[derive(Message)]
+pub struct PostCommentResponseEvent {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// 回复评论请求
+#[derive(Message)]
+pub struct PostCommentReplyRequest {
+    pub comment_id: String,
+    pub content: String,
+}
+
+/// 回复评论响应
+#[derive(Message)]
+pub struct PostCommentReplyResponseEvent {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// 点赞评论请求
+#[derive(Message)]
+pub struct LikeCommentRequestEvent {
+    pub comment_id: String,
+}
+
+/// 点赞评论响应
+#[derive(Message)]
+pub struct LikeCommentResponseEvent {
+    pub comment_id: String,
+    pub action: String,
+}
+
+/// 加载子评论请求
+#[derive(Message)]
+pub struct LoadChildCommentsRequest {
+    pub comment_id: String,
+    pub page: i32,
+}
+
+/// 子评论加载完成
+#[derive(Message)]
+pub struct ChildCommentsLoadedEvent {
+    pub comment_id: String,
+    pub comments: Vec<Comment>,
+    pub total_pages: i32,
+    pub page: i32,
+}
+
+// ==================== 个人资料消息 ====================
+
+/// 加载用户个人资料请求
+#[derive(Message)]
+pub struct LoadUserProfileRequest;
+
+/// 用户个人资料加载完成
+#[derive(Message)]
+pub struct UserProfileLoadedEvent {
+    pub user: picacg_api::models::User,
+}
+
+/// 用户个人资料加载失败
+#[derive(Message)]
+pub struct UserProfileLoadFailedEvent {
+    pub error: String,
+}
+
+// ==================== 版本更新消息 ====================
+
+/// 检查更新请求
+#[derive(Message)]
+pub struct CheckUpdateRequest;
+
+/// 检查更新响应
+#[derive(Message)]
+pub struct CheckUpdateResponse {
+    /// 最新版本号
+    pub latest_version: String,
+    /// 当前版本号
+    pub current_version: String,
+    /// 是否有更新
+    pub has_update: bool,
+    /// 更新说明（如果有）
+    pub release_notes: Option<String>,
+    /// 下载链接
+    pub download_url: Option<String>,
+}
+
+/// 检查更新失败事件
+#[derive(Message)]
+pub struct CheckUpdateFailedEvent {
+    pub error: String,
+}
+
+// ==================== 忘记/重置密码消息 ====================
+
+/// 忘记密码请求（获取安全问题）
+#[derive(Message)]
+pub struct ForgotPasswordRequestEvent {
+    pub email: String,
+}
+
+/// 忘记密码响应（返回安全问题）
+#[derive(Message)]
+pub struct ForgotPasswordResponseEvent {
+    pub result: Result<(String, String, String), String>,
+}
+
+/// 重置密码请求（通过安全问题）
+#[derive(Message)]
+pub struct ResetPasswordRequestEvent {
+    pub email: String,
+    pub question_no: i32,
+    pub answer: String,
+}
+
+/// 重置密码响应
+#[derive(Message)]
+pub struct ResetPasswordResponseEvent {
+    pub result: Result<String, String>,
+}
+
+// ==================== 游戏消息 ====================
+
+/// 加载游戏列表请求
+#[derive(Message)]
+pub struct LoadGamesRequest {
+    pub page: i32,
+}
+
+/// 游戏列表加载完成
+#[derive(Message)]
+pub struct GamesLoadedEvent {
+    pub games: Vec<Game>,
+    pub total_pages: i32,
+}
+
+/// 游戏列表加载失败
+#[derive(Message)]
+pub struct GamesLoadFailedEvent {
+    pub error: String,
+}
+
+/// 加载游戏详情请求
+#[derive(Message)]
+pub struct LoadGameDetailRequest {
+    pub game_id: String,
+}
+
+/// 游戏详情加载完成
+#[derive(Message)]
+pub struct GameDetailLoadedEvent {
+    pub game: Game,
+}
+
+/// 游戏详情加载失败
+#[derive(Message)]
+pub struct GameDetailLoadFailedEvent {
+    pub error: String,
+}
+
+// ==================== 本地阅读消息 ====================
+
+/// 扫描本地已下载漫画请求
+#[derive(Message)]
+pub struct ScanLocalComicsRequest;
+
+/// 扫描本地漫画完成
+#[derive(Message)]
+pub struct ScanLocalComicsCompletedEvent {
+    pub entries: Vec<crate::resources::LocalComicEntry>,
+}
+
+/// 扫描本地漫画失败
+#[derive(Message)]
+pub struct ScanLocalComicsFailedEvent {
+    pub error: String,
+}
+
+// ==================== 网络诊断消息 ====================
+
+/// 网速测试请求（下载固定图片测速）
+#[derive(Message)]
+pub struct SpeedTestRequest;
+
+/// 网速测试结果
+#[derive(Message)]
+pub struct SpeedTestResultEvent {
+    /// 下载速度（KB/s）
+    pub download_speed: f64,
+    /// 耗时（毫秒）
+    pub elapsed_ms: u64,
+}
+
+/// Ping 测试请求（请求 /categories API 测延迟）
+#[derive(Message)]
+pub struct PingTestRequest;
+
+/// Ping 测试结果
+#[derive(Message)]
+pub struct PingTestResultEvent {
+    /// 延迟（毫秒）
+    pub latency_ms: u64,
+}
+
+/// 网络测试失败事件
+#[derive(Message)]
+pub struct NetworkTestFailedEvent {
+    /// 错误信息
+    pub error: String,
+}
+
+// ==================== 锅贴社区消息 ====================
+
+/// 加载小程序列表请求
+#[derive(Message)]
+pub struct LoadAppsRequest;
+
+/// 小程序列表加载完成
+#[derive(Message)]
+pub struct AppsLoadedEvent {
+    pub apps: Vec<picacg_api::endpoints::fried::AppInfo>,
+}
+
+/// 小程序列表加载失败
+#[derive(Message)]
+pub struct AppsLoadFailedEvent {
+    pub error: String,
+}
+
+/// 加载锅贴帖子列表请求
+#[derive(Message)]
+pub struct LoadFriedPostsRequest {
+    pub page: i32,
+}
+
+/// 锅贴帖子列表加载完成
+#[derive(Message)]
+pub struct FriedPostsLoadedEvent {
+    pub posts: Vec<picacg_api::endpoints::fried::FriedPost>,
+    pub total: i32,
+    pub limit: i32,
+}
+
+/// 锅贴帖子列表加载失败
+#[derive(Message)]
+pub struct FriedPostsLoadFailedEvent {
+    pub error: String,
+}
+
+// ==================== NAS 远程存储消息 ====================
+
+/// NAS 测试连接请求
+#[derive(Message)]
+pub struct NasTestConnectionRequest;
+
+/// NAS 测试连接响应
+#[derive(Message)]
+pub struct NasTestConnectionResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+/// NAS 上传下载目录请求
+#[derive(Message)]
+pub struct NasUploadRequest;
+
+/// NAS 上传进度更新
+#[derive(Message)]
+pub struct NasUploadProgressEvent {
+    /// 漫画标题
+    pub comic_title: String,
+    /// 已上传文件数
+    pub uploaded_files: u32,
+    /// 总文件数
+    pub total_files: u32,
+}
+
+/// NAS 上传完成
+#[derive(Message)]
+pub struct NasUploadCompletedEvent {
+    pub message: String,
+}
+
+/// NAS 上传失败
+#[derive(Message)]
+pub struct NasUploadFailedEvent {
+    pub error: String,
+}
+
+/// NAS 浏览远程目录请求
+#[derive(Message)]
+pub struct NasBrowseRequest {
+    pub path: String,
+}
+
+/// NAS 浏览远程目录响应
+#[derive(Message)]
+pub struct NasBrowseResponse {
+    pub entries: Vec<crate::resources::NasRemoteEntry>,
+    pub path: String,
+}
+
+/// NAS 浏览失败
+#[derive(Message)]
+pub struct NasBrowseFailedEvent {
+    pub error: String,
+}
+
+// ==================== 聊天室消息 ====================
+
+/// 加载聊天房间列表请求
+#[derive(Message)]
+pub struct LoadChatRoomsRequest;
+
+/// 聊天房间列表加载完成
+#[derive(Message)]
+pub struct ChatRoomsLoadedEvent {
+    pub rooms: Vec<picacg_api::endpoints::chat::ChatRoom>,
+    pub token: String,
+    pub profile: Option<picacg_api::endpoints::chat::ChatProfile>,
+}
+
+/// 聊天房间列表加载失败
+#[derive(Message)]
+pub struct ChatRoomsLoadFailedEvent {
+    pub error: String,
+}
+
+/// 连接聊天室 WebSocket 请求
+#[derive(Message)]
+pub struct ConnectChatRoomRequest {
+    pub room_id: String,
+    pub token: String,
+}
+
+/// 发送聊天消息请求（通过 REST API）
+#[derive(Message)]
+pub struct SendChatMessageRequest {
+    pub room_id: String,
+    pub message: String,
+}
+
+/// 发送聊天消息响应
+#[derive(Message)]
+pub struct SendChatMessageResponse {
+    pub success: bool,
+    pub error: Option<String>,
+}
+
+/// 断开聊天室 WebSocket
+#[derive(Message)]
+pub struct DisconnectChatRoomRequest;

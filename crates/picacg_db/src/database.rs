@@ -9,7 +9,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use tracing::{debug, info};
 
 use crate::models::{
-    DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DownloadStateData,
+    DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DbLikeRecord, DownloadStateData,
 };
 
 // 数据库单例
@@ -174,6 +174,10 @@ impl Database {
             "ALTER TABLE download_task ADD COLUMN completed_episodes TEXT",
             "ALTER TABLE download_task ADD COLUMN custom_download_path TEXT",
             "ALTER TABLE download_task ADD COLUMN custom_auto_pack_cbz INTEGER",
+            // history 表扩展列
+            "ALTER TABLE history ADD COLUMN comic_title TEXT",
+            "ALTER TABLE history ADD COLUMN thumb_url TEXT",
+            "ALTER TABLE history ADD COLUMN last_eps_title TEXT",
         ] {
             match sqlx::query(sql).execute(&pool).await {
                 Ok(_) => debug!("迁移成功: {}", sql),
@@ -187,6 +191,20 @@ impl Database {
                 }
             }
         }
+
+        // 点赞记录表（启动时检查创建）
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS like_record (
+                comic_id TEXT PRIMARY KEY,
+                comic_title TEXT NOT NULL,
+                thumb_url TEXT,
+                liked_at INTEGER NOT NULL DEFAULT 0
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await?;
 
         info!("数据库初始化完成");
         Ok(Self { pool })
@@ -356,18 +374,24 @@ impl Database {
     pub async fn update_history(&self, history: &DbHistory) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO history (book_id, last_read, last_eps, last_page)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO history (book_id, last_read, last_eps, last_page, comic_title, thumb_url, last_eps_title)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(book_id) DO UPDATE SET
                 last_read = excluded.last_read,
                 last_eps = excluded.last_eps,
-                last_page = excluded.last_page
+                last_page = excluded.last_page,
+                comic_title = excluded.comic_title,
+                thumb_url = excluded.thumb_url,
+                last_eps_title = excluded.last_eps_title
             "#,
         )
         .bind(&history.book_id)
         .bind(history.last_read)
         .bind(history.last_eps)
         .bind(history.last_page)
+        .bind(&history.comic_title)
+        .bind(&history.thumb_url)
+        .bind(&history.last_eps_title)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -387,6 +411,100 @@ impl Database {
                 .fetch_all(&self.pool)
                 .await?;
         Ok(histories)
+    }
+
+    /// 获取历史记录（分页）
+    pub async fn get_histories_paged(&self, limit: i64, offset: i64) -> Result<Vec<DbHistory>> {
+        let histories = sqlx::query_as::<_, DbHistory>(
+            "SELECT * FROM history ORDER BY last_read DESC LIMIT ? OFFSET ?",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(histories)
+    }
+
+    /// 删除单条历史记录
+    pub async fn delete_history(&self, book_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM history WHERE book_id = ?")
+            .bind(book_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// 清空所有历史记录
+    pub async fn clear_all_history(&self) -> Result<()> {
+        sqlx::query("DELETE FROM history")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// 获取历史记录总数
+    pub async fn get_history_count(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
+    // ==================== 点赞记录相关操作 ====================
+
+    /// 插入点赞记录（UPSERT：已存在则更新时间戳）
+    pub async fn insert_like_record(
+        &self,
+        comic_id: &str,
+        comic_title: &str,
+        thumb_url: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO like_record (comic_id, comic_title, thumb_url, liked_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(comic_id) DO UPDATE SET
+                comic_title = excluded.comic_title,
+                thumb_url = excluded.thumb_url,
+                liked_at = excluded.liked_at
+            "#,
+        )
+        .bind(comic_id)
+        .bind(comic_title)
+        .bind(thumb_url)
+        .bind(chrono::Utc::now().timestamp())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// 删除点赞记录
+    pub async fn delete_like_record(&self, comic_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM like_record WHERE comic_id = ?")
+            .bind(comic_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// 获取点赞记录（分页，按时间倒序）
+    pub async fn get_like_records(&self, limit: i64, offset: i64) -> Result<Vec<DbLikeRecord>> {
+        let records = sqlx::query_as::<_, DbLikeRecord>(
+            "SELECT * FROM like_record ORDER BY liked_at DESC LIMIT ? OFFSET ?",
+        )
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(records)
+    }
+
+    /// 获取点赞记录总数
+    pub async fn get_like_count(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM like_record")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
     }
 
     // ==================== 分类计数相关操作 ====================
@@ -742,4 +860,118 @@ pub async fn add_completed_episode_async(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+// ==================== 历史记录独立异步函数 ====================
+
+/// 插入或更新历史记录
+pub async fn upsert_history_async(pool: &SqlitePool, history: &DbHistory) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO history (book_id, last_read, last_eps, last_page, comic_title, thumb_url, last_eps_title)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(book_id) DO UPDATE SET
+            last_read = excluded.last_read,
+            last_eps = excluded.last_eps,
+            last_page = excluded.last_page,
+            comic_title = excluded.comic_title,
+            thumb_url = excluded.thumb_url,
+            last_eps_title = excluded.last_eps_title
+        "#,
+    )
+    .bind(&history.book_id)
+    .bind(history.last_read)
+    .bind(history.last_eps)
+    .bind(history.last_page)
+    .bind(&history.comic_title)
+    .bind(&history.thumb_url)
+    .bind(&history.last_eps_title)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 获取所有历史记录（按最后阅读时间降序）
+pub async fn get_all_histories_async(pool: &SqlitePool) -> Result<Vec<DbHistory>> {
+    let histories = sqlx::query_as::<_, DbHistory>("SELECT * FROM history ORDER BY last_read DESC")
+        .fetch_all(pool)
+        .await?;
+    Ok(histories)
+}
+
+/// 获取历史记录总数
+pub async fn get_history_count_async(pool: &SqlitePool) -> Result<i64> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
+}
+
+/// 删除单条历史记录
+pub async fn delete_history_async(pool: &SqlitePool, book_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM history WHERE book_id = ?")
+        .bind(book_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 清空所有历史记录
+pub async fn clear_all_history_async(pool: &SqlitePool) -> Result<()> {
+    sqlx::query("DELETE FROM history").execute(pool).await?;
+    Ok(())
+}
+
+// ==================== 点赞记录独立异步函数 ====================
+
+/// 插入点赞记录
+pub async fn insert_like_record_async(
+    pool: &SqlitePool,
+    comic_id: &str,
+    comic_title: &str,
+    thumb_url: Option<&str>,
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO like_record (comic_id, comic_title, thumb_url, liked_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(comic_id) DO UPDATE SET
+            comic_title = excluded.comic_title,
+            thumb_url = excluded.thumb_url,
+            liked_at = excluded.liked_at
+        "#,
+    )
+    .bind(comic_id)
+    .bind(comic_title)
+    .bind(thumb_url)
+    .bind(chrono::Utc::now().timestamp())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// 删除点赞记录
+pub async fn delete_like_record_async(pool: &SqlitePool, comic_id: &str) -> Result<()> {
+    sqlx::query("DELETE FROM like_record WHERE comic_id = ?")
+        .bind(comic_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// 获取所有点赞记录（按时间倒序）
+pub async fn get_all_like_records_async(pool: &SqlitePool) -> Result<Vec<DbLikeRecord>> {
+    let records =
+        sqlx::query_as::<_, DbLikeRecord>("SELECT * FROM like_record ORDER BY liked_at DESC")
+            .fetch_all(pool)
+            .await?;
+    Ok(records)
+}
+
+/// 获取点赞记录总数
+pub async fn get_like_count_async(pool: &SqlitePool) -> Result<i64> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM like_record")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
 }

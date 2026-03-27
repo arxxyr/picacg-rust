@@ -17,8 +17,7 @@ use crate::{
         },
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            TagColor, calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar,
-            spawn_tag_badge,
+            Scrollable, TagColor, spawn_comic_time_info, spawn_scrollbar, spawn_tag_badge,
         },
     },
     utils::content_filter::{
@@ -109,7 +108,7 @@ impl FavoritesCardCreationState {
     }
 }
 
-/// 创建收藏列表界面
+/// 创建收藏列表界面（如果已存在则只显示）
 pub fn setup_favorites_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
@@ -117,7 +116,20 @@ pub fn setup_favorites_ui(
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<FavoritesCardCreationState>,
     mut load_favorites_messages: MessageWriter<LoadFavoritesRequest>,
+    mut existing_query: Query<&mut Node, With<FavoritesRoot>>,
 ) {
+    // 如果 FavoritesRoot 已存在（被 Display::None 隐藏了），直接显示
+    if let Ok(mut node) = existing_query.single_mut() {
+        node.display = Display::Flex;
+        if favorites_state.comics.is_empty() && !favorites_state.is_loading {
+            load_favorites_messages.write(LoadFavoritesRequest {
+                page: favorites_state.page,
+                sort: favorites_state.sort.clone(),
+            });
+        }
+        return;
+    }
+
     let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
@@ -194,6 +206,7 @@ pub fn setup_favorites_ui(
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
+                            Scrollable,
                             ScrollPosition::default(),
                             ContentSizeInfo::default(),
                         ))
@@ -272,6 +285,10 @@ fn spawn_favorite_card(
         .spawn((
             FavoriteCard {
                 comic_id: comic.id.clone(),
+            },
+            ContextMenuTarget {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
             },
             Button,
             Interaction::default(),
@@ -384,14 +401,13 @@ fn spawn_favorite_card(
 
 /// 清理收藏页面
 pub fn cleanup_favorites_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<FavoritesRoot>>,
+    mut query: Query<&mut Node, With<FavoritesRoot>>,
     mut creation_state: ResMut<FavoritesCardCreationState>,
 ) {
     creation_state.clear();
 
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
+    for mut node in query.iter_mut() {
+        node.display = Display::None;
     }
 }
 
@@ -488,27 +504,13 @@ pub fn favorites_pagination_interaction(
 
 /// 收藏页面滚动处理
 pub fn handle_favorites_scroll(
-    mut mouse_wheel_events: MessageReader<MouseWheel>,
-    mut scroll_query: Query<
+    mut _mouse_wheel_events: MessageReader<MouseWheel>,
+    _scroll_query: Query<
         (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
         With<FavoritesScrollContainer>,
     >,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = calculate_scroll_delta(event);
-
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let (content_height, viewport_height) = content_size_info
-                .map(|info| (info.content_height, info.viewport_height))
-                .unwrap_or_else(|| {
-                    let size = computed_node.size();
-                    (size.y, size.y)
-                });
-
-            let max_scroll = (content_height - viewport_height).max(0.0);
-            scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 瀑布式创建收藏卡片

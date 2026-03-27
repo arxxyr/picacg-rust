@@ -71,10 +71,18 @@ impl Plugin for ApiPlugin {
             .add_message::<SearchComicsRequestEvent>()
             .add_message::<SearchResultsLoadedEvent>()
             .add_message::<SearchFailedEvent>()
+            // 热词相关消息
+            .add_message::<LoadKeywordsRequest>()
+            .add_message::<KeywordsLoadedEvent>()
+            .add_message::<KeywordsLoadFailedEvent>()
             // 排行榜相关消息
             .add_message::<LoadRankingsRequest>()
             .add_message::<RankingsLoadedEvent>()
             .add_message::<RankingsLoadFailedEvent>()
+            // 骑士榜相关消息
+            .add_message::<LoadKnightRankingsRequest>()
+            .add_message::<KnightRankingsLoadedEvent>()
+            .add_message::<KnightRankingsLoadFailedEvent>()
             // 收藏列表相关消息
             .add_message::<LoadFavoritesRequest>()
             .add_message::<FavoritesLoadedEvent>()
@@ -88,6 +96,82 @@ impl Plugin for ApiPlugin {
             // 注册相关消息
             .add_message::<RegisterRequestEvent>()
             .add_message::<RegisterResponseEvent>()
+            // 忘记/重置密码相关消息
+            .add_message::<ForgotPasswordRequestEvent>()
+            .add_message::<ForgotPasswordResponseEvent>()
+            .add_message::<ResetPasswordRequestEvent>()
+            .add_message::<ResetPasswordResponseEvent>()
+            // 历史记录相关消息
+            .add_message::<LoadHistoryRequest>()
+            .add_message::<HistoryLoadedEvent>()
+            .add_message::<HistoryLoadFailedEvent>()
+            .add_message::<SaveHistoryRequest>()
+            .add_message::<DeleteHistoryRequest>()
+            .add_message::<ClearAllHistoryRequest>()
+            // 点赞记录相关消息
+            .add_message::<LoadLikeRecordsRequest>()
+            .add_message::<LikeRecordsLoadedEvent>()
+            .add_message::<LikeRecordsLoadFailedEvent>()
+            .add_message::<SaveLikeRecordRequest>()
+            .add_message::<DeleteLikeRecordRequest>()
+            // 评论相关消息
+            .add_message::<LoadCommentsRequest>()
+            .add_message::<CommentsLoadedEvent>()
+            .add_message::<CommentsLoadFailedEvent>()
+            .add_message::<PostCommentRequest>()
+            .add_message::<PostCommentResponseEvent>()
+            .add_message::<PostCommentReplyRequest>()
+            .add_message::<PostCommentReplyResponseEvent>()
+            .add_message::<LikeCommentRequestEvent>()
+            .add_message::<LikeCommentResponseEvent>()
+            .add_message::<LoadChildCommentsRequest>()
+            .add_message::<ChildCommentsLoadedEvent>()
+            // 个人资料相关消息
+            .add_message::<LoadUserProfileRequest>()
+            .add_message::<UserProfileLoadedEvent>()
+            .add_message::<UserProfileLoadFailedEvent>()
+            // 版本更新检查消息
+            .add_message::<CheckUpdateRequest>()
+            .add_message::<CheckUpdateResponse>()
+            .add_message::<CheckUpdateFailedEvent>()
+            // 游戏相关消息
+            .add_message::<LoadGamesRequest>()
+            .add_message::<GamesLoadedEvent>()
+            .add_message::<GamesLoadFailedEvent>()
+            .add_message::<LoadGameDetailRequest>()
+            .add_message::<GameDetailLoadedEvent>()
+            .add_message::<GameDetailLoadFailedEvent>()
+            // 网络诊断消息
+            .add_message::<SpeedTestRequest>()
+            .add_message::<SpeedTestResultEvent>()
+            .add_message::<PingTestRequest>()
+            .add_message::<PingTestResultEvent>()
+            .add_message::<NetworkTestFailedEvent>()
+            // 锅贴社区消息
+            .add_message::<LoadAppsRequest>()
+            .add_message::<AppsLoadedEvent>()
+            .add_message::<AppsLoadFailedEvent>()
+            .add_message::<LoadFriedPostsRequest>()
+            .add_message::<FriedPostsLoadedEvent>()
+            .add_message::<FriedPostsLoadFailedEvent>()
+            // NAS 远程存储消息
+            .add_message::<NasTestConnectionRequest>()
+            .add_message::<NasTestConnectionResponse>()
+            .add_message::<NasUploadRequest>()
+            .add_message::<NasUploadProgressEvent>()
+            .add_message::<NasUploadCompletedEvent>()
+            .add_message::<NasUploadFailedEvent>()
+            .add_message::<NasBrowseRequest>()
+            .add_message::<NasBrowseResponse>()
+            .add_message::<NasBrowseFailedEvent>()
+            // 聊天室消息
+            .add_message::<LoadChatRoomsRequest>()
+            .add_message::<ChatRoomsLoadedEvent>()
+            .add_message::<ChatRoomsLoadFailedEvent>()
+            .add_message::<ConnectChatRoomRequest>()
+            .add_message::<SendChatMessageRequest>()
+            .add_message::<SendChatMessageResponse>()
+            .add_message::<DisconnectChatRoomRequest>()
             // 注册系统 - 登录和分类
             .add_systems(
                 Update,
@@ -137,8 +221,15 @@ impl Plugin for ApiPlugin {
             )
             // 注册系统 - 搜索
             .add_systems(Update, (handle_search_request, handle_search_response))
+            // 注册系统 - 热词
+            .add_systems(Update, (handle_load_keywords, handle_keywords_response))
             // 注册系统 - 排行榜
             .add_systems(Update, (handle_load_rankings, handle_rankings_response))
+            // 注册系统 - 骑士榜
+            .add_systems(
+                Update,
+                (handle_load_knight_rankings, handle_knight_rankings_response),
+            )
             // 注册系统 - 收藏列表
             .add_systems(Update, (handle_load_favorites, handle_favorites_response))
             // 注册系统 - 首页推荐
@@ -148,6 +239,14 @@ impl Plugin for ApiPlugin {
             )
             // 注册系统 - 用户注册
             .add_systems(Update, handle_register_request)
+            // 注册系统 - 忘记/重置密码
+            .add_systems(
+                Update,
+                (
+                    handle_forgot_password_request,
+                    handle_reset_password_request,
+                ),
+            )
             // 注册系统 - CBZ 打包
             .add_systems(
                 Update,
@@ -157,6 +256,38 @@ impl Plugin for ApiPlugin {
                     handle_cbz_package_failed,
                 ),
             )
+            // 注册系统 - 历史记录
+            .add_systems(
+                Update,
+                (
+                    handle_load_history,
+                    handle_save_history,
+                    handle_delete_history,
+                    handle_clear_all_history,
+                ),
+            )
+            // 注册系统 - 点赞记录
+            .add_systems(
+                Update,
+                (
+                    handle_load_like_records,
+                    handle_save_like_record,
+                    handle_delete_like_record,
+                ),
+            )
+            // 注册系统 - 评论
+            .add_systems(
+                Update,
+                (
+                    handle_load_comments,
+                    handle_post_comment,
+                    handle_post_comment_reply,
+                    handle_like_comment,
+                    handle_load_child_comments,
+                ),
+            )
+            // 注册系统 - 个人资料
+            .add_systems(Update, handle_load_user_profile)
             // API 客户端重载（通道/代理变更）
             .add_systems(Update, handle_reload_api_client)
             // 自动收集标签到缓存
@@ -164,7 +295,32 @@ impl Plugin for ApiPlugin {
             // 启动时自动登录系统
             .add_systems(Startup, auto_login_on_startup)
             // 检查自动登录计时器（在 Update 中运行）
-            .add_systems(Update, check_auto_login_timer);
+            .add_systems(Update, check_auto_login_timer)
+            // 注册系统 - 游戏
+            .add_systems(Update, (handle_load_games, handle_load_game_detail))
+            // 注册系统 - 锅贴社区
+            .add_systems(Update, (handle_load_apps, handle_load_fried_posts))
+            // 注册系统 - 网络诊断
+            .add_systems(
+                Update,
+                (
+                    handle_speed_test,
+                    handle_speed_test_result,
+                    handle_ping_test,
+                    handle_ping_test_result,
+                    handle_network_test_failed,
+                ),
+            )
+            // 注册系统 - 聊天室
+            .add_systems(
+                Update,
+                (
+                    handle_load_chat_rooms,
+                    handle_connect_chat_room,
+                    handle_send_chat_message,
+                    handle_disconnect_chat_room,
+                ),
+            );
     }
 }
 
@@ -183,18 +339,26 @@ pub struct AutoLoginTimer {
 
 impl ApiClientResource {
     pub fn new() -> Self {
-        // 读取代理和分流设置
-        let (proxy_url, api_channel, custom_cdn_api_ip) = {
+        // 读取代理、分流、SNI/IPv6 设置
+        let (proxy_url, api_channel, custom_cdn_api_ip, use_sni_pretend, prefer_ipv6) = {
             let settings = AppSettings::global().read();
             (
                 settings.proxy.to_proxy_url(),
                 settings.channel.api_channel,
                 settings.channel.custom_cdn_api_ip.clone(),
+                settings.use_sni_pretend,
+                settings.prefer_ipv6,
             )
         };
         Self(
-            ApiClient::with_config(proxy_url, api_channel, &custom_cdn_api_ip)
-                .expect("创建 API 客户端失败"),
+            ApiClient::with_config(
+                proxy_url,
+                api_channel,
+                &custom_cdn_api_ip,
+                use_sni_pretend,
+                prefer_ipv6,
+            )
+            .expect("创建 API 客户端失败"),
         )
     }
 }
@@ -694,14 +858,22 @@ fn handle_punch_in_request(
 }
 
 /// 处理打卡响应
-fn handle_punch_in_response(mut messages: MessageReader<PunchInResponseEvent>) {
+fn handle_punch_in_response(
+    mut messages: MessageReader<PunchInResponseEvent>,
+    mut punch_in_state: ResMut<PunchInState>,
+) {
     for event in messages.read() {
         match &event.result {
             Ok(status) => {
                 tracing::info!("打卡成功: {}", status);
+                punch_in_state.is_punched = true;
+                punch_in_state.is_success = true;
+                punch_in_state.message = Some("签到成功！".into());
             }
             Err(error) => {
                 tracing::warn!("打卡失败: {}", error);
+                punch_in_state.is_success = false;
+                punch_in_state.message = Some(format!("签到失败: {}", error));
             }
         }
     }
@@ -713,19 +885,24 @@ fn handle_reload_api_client(
     mut api_client: ResMut<ApiClientResource>,
 ) {
     for _ in messages.read() {
-        let (proxy_url, api_channel, custom_cdn_api_ip) = {
+        let (proxy_url, api_channel, custom_cdn_api_ip, use_sni_pretend, prefer_ipv6) = {
             let settings = AppSettings::global().read();
             (
                 settings.proxy.to_proxy_url(),
                 settings.channel.api_channel,
                 settings.channel.custom_cdn_api_ip.clone(),
+                settings.use_sni_pretend,
+                settings.prefer_ipv6,
             )
         };
 
-        if let Err(e) = api_client
-            .0
-            .reload_config(proxy_url, api_channel, &custom_cdn_api_ip)
-        {
+        if let Err(e) = api_client.0.reload_config(
+            proxy_url,
+            api_channel,
+            &custom_cdn_api_ip,
+            use_sni_pretend,
+            prefer_ipv6,
+        ) {
             tracing::error!("重载 API 客户端失败: {}", e);
         } else {
             tracing::info!("API 客户端已重载");
@@ -1007,12 +1184,16 @@ fn handle_like_comic(
         runtime.spawn_background_task(move |mut ctx| async move {
             use picacg_api::endpoints::comic::LikeComicRequest as ApiLikeRequest;
 
-            let request = ApiLikeRequest { comic_id };
+            let request = ApiLikeRequest {
+                comic_id: comic_id.clone(),
+            };
 
             match client.request(request).await {
                 Ok(response) => {
+                    let cid = comic_id;
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(LikeComicResponse {
+                            comic_id: cid,
                             action: response.action,
                         });
                     })
@@ -1027,12 +1208,34 @@ fn handle_like_comic(
 }
 
 /// 处理点赞响应
+///
+/// 更新详情页状态，同时保存/删除本地点赞记录
 fn handle_like_response(
     mut messages: MessageReader<LikeComicResponse>,
     mut detail_state: ResMut<ComicDetailState>,
+    mut save_messages: MessageWriter<SaveLikeRecordRequest>,
+    mut delete_messages: MessageWriter<DeleteLikeRecordRequest>,
 ) {
     for event in messages.read() {
-        detail_state.is_liked = event.action == "like";
+        let is_liked = event.action == "like";
+        detail_state.is_liked = is_liked;
+
+        // 保存/删除本地点赞记录
+        if is_liked {
+            // 从当前详情页获取漫画信息
+            if let Some(ref comic) = detail_state.comic {
+                save_messages.write(SaveLikeRecordRequest {
+                    comic_id: event.comic_id.clone(),
+                    comic_title: comic.title.clone(),
+                    thumb_url: comic.thumb.url(),
+                });
+            }
+        } else {
+            delete_messages.write(DeleteLikeRecordRequest {
+                comic_id: event.comic_id.clone(),
+            });
+        }
+
         tracing::info!("点赞操作: {}", event.action);
     }
 }
@@ -1319,13 +1522,58 @@ fn handle_download_comic(
         }
 
         // 确定要下载的章节
-        let mut episodes_to_download: Vec<i32> = if event.episodes.is_empty() {
-            // 下载所有章节
+        let mut episodes_to_download: Vec<i32> = if !event.episodes.is_empty() {
+            event.episodes.clone()
+        } else if !detail_state.episodes.is_empty() && detail_state.comic_id == comic_id {
+            // 当前详情页就是这个漫画，直接用已加载的章节
             detail_state.episodes.iter().map(|e| e.order).collect()
         } else {
-            event.episodes.clone()
+            // 章节列表未加载（如右键菜单下载），先通过 API 获取
+            let client = api_client.0.clone();
+            let cid = comic_id.clone();
+            let ctitle = comic_title.clone();
+            runtime.spawn_background_task(move |mut ctx| async move {
+                use picacg_api::endpoints::GetEpisodesRequest;
+                tracing::info!("快速下载：正在获取 {} 的章节列表...", ctitle);
+                let mut all_episodes = Vec::new();
+                let mut page = 1;
+                loop {
+                    match client
+                        .request(GetEpisodesRequest {
+                            comic_id: cid.clone(),
+                            page,
+                        })
+                        .await
+                    {
+                        Ok(resp) => {
+                            all_episodes.extend(resp.eps.docs.iter().map(|e| e.order));
+                            if page >= resp.eps.pages {
+                                break;
+                            }
+                            page += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!("获取章节列表失败: {}", e);
+                            return;
+                        }
+                    }
+                }
+                if all_episodes.is_empty() {
+                    tracing::warn!("快速下载：{} 没有章节", ctitle);
+                    return;
+                }
+                // 重新发送带章节的下载请求
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(DownloadComicRequest {
+                        comic_id: cid,
+                        comic_title: ctitle,
+                        episodes: all_episodes,
+                    });
+                })
+                .await;
+            });
+            continue; // 本次跳过，等异步回调重新触发
         };
-        // 从第一章开始下载（正序）
         episodes_to_download.sort();
 
         if episodes_to_download.is_empty() {
@@ -1338,12 +1586,16 @@ fn handle_download_comic(
             .to_string_lossy()
             .to_string();
 
-        // 从漫画详情获取分类和标签
-        let (categories, tags) = detail_state
-            .comic
-            .as_ref()
-            .map(|c| (c.categories.clone(), c.tags.clone()))
-            .unwrap_or_default();
+        // 从漫画详情获取分类和标签（可能为空，后续下载时会从 API 获取）
+        let (categories, tags) = if detail_state.comic_id == comic_id {
+            detail_state
+                .comic
+                .as_ref()
+                .map(|c| (c.categories.clone(), c.tags.clone()))
+                .unwrap_or_default()
+        } else {
+            (vec![], vec![])
+        };
 
         // 创建 FSM 任务元数据
         let meta = DownloadTaskMeta::new(
@@ -1413,6 +1665,7 @@ fn handle_download_comic(
 }
 
 /// 启动后台下载任务
+#[allow(clippy::too_many_arguments)]
 fn spawn_download_task(
     runtime: &TokioTasksRuntime,
     client: ApiClient,
@@ -1441,6 +1694,7 @@ fn spawn_download_task(
 /// 执行下载任务（核心下载逻辑）
 ///
 /// 可以从任何有 TaskContext 的异步上下文中调用
+#[allow(clippy::too_many_arguments)]
 async fn execute_download_task(
     ctx: &mut crate::utils::TaskContext,
     client: ApiClient,
@@ -2226,11 +2480,11 @@ fn handle_resume_download(
         }
 
         // 跳过已完成的任务（防止重复下载）
-        if let Some(fsm) = download_state.find_task(&comic_id) {
-            if matches!(fsm.meta.state, DownloadState::Completed) {
-                tracing::debug!("漫画 {} 已完成，跳过恢复", comic_title);
-                continue;
-            }
+        if let Some(fsm) = download_state.find_task(&comic_id)
+            && matches!(fsm.meta.state, DownloadState::Completed)
+        {
+            tracing::debug!("漫画 {} 已完成，跳过恢复", comic_title);
+            continue;
         }
 
         // 检查是否已达到最大并发数
@@ -2590,6 +2844,66 @@ fn handle_search_request(
     }
 }
 
+// ==================== 热词处理 ====================
+
+/// 处理加载热词请求
+fn handle_load_keywords(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadKeywordsRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for _event in messages.read() {
+        let client = api_client.0.clone();
+
+        tracing::info!("加载热门搜索关键词");
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::comic::GetKeywordsRequest;
+
+            match client.request(GetKeywordsRequest).await {
+                Ok(response) => {
+                    let count = response.keywords.len();
+                    tracing::info!("热词加载成功，共 {} 个", count);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(KeywordsLoadedEvent {
+                            keywords: response.keywords,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    tracing::error!("热词加载失败: {}", error);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(KeywordsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理热词加载响应
+fn handle_keywords_response(
+    mut loaded_messages: MessageReader<KeywordsLoadedEvent>,
+    mut failed_messages: MessageReader<KeywordsLoadFailedEvent>,
+    mut search_state: ResMut<SearchState>,
+) {
+    for event in loaded_messages.read() {
+        search_state.hot_keywords = event.keywords.clone();
+        search_state.hot_keywords_loaded = true;
+        search_state.needs_rebuild = true;
+        tracing::info!("热词已更新: {} 个", search_state.hot_keywords.len());
+    }
+
+    for event in failed_messages.read() {
+        tracing::error!("热词加载失败，不影响搜索功能: {}", event.error);
+        // 加载失败不阻塞功能，仅标记已尝试加载
+        search_state.hot_keywords_loaded = true;
+    }
+}
+
 /// 判断漫画是否应该被屏蔽
 fn is_comic_blocked(
     comic: &picacg_api::models::Comic,
@@ -2743,6 +3057,71 @@ fn handle_rankings_response(
     for event in failed_messages.read() {
         rankings_state.is_loading = false;
         rankings_state.error = Some(event.error.clone());
+    }
+}
+
+// ==================== 骑士榜处理 ====================
+
+/// 处理加载骑士榜请求
+fn handle_load_knight_rankings(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadKnightRankingsRequest>,
+    api_client: Res<ApiClientResource>,
+    mut rankings_state: ResMut<RankingsState>,
+) {
+    for _event in messages.read() {
+        rankings_state.knight_loading = true;
+        rankings_state.knight_error = None;
+
+        let client = api_client.0.clone();
+
+        tracing::info!("加载骑士榜数据");
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::rank::GetKnightRankingsRequest;
+
+            let request = GetKnightRankingsRequest;
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let count = response.users.len();
+                    tracing::info!("骑士榜加载成功，共 {} 位骑士", count);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(KnightRankingsLoadedEvent {
+                            users: response.users,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    tracing::error!("骑士榜加载失败: {}", error);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(KnightRankingsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理骑士榜加载响应
+fn handle_knight_rankings_response(
+    mut loaded_messages: MessageReader<KnightRankingsLoadedEvent>,
+    mut failed_messages: MessageReader<KnightRankingsLoadFailedEvent>,
+    mut rankings_state: ResMut<RankingsState>,
+) {
+    for event in loaded_messages.read() {
+        rankings_state.knight_loading = false;
+        rankings_state.knight_error = None;
+        rankings_state.knight_users = event.users.clone();
+    }
+
+    for event in failed_messages.read() {
+        rankings_state.knight_loading = false;
+        rankings_state.knight_error = Some(event.error.clone());
     }
 }
 
@@ -3192,5 +3571,1312 @@ fn update_cached_tags(
     let new_tags: Vec<String> = tags.into_iter().collect();
     if new_tags.len() != cached_tags.tags.len() {
         cached_tags.tags = new_tags;
+    }
+}
+
+// ==================== 个人资料处理 ====================
+
+/// 处理加载用户个人资料请求
+fn handle_load_user_profile(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadUserProfileRequest>,
+    api_client: Res<ApiClientResource>,
+    mut profile_state: ResMut<UserProfileState>,
+) {
+    for _request in messages.read() {
+        profile_state.is_loading = true;
+        profile_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::GetUserInfoRequest;
+
+            match client.request(GetUserInfoRequest).await {
+                Ok(response) => {
+                    let user = response.user;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(UserProfileLoadedEvent { user });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(UserProfileLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+// ==================== 历史记录处理 ====================
+
+/// 处理加载历史记录请求
+fn handle_load_history(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadHistoryRequest>,
+    mut history_state: ResMut<HistoryState>,
+) {
+    for _event in messages.read() {
+        history_state.is_loading = true;
+        history_state.error = None;
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            let records_result = picacg_db::get_all_histories_async(&pool).await;
+            let count_result = picacg_db::get_history_count_async(&pool).await;
+
+            match (records_result, count_result) {
+                (Ok(records), Ok(count)) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(HistoryLoadedEvent {
+                            records,
+                            total_count: count,
+                        });
+                    })
+                    .await;
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(HistoryLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理保存历史记录请求
+fn handle_save_history(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<SaveHistoryRequest>,
+) {
+    for event in messages.read() {
+        let history = picacg_db::DbHistory::with_info(
+            event.comic_id.clone(),
+            event.comic_title.clone(),
+            event.thumb_url.clone(),
+            event.last_eps_order as i64,
+            event.last_eps_title.clone(),
+            event.last_page as i64,
+        );
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|_ctx| async move {
+            if let Err(e) = picacg_db::upsert_history_async(&pool, &history).await {
+                tracing::warn!("保存阅读历史失败: {}", e);
+            } else {
+                tracing::debug!(
+                    "保存阅读历史: comic_id={}, eps={}, page={}",
+                    history.book_id,
+                    history.last_eps,
+                    history.last_page
+                );
+            }
+        });
+    }
+}
+
+/// 处理删除历史记录请求
+fn handle_delete_history(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<DeleteHistoryRequest>,
+    mut history_state: ResMut<HistoryState>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+
+        // 立即从内存中移除，UI 即时响应
+        history_state.records.retain(|r| r.book_id != comic_id);
+        history_state.total_count = history_state.records.len() as i64;
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|_ctx| async move {
+            if let Err(e) = picacg_db::delete_history_async(&pool, &comic_id).await {
+                tracing::warn!("删除阅读历史失败: {}", e);
+            }
+        });
+    }
+}
+
+/// 处理清空所有历史记录请求
+fn handle_clear_all_history(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<ClearAllHistoryRequest>,
+    mut history_state: ResMut<HistoryState>,
+) {
+    for _event in messages.read() {
+        // 立即清空内存，UI 即时响应
+        history_state.records.clear();
+        history_state.total_count = 0;
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|_ctx| async move {
+            if let Err(e) = picacg_db::clear_all_history_async(&pool).await {
+                tracing::warn!("清空阅读历史失败: {}", e);
+            } else {
+                tracing::info!("已清空所有阅读历史");
+            }
+        });
+    }
+}
+
+// ==================== 点赞记录处理 ====================
+
+/// 处理加载点赞记录请求
+fn handle_load_like_records(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadLikeRecordsRequest>,
+    mut like_records_state: ResMut<crate::resources::LikeRecordsState>,
+) {
+    for _event in messages.read() {
+        like_records_state.is_loading = true;
+        like_records_state.error = None;
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            let records_result = picacg_db::get_all_like_records_async(&pool).await;
+            let count_result = picacg_db::get_like_count_async(&pool).await;
+
+            match (records_result, count_result) {
+                (Ok(records), Ok(count)) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(LikeRecordsLoadedEvent {
+                            records,
+                            total_count: count,
+                        });
+                    })
+                    .await;
+                }
+                (Err(e), _) | (_, Err(e)) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(LikeRecordsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理保存点赞记录请求
+fn handle_save_like_record(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<SaveLikeRecordRequest>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+        let comic_title = event.comic_title.clone();
+        let thumb_url = event.thumb_url.clone();
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|_ctx| async move {
+            let thumb = if thumb_url.is_empty() {
+                None
+            } else {
+                Some(thumb_url.as_str())
+            };
+            if let Err(e) =
+                picacg_db::insert_like_record_async(&pool, &comic_id, &comic_title, thumb).await
+            {
+                tracing::warn!("保存点赞记录失败: {}", e);
+            } else {
+                tracing::debug!("保存点赞记录: comic_id={}", comic_id);
+            }
+        });
+    }
+}
+
+/// 处理删除点赞记录请求
+fn handle_delete_like_record(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<DeleteLikeRecordRequest>,
+    mut like_records_state: ResMut<crate::resources::LikeRecordsState>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+
+        // 立即从内存中移除，UI 即时响应
+        like_records_state
+            .records
+            .retain(|r| r.comic_id != comic_id);
+        like_records_state.total_count = like_records_state.records.len() as i64;
+
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|_ctx| async move {
+            if let Err(e) = picacg_db::delete_like_record_async(&pool, &comic_id).await {
+                tracing::warn!("删除点赞记录失败: {}", e);
+            }
+        });
+    }
+}
+
+// ==================== 版本更新检查 ====================
+
+/// GitHub Releases API 地址
+const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/arxxyr/picacg-rust/releases/latest";
+
+/// 处理检查更新请求
+fn handle_check_update(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<CheckUpdateRequest>,
+    mut update_state: ResMut<crate::resources::UpdateCheckState>,
+) {
+    for _event in messages.read() {
+        if update_state.is_checking {
+            continue;
+        }
+
+        update_state.is_checking = true;
+        update_state.error = None;
+        update_state.has_update = None;
+        update_state.latest_version = None;
+        update_state.release_notes = None;
+        update_state.download_url = None;
+
+        let current_version = env!("CARGO_PKG_VERSION").to_string();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            let result = check_github_latest_release(&current_version).await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok(info) => {
+                    ctx.world.write_message(CheckUpdateResponse {
+                        latest_version: info.latest_version,
+                        current_version: info.current_version,
+                        has_update: info.has_update,
+                        release_notes: info.release_notes,
+                        download_url: info.download_url,
+                    });
+                }
+                Err(e) => {
+                    ctx.world.write_message(CheckUpdateFailedEvent { error: e });
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 版本更新信息
+struct UpdateInfo {
+    latest_version: String,
+    current_version: String,
+    has_update: bool,
+    release_notes: Option<String>,
+    download_url: Option<String>,
+}
+
+/// 请求 GitHub Releases API 获取最新版本
+async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("picacg-rust")
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+    let response = client
+        .get(GITHUB_RELEASES_URL)
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .map_err(|e| format!("网络请求失败: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("GitHub API 返回错误: {}", response.status()));
+    }
+
+    let body: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    // 从 tag_name 提取版本号（去除 v 前缀和 +build 后缀）
+    let tag_name = body["tag_name"]
+        .as_str()
+        .ok_or_else(|| "响应中缺少 tag_name 字段".to_string())?;
+    let latest_version = tag_name
+        .strip_prefix('v')
+        .unwrap_or(tag_name)
+        .split('+')
+        .next()
+        .unwrap_or(tag_name)
+        .to_string();
+
+    let release_notes = body["body"].as_str().map(|s| s.to_string());
+    let download_url = body["html_url"].as_str().map(|s| s.to_string());
+
+    let has_update = compare_versions(&latest_version, current_version);
+
+    tracing::info!(
+        "版本检查完成: 当前={}, 最新={}, 有更新={}",
+        current_version,
+        latest_version,
+        has_update
+    );
+
+    Ok(UpdateInfo {
+        latest_version,
+        current_version: current_version.to_string(),
+        has_update,
+        release_notes,
+        download_url,
+    })
+}
+
+/// 简单的语义化版本比较：latest > current 则返回 true
+fn compare_versions(latest: &str, current: &str) -> bool {
+    let parse =
+        |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect() };
+    let latest_parts = parse(latest);
+    let current_parts = parse(current);
+
+    // 逐段比较，缺失的段视为 0
+    let max_len = latest_parts.len().max(current_parts.len());
+    for i in 0..max_len {
+        let l = latest_parts.get(i).copied().unwrap_or(0);
+        let c = current_parts.get(i).copied().unwrap_or(0);
+        if l > c {
+            return true;
+        }
+        if l < c {
+            return false;
+        }
+    }
+    false
+}
+
+/// 处理检查更新响应
+fn handle_check_update_response(
+    mut messages: MessageReader<CheckUpdateResponse>,
+    mut update_state: ResMut<crate::resources::UpdateCheckState>,
+) {
+    for event in messages.read() {
+        update_state.is_checking = false;
+        update_state.latest_version = Some(event.latest_version.clone());
+        update_state.has_update = Some(event.has_update);
+        update_state.release_notes.clone_from(&event.release_notes);
+        update_state.download_url.clone_from(&event.download_url);
+        update_state.error = None;
+    }
+}
+
+/// 处理检查更新失败
+fn handle_check_update_failed(
+    mut messages: MessageReader<CheckUpdateFailedEvent>,
+    mut update_state: ResMut<crate::resources::UpdateCheckState>,
+) {
+    for event in messages.read() {
+        update_state.is_checking = false;
+        update_state.error = Some(event.error.clone());
+        tracing::warn!("检查更新失败: {}", event.error);
+    }
+}
+
+// ==================== 忘记/重置密码处理 ====================
+
+/// 处理忘记密码请求（获取安全问题）
+fn handle_forgot_password_request(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<ForgotPasswordRequestEvent>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let email = event.email.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::auth::ForgotPasswordRequest;
+
+            let result = match client
+                .request(ForgotPasswordRequest {
+                    email: email.clone(),
+                })
+                .await
+            {
+                Ok(response) => Ok((response.question1, response.question2, response.question3)),
+                Err(e) => Err(e.to_string()),
+            };
+
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world
+                    .write_message(ForgotPasswordResponseEvent { result });
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理重置密码请求（通过安全问题）
+fn handle_reset_password_request(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<ResetPasswordRequestEvent>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let email = event.email.clone();
+        let question_no = event.question_no;
+        let answer = event.answer.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::auth::ResetPasswordRequest;
+
+            let result = match client
+                .request(ResetPasswordRequest {
+                    email,
+                    question_no,
+                    answer,
+                })
+                .await
+            {
+                Ok(response) => {
+                    let msg = response
+                        .password
+                        .map(|p| format!("密码已重置，新密码: {}", p))
+                        .unwrap_or_else(|| "密码已重置".to_string());
+                    Ok(msg)
+                }
+                Err(e) => Err(e.to_string()),
+            };
+
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world
+                    .write_message(ResetPasswordResponseEvent { result });
+            })
+            .await;
+        });
+    }
+}
+
+// ==================== 评论处理 ====================
+
+/// 处理加载评论列表请求
+fn handle_load_comments(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadCommentsRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+        let page = event.page;
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::comment::GetCommentsRequest;
+
+            match client.request(GetCommentsRequest { comic_id, page }).await {
+                Ok(response) => {
+                    let comments = response.comments.docs;
+                    let total_pages = response.comments.page.pages;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(CommentsLoadedEvent {
+                            comments,
+                            total_pages,
+                            page,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(CommentsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理发表评论请求
+fn handle_post_comment(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<PostCommentRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+        let content = event.content.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::comment::PostCommentRequest as ApiPostComment;
+
+            let result = client.request(ApiPostComment { comic_id, content }).await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok(_) => {
+                    ctx.world.write_message(PostCommentResponseEvent {
+                        success: true,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    ctx.world.write_message(PostCommentResponseEvent {
+                        success: false,
+                        error: Some(e.to_string()),
+                    });
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理回复评论请求
+fn handle_post_comment_reply(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<PostCommentReplyRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comment_id = event.comment_id.clone();
+        let content = event.content.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::comment::PostCommentReplyRequest as ApiReply;
+
+            let result = client
+                .request(ApiReply {
+                    comment_id,
+                    content,
+                })
+                .await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok(_) => {
+                    ctx.world.write_message(PostCommentReplyResponseEvent {
+                        success: true,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    ctx.world.write_message(PostCommentReplyResponseEvent {
+                        success: false,
+                        error: Some(e.to_string()),
+                    });
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理点赞评论请求
+fn handle_like_comment(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LikeCommentRequestEvent>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comment_id = event.comment_id.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::comment::LikeCommentRequest as ApiLikeComment;
+
+            let result = client
+                .request(ApiLikeComment {
+                    comment_id: comment_id.clone(),
+                })
+                .await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok(response) => {
+                    ctx.world.write_message(LikeCommentResponseEvent {
+                        comment_id,
+                        action: response.action,
+                    });
+                }
+                Err(e) => {
+                    tracing::warn!("点赞评论失败: {}", e);
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理加载子评论请求
+fn handle_load_child_comments(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadChildCommentsRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comment_id = event.comment_id.clone();
+        let page = event.page;
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::comment::GetCommentChildrenRequest;
+
+            match client
+                .request(GetCommentChildrenRequest {
+                    comment_id: comment_id.clone(),
+                    page,
+                })
+                .await
+            {
+                Ok(response) => {
+                    let comments = response.comments.docs;
+                    let total_pages = response.comments.page.pages;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(ChildCommentsLoadedEvent {
+                            comment_id,
+                            comments,
+                            total_pages,
+                            page,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    tracing::warn!("加载子评论失败: {}", e);
+                }
+            }
+        });
+    }
+}
+
+// ==================== 网络诊断 ====================
+
+/// 测速用的固定图片 URL
+const SPEED_TEST_IMAGE_URL: &str =
+    "https://storage-b.picacomic.com/static/817c4a45-ce32-4ee7-b602-85e39d9ea00b.jpg";
+
+/// 处理网速测试请求：下载固定图片并计时
+fn handle_speed_test(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<crate::events::SpeedTestRequest>,
+    mut diag_state: ResMut<crate::resources::NetworkDiagState>,
+) {
+    for _event in messages.read() {
+        if diag_state.is_testing_speed {
+            continue;
+        }
+
+        diag_state.is_testing_speed = true;
+        diag_state.error = None;
+        diag_state.download_speed = None;
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            let result = async {
+                let client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .build()
+                    .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+
+                let start = std::time::Instant::now();
+                let response = client
+                    .get(SPEED_TEST_IMAGE_URL)
+                    .send()
+                    .await
+                    .map_err(|e| format!("下载失败: {}", e))?;
+
+                if !response.status().is_success() {
+                    return Err(format!("服务器返回错误: {}", response.status()));
+                }
+
+                let bytes = response
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("读取响应失败: {}", e))?;
+
+                let elapsed = start.elapsed();
+                let elapsed_ms = elapsed.as_millis() as u64;
+                // 避免除零
+                let speed_kbps = if elapsed_ms > 0 {
+                    (bytes.len() as f64 / 1024.0) / (elapsed_ms as f64 / 1000.0)
+                } else {
+                    0.0
+                };
+
+                Ok((speed_kbps, elapsed_ms))
+            }
+            .await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok((speed, elapsed)) => {
+                    ctx.world
+                        .write_message(crate::events::SpeedTestResultEvent {
+                            download_speed: speed,
+                            elapsed_ms: elapsed,
+                        });
+                }
+                Err(error) => {
+                    ctx.world
+                        .write_message(crate::events::NetworkTestFailedEvent { error });
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理网速测试结果
+fn handle_speed_test_result(
+    mut messages: MessageReader<crate::events::SpeedTestResultEvent>,
+    mut diag_state: ResMut<crate::resources::NetworkDiagState>,
+) {
+    for event in messages.read() {
+        diag_state.is_testing_speed = false;
+        diag_state.download_speed = Some(event.download_speed);
+        tracing::info!(
+            "测速完成: {:.1} KB/s, 耗时 {} ms",
+            event.download_speed,
+            event.elapsed_ms
+        );
+    }
+}
+
+/// 处理 Ping 测试请求：请求 /categories API 并计时
+fn handle_ping_test(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<crate::events::PingTestRequest>,
+    api_client: Res<ApiClientResource>,
+    mut diag_state: ResMut<crate::resources::NetworkDiagState>,
+) {
+    for _event in messages.read() {
+        if diag_state.is_testing_ping {
+            continue;
+        }
+
+        diag_state.is_testing_ping = true;
+        diag_state.error = None;
+        diag_state.latency_ms = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            let result = async {
+                use picacg_api::endpoints::category::GetCategoriesRequest;
+
+                let start = std::time::Instant::now();
+                client
+                    .request(GetCategoriesRequest)
+                    .await
+                    .map_err(|e| format!("请求失败: {}", e))?;
+                let elapsed = start.elapsed();
+                let latency_ms = elapsed.as_millis() as u64;
+
+                Ok::<u64, String>(latency_ms)
+            }
+            .await;
+
+            ctx.run_on_main_thread(move |ctx| match result {
+                Ok(latency) => {
+                    ctx.world.write_message(crate::events::PingTestResultEvent {
+                        latency_ms: latency,
+                    });
+                }
+                Err(error) => {
+                    ctx.world
+                        .write_message(crate::events::NetworkTestFailedEvent { error });
+                }
+            })
+            .await;
+        });
+    }
+}
+
+/// 处理 Ping 测试结果
+fn handle_ping_test_result(
+    mut messages: MessageReader<crate::events::PingTestResultEvent>,
+    mut diag_state: ResMut<crate::resources::NetworkDiagState>,
+) {
+    for event in messages.read() {
+        diag_state.is_testing_ping = false;
+        diag_state.latency_ms = Some(event.latency_ms);
+        tracing::info!("Ping 测试完成: {} ms", event.latency_ms);
+    }
+}
+
+/// 处理网络测试失败事件
+fn handle_network_test_failed(
+    mut messages: MessageReader<crate::events::NetworkTestFailedEvent>,
+    mut diag_state: ResMut<crate::resources::NetworkDiagState>,
+) {
+    for event in messages.read() {
+        diag_state.is_testing_speed = false;
+        diag_state.is_testing_ping = false;
+        diag_state.error = Some(event.error.clone());
+        tracing::warn!("网络诊断失败: {}", event.error);
+    }
+}
+
+// ==================== 游戏处理 ====================
+
+/// 处理加载游戏列表请求
+fn handle_load_games(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadGamesRequest>,
+    api_client: Res<ApiClientResource>,
+    mut games_state: ResMut<GamesState>,
+) {
+    for event in messages.read() {
+        let page = event.page;
+
+        games_state.is_loading = true;
+        games_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::game::GetGamesRequest;
+
+            let request = GetGamesRequest { page };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let games = response.games.docs;
+                    let total_pages = response.games.pages;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(GamesLoadedEvent { games, total_pages });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(GamesLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理加载游戏详情请求
+fn handle_load_game_detail(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadGameDetailRequest>,
+    api_client: Res<ApiClientResource>,
+    mut game_detail_state: ResMut<GameDetailState>,
+) {
+    for event in messages.read() {
+        let game_id = event.game_id.clone();
+
+        game_detail_state.is_loading = true;
+        game_detail_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::game::GetGameDetailRequest;
+
+            let request = GetGameDetailRequest { game_id };
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let game = response.game;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(GameDetailLoadedEvent { game });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(GameDetailLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+// ==================== 锅贴社区处理 ====================
+
+/// 处理加载小程序列表请求
+fn handle_load_apps(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadAppsRequest>,
+    api_client: Res<ApiClientResource>,
+    mut fried_state: ResMut<FriedState>,
+) {
+    for _event in messages.read() {
+        fried_state.is_loading = true;
+        fried_state.error = None;
+
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::fried::GetAppsRequest;
+
+            let request = GetAppsRequest;
+
+            match client.request(request).await {
+                Ok(response) => {
+                    let apps = response.apps;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(AppsLoadedEvent { apps });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e.to_string();
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(AppsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理加载锅贴帖子列表请求
+///
+/// 锅贴 API 使用独立域名和 PicACG token 认证。
+/// 请求流程：
+/// 1. 使用 PicACG token 访问锅贴 API
+/// 2. 获取帖子列表
+fn handle_load_fried_posts(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadFriedPostsRequest>,
+    api_client: Res<ApiClientResource>,
+    mut fried_state: ResMut<FriedState>,
+) {
+    for event in messages.read() {
+        let page = event.page;
+        let limit = if fried_state.limit > 0 {
+            fried_state.limit
+        } else {
+            10
+        };
+        let offset = page * limit;
+
+        fried_state.is_loading = true;
+        fried_state.error = None;
+
+        let client = api_client.0.clone();
+        let token = client.get_token().unwrap_or_default();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::fried::FRIED_API_BASE;
+
+            // 构建锅贴 API 请求（独立域名，使用 PicACG token 认证）
+            let url = format!("{}/posts?offset={}", FRIED_API_BASE, offset);
+
+            let http_client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .timeout(std::time::Duration::from_secs(30))
+                .build();
+
+            let http_client = match http_client {
+                Ok(c) => c,
+                Err(e) => {
+                    let error = format!("创建 HTTP 客户端失败: {}", e);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(FriedPostsLoadFailedEvent { error });
+                    })
+                    .await;
+                    return;
+                }
+            };
+
+            let response = http_client
+                .get(&url)
+                .header("token", &token)
+                .header(
+                    "user-agent",
+                    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36",
+                )
+                .header("Referer", format!("{}/?token={}", FRIED_API_BASE, token))
+                .send()
+                .await;
+
+            match response {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        let status = resp.status().as_u16();
+                        let error = format!("HTTP 错误: {}", status);
+                        ctx.run_on_main_thread(move |ctx| {
+                            ctx.world
+                                .write_message(FriedPostsLoadFailedEvent { error });
+                        })
+                        .await;
+                        return;
+                    }
+
+                    let text = match resp.text().await {
+                        Ok(t) => t,
+                        Err(e) => {
+                            let error = format!("读取响应失败: {}", e);
+                            ctx.run_on_main_thread(move |ctx| {
+                                ctx.world
+                                    .write_message(FriedPostsLoadFailedEvent { error });
+                            })
+                            .await;
+                            return;
+                        }
+                    };
+
+                    // 安全地截取前 500 个字符用于调试
+                    let preview: String = text.chars().take(500).collect();
+                    tracing::debug!("锅贴响应(前 500 字符): {}", preview);
+
+                    // 解析响应
+                    match serde_json::from_str::<
+                        picacg_api::endpoints::fried::FriedPostsResponse,
+                    >(&text)
+                    {
+                        Ok(parsed) => {
+                            let posts = parsed.data.posts;
+                            let total = parsed.data.total;
+                            let limit = parsed.data.limit;
+                            ctx.run_on_main_thread(move |ctx| {
+                                ctx.world.write_message(FriedPostsLoadedEvent {
+                                    posts,
+                                    total,
+                                    limit,
+                                });
+                            })
+                            .await;
+                        }
+                        Err(e) => {
+                            let error = format!("解析锅贴响应失败: {}", e);
+                            tracing::error!("锅贴响应解析失败: {}, 响应体: {}", e, text);
+                            ctx.run_on_main_thread(move |ctx| {
+                                ctx.world
+                                    .write_message(FriedPostsLoadFailedEvent { error });
+                            })
+                            .await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let error = format!("请求锅贴 API 失败: {}", e);
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world
+                            .write_message(FriedPostsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+// ==================== 聊天室 API 处理 ====================
+
+/// 处理加载聊天房间列表请求
+fn handle_load_chat_rooms(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadChatRoomsRequest>,
+    mut chat_state: ResMut<ChatState>,
+) {
+    for _event in messages.read() {
+        if chat_state.is_loading {
+            continue;
+        }
+        chat_state.is_loading = true;
+        chat_state.error = None;
+
+        // 从配置读取登录凭据
+        let (email, password) = {
+            let settings = AppSettings::global().read();
+            (
+                settings.login.saved_email.clone(),
+                settings.login.saved_password.clone(),
+            )
+        };
+
+        // 复用已有 token（如果存在）
+        let existing_token = chat_state.chat_token.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            use picacg_api::endpoints::chat::ChatApiClient;
+
+            let mut chat_client = ChatApiClient::new();
+
+            // 步骤 1：登录（或复用 token）
+            let token = if let Some(token) = existing_token {
+                chat_client.set_token(token.clone());
+                token
+            } else {
+                match chat_client.signin(&email, &password).await {
+                    Ok(token) => token,
+                    Err(e) => {
+                        let error = e;
+                        ctx.run_on_main_thread(move |ctx| {
+                            ctx.world.write_message(ChatRoomsLoadFailedEvent { error });
+                        })
+                        .await;
+                        return;
+                    }
+                }
+            };
+
+            // 步骤 2：获取用户资料（可选，失败不影响）
+            let profile = match chat_client.get_profile().await {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    tracing::warn!("获取聊天资料失败（不影响功能）: {}", e);
+                    None
+                }
+            };
+
+            // 步骤 3：获取房间列表
+            match chat_client.get_rooms().await {
+                Ok(rooms) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(ChatRoomsLoadedEvent {
+                            rooms,
+                            token,
+                            profile,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(ChatRoomsLoadFailedEvent { error });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理连接聊天室 WebSocket 请求
+fn handle_connect_chat_room(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<ConnectChatRoomRequest>,
+    mut chat_room_state: ResMut<ChatRoomState>,
+) {
+    for event in messages.read() {
+        // 关闭旧连接
+        if let Some(close_sender) = chat_room_state.ws_close_sender.take() {
+            let _ = close_sender.send(());
+        }
+
+        chat_room_state.is_connecting = true;
+        chat_room_state.is_connected = false;
+        chat_room_state.error = None;
+
+        let room_id = event.room_id.clone();
+        let token = event.token.clone();
+        let ws_url = format!(
+            "{}?token={}&room={}",
+            picacg_api::endpoints::chat::CHAT_WS_BASE,
+            token,
+            room_id,
+        );
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            match crate::utils::websocket::connect_websocket(&ws_url).await {
+                Ok((incoming_rx, outgoing_tx, close_tx)) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        let mut state = ctx.world.resource_mut::<ChatRoomState>();
+                        state.ws_receiver = Some(std::sync::Mutex::new(incoming_rx));
+                        state.ws_sender = Some(outgoing_tx);
+                        state.ws_close_sender = Some(close_tx);
+                        state.is_connecting = false;
+                        state.is_connected = true;
+                        tracing::info!("WebSocket 连接已建立");
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e;
+                    ctx.run_on_main_thread(move |ctx| {
+                        let mut state = ctx.world.resource_mut::<ChatRoomState>();
+                        state.is_connecting = false;
+                        state.is_connected = false;
+                        state.error = Some(error);
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理发送聊天消息请求
+fn handle_send_chat_message(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<SendChatMessageRequest>,
+    chat_state: Res<ChatState>,
+) {
+    for event in messages.read() {
+        let token = match &chat_state.chat_token {
+            Some(t) => t.clone(),
+            None => {
+                tracing::warn!("聊天服务未登录，无法发送消息");
+                continue;
+            }
+        };
+
+        let room_id = event.room_id.clone();
+        let message = event.message.clone();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            let mut chat_client = picacg_api::endpoints::chat::ChatApiClient::new();
+            chat_client.set_token(token);
+
+            match chat_client.send_message(&room_id, &message, None).await {
+                Ok(()) => {
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(SendChatMessageResponse {
+                            success: true,
+                            error: None,
+                        });
+                    })
+                    .await;
+                }
+                Err(e) => {
+                    let error = e;
+                    ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(SendChatMessageResponse {
+                            success: false,
+                            error: Some(error),
+                        });
+                    })
+                    .await;
+                }
+            }
+        });
+    }
+}
+
+/// 处理断开聊天室 WebSocket
+fn handle_disconnect_chat_room(
+    mut messages: MessageReader<DisconnectChatRoomRequest>,
+    mut chat_room_state: ResMut<ChatRoomState>,
+) {
+    for _event in messages.read() {
+        if let Some(close_sender) = chat_room_state.ws_close_sender.take() {
+            let _ = close_sender.send(());
+        }
+        chat_room_state.is_connected = false;
+        chat_room_state.is_connecting = false;
+        chat_room_state.ws_receiver = None;
+        chat_room_state.ws_sender = None;
     }
 }

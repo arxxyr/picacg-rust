@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use crate::{
     components::SidebarRoute,
     events::*,
-    resources::{AppRoute, ComicDetailState, ComicsListState, ReaderState},
+    resources::{AppRoute, ComicDetailState, ComicsListState, GameDetailState, ReaderState},
 };
 
 /// 导航历史记录（支持前进后退）
@@ -35,16 +35,28 @@ pub fn get_sidebar_route(route: &AppRoute) -> Option<SidebarRoute> {
         AppRoute::Categories | AppRoute::ComicsList => Some(SidebarRoute::Categories),
         AppRoute::Search => Some(SidebarRoute::Search),
         AppRoute::Rankings => Some(SidebarRoute::Rankings),
+        AppRoute::Games | AppRoute::GameDetail => Some(SidebarRoute::Games),
+        AppRoute::Fried => Some(SidebarRoute::Fried),
         AppRoute::Favorites => Some(SidebarRoute::Favorites),
+        AppRoute::History => Some(SidebarRoute::History),
+        AppRoute::LikeRecords => Some(SidebarRoute::LikeRecords),
+        AppRoute::Profile => Some(SidebarRoute::Profile),
+        AppRoute::LocalRead => Some(SidebarRoute::LocalRead),
         AppRoute::Downloads => Some(SidebarRoute::Downloads),
         AppRoute::Settings => Some(SidebarRoute::Settings),
+        AppRoute::ImageConvert => Some(SidebarRoute::ImageConvert),
+        AppRoute::Waifu2x => Some(SidebarRoute::Waifu2x),
+        AppRoute::Chat | AppRoute::ChatRoom => Some(SidebarRoute::Chat),
+        AppRoute::Nas => Some(SidebarRoute::Nas),
         // ComicDetail/ReadView 可从多个入口进入，不归属于任何分区
         // Login/Register/ProxySettings 不属于主导航
         AppRoute::ComicDetail
         | AppRoute::ReadView
         | AppRoute::Login
         | AppRoute::Register
-        | AppRoute::ProxySettings => None,
+        | AppRoute::ProxySettings
+        | AppRoute::Comments
+        | AppRoute::ForgotPassword => None,
     }
 }
 
@@ -55,9 +67,19 @@ pub fn get_default_route(sidebar_route: SidebarRoute) -> AppRoute {
         SidebarRoute::Categories => AppRoute::Categories,
         SidebarRoute::Search => AppRoute::Search,
         SidebarRoute::Rankings => AppRoute::Rankings,
+        SidebarRoute::Games => AppRoute::Games,
         SidebarRoute::Favorites => AppRoute::Favorites,
+        SidebarRoute::History => AppRoute::History,
+        SidebarRoute::Profile => AppRoute::Profile,
+        SidebarRoute::LocalRead => AppRoute::LocalRead,
+        SidebarRoute::LikeRecords => AppRoute::LikeRecords,
         SidebarRoute::Downloads => AppRoute::Downloads,
         SidebarRoute::Settings => AppRoute::Settings,
+        SidebarRoute::Fried => AppRoute::Fried,
+        SidebarRoute::ImageConvert => AppRoute::ImageConvert,
+        SidebarRoute::Waifu2x => AppRoute::Waifu2x,
+        SidebarRoute::Chat => AppRoute::Chat,
+        SidebarRoute::Nas => AppRoute::Nas,
     }
 }
 
@@ -123,6 +145,7 @@ pub fn handle_navigation_messages(
     mut comics_state: ResMut<ComicsListState>,
     mut detail_state: ResMut<ComicDetailState>,
     mut reader_state: ResMut<ReaderState>,
+    mut game_detail_state: ResMut<GameDetailState>,
     // 导航消息
     mut categories_events: MessageReader<NavigateToCategoriesEvent>,
     mut comics_events: MessageReader<NavigateToComicsListEvent>,
@@ -132,6 +155,7 @@ pub fn handle_navigation_messages(
     mut back_events: MessageReader<NavigateBackEvent>,
     mut forward_events: MessageReader<NavigateForwardEvent>,
     mut login_events: MessageReader<NavigateToLoginEvent>,
+    mut game_detail_events: MessageReader<NavigateToGameDetailEvent>,
 ) {
     let current = current_route.get().clone();
 
@@ -188,6 +212,16 @@ pub fn handle_navigation_messages(
         next_route.set(AppRoute::ProxySettings);
     }
 
+    // 处理导航到游戏详情
+    for event in game_detail_events.read() {
+        history.push(current.clone());
+        game_detail_state.game_id = event.game_id.clone();
+        game_detail_state.game = None;
+        game_detail_state.is_loading = false;
+        game_detail_state.error = None;
+        next_route.set(AppRoute::GameDetail);
+    }
+
     // 处理后退导航
     for _ in back_events.read() {
         if let Some(prev) = history.go_back(current.clone()) {
@@ -199,6 +233,7 @@ pub fn handle_navigation_messages(
                 AppRoute::ComicsList => next_route.set(AppRoute::Categories),
                 AppRoute::ReadView => next_route.set(AppRoute::ComicDetail),
                 AppRoute::ProxySettings => next_route.set(AppRoute::Login),
+                AppRoute::GameDetail => next_route.set(AppRoute::Games),
                 _ => {}
             }
         }

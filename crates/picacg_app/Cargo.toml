@@ -77,6 +77,10 @@ zip.workspace = true
 # === 繁简转换 ===
 zhconv.workspace = true
 
+# === WebSocket ===
+tokio-tungstenite.workspace = true
+futures-util.workspace = true
+
 # === 内存分配器 ===
 mimalloc.workspace = true
 

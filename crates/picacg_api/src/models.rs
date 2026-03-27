@@ -23,7 +23,8 @@ impl ImageInfo {
 // 用户信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
-    #[serde(rename = "_id")]
+    /// 用户 ID，部分 API（如 /users/profile）可能不返回此字段
+    #[serde(rename = "_id", default)]
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
@@ -31,14 +32,22 @@ pub struct User {
     pub level: i32,
     pub exp: i64,
     pub gender: String,
-    pub avatar: ImageInfo,
+    #[serde(default)]
+    pub avatar: Option<ImageInfo>,
+    #[serde(default)]
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified: Option<bool>,
     #[serde(rename = "isPunched", skip_serializing_if = "Option::is_none")]
     pub is_punched: Option<bool>,
-    #[serde(rename = "created_at")]
+    #[serde(rename = "created_at", default)]
     pub created_at: String,
+    /// 自我简介（/users/profile 返回）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slogan: Option<String>,
+    /// 角色标签（/users/profile 返回，如 knight）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub characters: Option<Vec<String>>,
 }
 
 // 漫画信息

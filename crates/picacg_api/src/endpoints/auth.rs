@@ -37,8 +37,17 @@ impl ApiRequest for LoginRequest {
 #[derive(Debug, Serialize)]
 pub struct GetUserInfoRequest;
 
+/// `/users/profile` 响应的 data 层
+///
+/// API 返回格式：`{ code: 200, data: { user: { ... } } }`，
+/// 用户信息嵌套在 `user` 字段中。
+#[derive(Debug, Deserialize)]
+pub struct GetUserInfoResponse {
+    pub user: User,
+}
+
 impl ApiRequest for GetUserInfoRequest {
-    type Response = User;
+    type Response = GetUserInfoResponse;
 
     fn method(&self) -> Method {
         Method::GET
@@ -207,7 +216,7 @@ impl ApiRequest for GetMyCommentsRequest {
     }
 }
 
-// 忘记密码（发送重置邮件）
+// 忘记密码（获取安全问题）
 #[derive(Debug, Serialize)]
 pub struct ForgotPasswordRequest {
     pub email: String,
@@ -215,7 +224,9 @@ pub struct ForgotPasswordRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct ForgotPasswordResponse {
-    pub message: String,
+    pub question1: String,
+    pub question2: String,
+    pub question3: String,
 }
 
 impl ApiRequest for ForgotPasswordRequest {
@@ -236,6 +247,108 @@ impl ApiRequest for ForgotPasswordRequest {
     fn body(&self) -> Option<serde_json::Value> {
         Some(serde_json::json!({
             "email": self.email,
+        }))
+    }
+}
+
+// 设置头像请求
+#[derive(Debug, Serialize)]
+pub struct SetAvatarRequest {
+    /// base64 data URI 格式的头像数据
+    pub avatar: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetAvatarResponse {
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+impl ApiRequest for SetAvatarRequest {
+    type Response = SetAvatarResponse;
+
+    fn method(&self) -> Method {
+        Method::PUT
+    }
+
+    fn path(&self) -> String {
+        "/users/avatar".to_string()
+    }
+
+    fn body(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "avatar": self.avatar,
+        }))
+    }
+}
+
+// 设置称号请求
+#[derive(Debug, Serialize)]
+pub struct SetTitleRequest {
+    /// 称号名称
+    pub title: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetTitleResponse {
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+impl ApiRequest for SetTitleRequest {
+    type Response = SetTitleResponse;
+
+    fn method(&self) -> Method {
+        Method::PUT
+    }
+
+    fn path(&self) -> String {
+        "/users/title".to_string()
+    }
+
+    fn body(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "title": self.title,
+        }))
+    }
+}
+
+// 重置密码（通过安全问题）
+#[derive(Debug, Serialize)]
+pub struct ResetPasswordRequest {
+    pub email: String,
+    /// 安全问题编号 (1, 2, 或 3)
+    #[serde(rename = "questionNo")]
+    pub question_no: i32,
+    pub answer: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordResponse {
+    /// API 返回的新临时密码
+    pub password: Option<String>,
+}
+
+impl ApiRequest for ResetPasswordRequest {
+    type Response = ResetPasswordResponse;
+
+    fn method(&self) -> Method {
+        Method::POST
+    }
+
+    fn path(&self) -> String {
+        "/auth/reset-password".to_string()
+    }
+
+    fn need_auth(&self) -> bool {
+        false
+    }
+
+    fn body(&self) -> Option<serde_json::Value> {
+        Some(serde_json::json!({
+            "email": self.email,
+            "questionNo": self.question_no,
+            "answer": self.answer,
         }))
     }
 }

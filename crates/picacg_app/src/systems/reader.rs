@@ -10,7 +10,7 @@ use super::font_loader::get_font;
 use crate::{
     events::*,
     resources::{ComicDetailState, ImageCache, ReadMode, ReaderState},
-    systems::downloads::get_download_base_path,
+    systems::{downloads::get_download_base_path, ui_common::Scrollable},
     utils::icons::*,
 };
 
@@ -568,6 +568,7 @@ pub fn handle_pictures_loaded(
                                 ..default()
                             },
                             BackgroundColor(Color::BLACK),
+                            Scrollable,
                             ScrollPosition::default(),
                         ))
                         .with_children(|scroll| {
@@ -1331,6 +1332,7 @@ pub fn handle_read_mode_change(
                             ..default()
                         },
                         BackgroundColor(Color::BLACK),
+                        Scrollable,
                         ScrollPosition::default(),
                     ))
                     .with_children(|scroll| {
@@ -1523,4 +1525,58 @@ pub fn update_webtoon_scale(
     for mut node in webtoon_images_query.iter_mut() {
         node.width = new_style.width;
     }
+}
+
+// ==================== 阅读历史保存 ====================
+
+/// 自动保存阅读历史（监听 ReaderState 变化）
+///
+/// 当页码或章节发生变化时，将当前阅读进度保存到数据库。
+/// 使用 `Local<(i32, i32)>` 追踪上一次保存的 (episode, page)，
+/// 避免在状态未实际改变时重复写入。
+pub fn save_reading_history(
+    reader_state: Res<ReaderState>,
+    comic_detail_state: Res<ComicDetailState>,
+    mut save_messages: MessageWriter<SaveHistoryRequest>,
+    mut last_saved: Local<(i32, i32)>,
+) {
+    // 只在状态变化时检查
+    if !reader_state.is_changed() {
+        return;
+    }
+
+    // 确保有漫画信息且图片已加载
+    if reader_state.comic_id.is_empty() || reader_state.pictures.is_empty() {
+        return;
+    }
+
+    let current = (reader_state.episode_order, reader_state.current_page);
+
+    // 如果和上次保存的一样，跳过
+    if *last_saved == current {
+        return;
+    }
+    *last_saved = current;
+
+    // 获取漫画信息
+    let Some(comic) = &comic_detail_state.comic else {
+        return;
+    };
+
+    // 获取章节标题
+    let eps_title = comic_detail_state
+        .episodes
+        .iter()
+        .find(|ep| ep.order == reader_state.episode_order)
+        .map(|ep| ep.title.clone())
+        .unwrap_or_else(|| format!("第{}章", reader_state.episode_order));
+
+    save_messages.write(SaveHistoryRequest {
+        comic_id: reader_state.comic_id.clone(),
+        comic_title: comic.title.clone(),
+        thumb_url: comic.thumb.url(),
+        last_eps_order: reader_state.episode_order,
+        last_eps_title: eps_title,
+        last_page: reader_state.current_page,
+    });
 }

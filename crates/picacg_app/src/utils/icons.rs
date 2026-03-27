@@ -73,3 +73,29 @@ pub const ICON_HOME: &str = "\u{F02DC}";
 pub const ICON_BOOKSHELF: &str = "\u{F00B6}";
 /// 󰏫 trophy - 排行榜
 pub const ICON_TROPHY: &str = "\u{F03EB}";
+/// 󰋚 history - 阅读历史
+pub const ICON_HISTORY: &str = "\u{F02DA}";
+/// 󰐗 thumb_up - 点赞
+pub const ICON_THUMB_UP: &str = "\u{F0513}";
+/// 󰊖 gamepad_variant - 游戏
+pub const ICON_GAMEPAD: &str = "\u{F0296}";
+/// 󰀄 account - 个人资料
+pub const ICON_USER: &str = "\u{F0004}";
+/// 󰂺 book_open_variant - 本地阅读
+pub const ICON_BOOK_OPEN: &str = "\u{F05DA}";
+/// 󰍩 forum - 锅贴社区/论坛
+pub const ICON_FORUM: &str = "\u{F0369}";
+
+// ==================== 工具 ====================
+
+/// 󰋩 image - 图片格式转换
+pub const ICON_IMAGE_CONVERT: &str = "\u{F02E9}";
+/// 󰓆 creation - Waifu2x 超分辨率
+pub const ICON_WAIFU2X: &str = "\u{F04CD}";
+/// 󰌘 nas - NAS 远程存储
+pub const ICON_NAS: &str = "\u{F0318}";
+
+// ==================== 社交 ====================
+
+/// 󰍡 message_text - 聊天
+pub const ICON_CHAT: &str = "\u{F0361}";

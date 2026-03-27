@@ -15,10 +15,26 @@ pub struct GetGamesRequest {
     pub page: i32,
 }
 
+/// 游戏列表内层分页数据
+///
+/// API 实际响应结构：`data.games = { docs: [...], total, limit, page, pages }`
+/// 标准 `ApiResponse<T>` 解包 `data` 后，`GetGamesResponse.games` 即此结构。
 #[derive(Debug, Deserialize)]
 pub struct GamesData {
-    pub games: Vec<Game>,
-    pub page: PageInfo,
+    /// 游戏列表（API 字段名为 `docs`）
+    pub docs: Vec<Game>,
+    /// 当前页码
+    #[serde(default)]
+    pub page: i32,
+    /// 总条数
+    #[serde(default)]
+    pub total: i32,
+    /// 每页条数
+    #[serde(default)]
+    pub limit: i32,
+    /// 总页数
+    #[serde(default)]
+    pub pages: i32,
 }
 
 #[derive(Debug, Deserialize)]

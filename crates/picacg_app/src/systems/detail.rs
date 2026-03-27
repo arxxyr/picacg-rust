@@ -12,7 +12,10 @@ use crate::{
     components::*,
     events::*,
     resources::*,
-    systems::{login::AppColors, navigation::NavigationHistory, scrollbar::scrollbar_config::*},
+    systems::{
+        login::AppColors, navigation::NavigationHistory, scrollbar::scrollbar_config::*,
+        ui_common::Scrollable,
+    },
     utils::icons::*,
 };
 
@@ -74,7 +77,13 @@ pub fn setup_detail_ui(
     detail_state: Res<ComicDetailState>,
     image_cache: Res<ImageCache>,
     content_area_query: Query<Entity, With<ContentArea>>,
+    existing_query: Query<Entity, With<ComicDetailRoot>>,
 ) {
+    // 参数化页面：每次进入都可能是不同漫画，直接 despawn 重建
+    for entity in existing_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
     let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
@@ -167,6 +176,7 @@ pub fn setup_detail_ui(
                             overflow: Overflow::scroll_y(),
                             ..default()
                         },
+                        Scrollable,
                         ScrollPosition::default(),
                         ContentSizeInfo::default(),
                     ))
@@ -634,9 +644,9 @@ fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: E
         });
 }
 
-/// 清理漫画详情界面
-pub fn cleanup_detail_ui(mut commands: Commands, root_query: Query<Entity, With<ComicDetailRoot>>) {
-    for entity in root_query.iter() {
+/// 清理漫画详情界面（隐藏而非销毁）
+pub fn cleanup_detail_ui(mut commands: Commands, query: Query<Entity, With<ComicDetailRoot>>) {
+    for entity in query.iter() {
         commands.entity(entity).despawn();
     }
 }
@@ -777,6 +787,7 @@ fn create_detail_ui_internal(
                             overflow: Overflow::scroll_y(),
                             ..default()
                         },
+                        Scrollable,
                         ScrollPosition::default(),
                         ContentSizeInfo::default(),
                     ))
@@ -1414,45 +1425,23 @@ pub fn update_cover_image(
 
 /// 处理详情页滚动
 pub fn handle_detail_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<DetailScrollContainer>,
     >,
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = match event.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-        };
-
-        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-            let max_scroll = content_info
-                .map(|info| (info.content_height - info.viewport_height).max(0.0))
-                .unwrap_or(0.0);
-            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 限制详情页滚动范围
 pub fn clamp_detail_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<DetailScrollContainer>,
     >,
 ) {
-    for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-        if scroll_pos.y < 0.0 {
-            scroll_pos.y = 0.0;
-        }
-        if let Some(info) = content_info {
-            let max_scroll = (info.content_height - info.viewport_height).max(0.0);
-            if scroll_pos.y > max_scroll {
-                scroll_pos.y = max_scroll;
-            }
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动范围限制
 }
 
 /// 更新详情页内容尺寸信息（用于滚动条计算）

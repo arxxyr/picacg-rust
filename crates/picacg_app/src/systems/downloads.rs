@@ -19,8 +19,8 @@ use crate::{
         DownloadCompletedEvent, NavigateToComicDetailEvent, NavigateToComicsListEvent,
         RedownloadRequest, ResumeDownloadRequest, SearchComicsRequestEvent,
     },
-    resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, SearchState},
-    systems::{login::AppColors, navigation::NavigationHistory},
+    resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, DownloadState, SearchState},
+    systems::{login::AppColors, navigation::NavigationHistory, ui_common::Scrollable},
     utils::icons::*,
 };
 
@@ -72,6 +72,10 @@ pub struct DownloadingSection;
 /// "下载中" 标题文本
 #[derive(Component)]
 pub struct DownloadingTitleText;
+
+/// "全部更新" 按钮标记（检查已下载漫画的新章节）
+#[derive(Component)]
+pub struct UpdateAllDownloadsButton;
 
 /// "开始全部下载" 按钮标记
 #[derive(Component)]
@@ -478,6 +482,33 @@ pub struct TaskCbzToggle {
     pub comic_id: String,
 }
 
+/// 下载统计类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadStatType {
+    /// 总计
+    Total,
+    /// 下载中
+    Downloading,
+    /// 等待中
+    Waiting,
+    /// 已暂停
+    Paused,
+    /// 已完成
+    Completed,
+    /// 失败
+    Failed,
+}
+
+/// 下载统计面板标记
+#[derive(Component)]
+pub struct DownloadStatsPanel;
+
+/// 下载统计文本标记
+#[derive(Component)]
+pub struct DownloadStatText {
+    pub stat_type: DownloadStatType,
+}
+
 /// 加载未完成的下载任务（进入下载页面时调用）
 pub fn load_incomplete_downloads(mut download_state: ResMut<DownloadManagerState>) {
     download_state.load_incomplete_tasks();
@@ -490,7 +521,13 @@ pub fn setup_downloads_ui(
     content_area_query: Query<Entity, With<ContentArea>>,
     download_state: Res<DownloadManagerState>,
     collapse_state: Res<DownloadSectionCollapseState>,
+    existing_query: Query<Entity, With<DownloadsRoot>>,
 ) {
+    // 下载状态频繁变化，每次进入都重建 UI
+    for entity in existing_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
     let font: Handle<Font> = get_font();
 
     // 查找内容区域
@@ -519,6 +556,9 @@ pub fn setup_downloads_ui(
                 // 标题栏
                 spawn_downloads_header(root, &font);
 
+                // 下载统计面板（固定在标题栏下方，不随内容滚动）
+                spawn_download_stats_panel(root, &font, &download_state);
+
                 // 下载内容（可滚动）
                 root.spawn((Node {
                     width: Val::Percent(100.0),
@@ -543,6 +583,7 @@ pub fn setup_downloads_ui(
                                     overflow: Overflow::scroll_y(),
                                     ..default()
                                 },
+                                Scrollable,
                                 ScrollPosition::default(),
                                 ContentSizeInfo::default(),
                             ))
@@ -1120,7 +1161,7 @@ fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                     // 标题文本
                     btn.spawn((
                         FloatingHeaderText,
-                        Text::new(""),
+                        Text::new(" "),
                         TextFont {
                             font: font.clone(),
                             font_size: 14.0,
@@ -1129,6 +1170,131 @@ fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>)
                         TextColor(AppColors::TEXT),
                     ));
                 });
+        });
+}
+
+/// 各统计类型对应的数字颜色
+fn stat_value_color(stat_type: DownloadStatType) -> Color {
+    match stat_type {
+        DownloadStatType::Total => Color::WHITE,
+        DownloadStatType::Downloading => Color::srgb(0.3, 0.5, 0.9),
+        DownloadStatType::Waiting => Color::srgb(0.8, 0.7, 0.2),
+        DownloadStatType::Paused => Color::srgb(0.8, 0.5, 0.2),
+        DownloadStatType::Completed => Color::srgb(0.3, 0.7, 0.3),
+        DownloadStatType::Failed => Color::srgb(0.8, 0.3, 0.3),
+    }
+}
+
+/// 各统计类型对应的中文标签
+fn stat_label(stat_type: DownloadStatType) -> &'static str {
+    match stat_type {
+        DownloadStatType::Total => "总计",
+        DownloadStatType::Downloading => "下载中",
+        DownloadStatType::Waiting => "等待",
+        DownloadStatType::Paused => "暂停",
+        DownloadStatType::Completed => "已完成",
+        DownloadStatType::Failed => "失败",
+    }
+}
+
+/// 从 DownloadManagerState 中统计各状态任务数量
+fn count_download_stats(download_state: &DownloadManagerState) -> [(DownloadStatType, usize); 6] {
+    let mut downloading = 0usize;
+    let mut waiting = 0usize;
+    let mut paused = 0usize;
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+
+    for fsm in &download_state.fsm_tasks {
+        match &fsm.meta.state {
+            DownloadState::Downloading { .. } => downloading += 1,
+            DownloadState::Queued => waiting += 1,
+            DownloadState::Paused { .. } => paused += 1,
+            DownloadState::Completed => completed += 1,
+            DownloadState::Failed(_) => failed += 1,
+        }
+    }
+
+    let total = download_state.fsm_tasks.len();
+
+    [
+        (DownloadStatType::Total, total),
+        (DownloadStatType::Downloading, downloading),
+        (DownloadStatType::Waiting, waiting),
+        (DownloadStatType::Paused, paused),
+        (DownloadStatType::Completed, completed),
+        (DownloadStatType::Failed, failed),
+    ]
+}
+
+/// 创建单个统计项（"标签: 数字"）
+fn spawn_stat_item(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    stat_type: DownloadStatType,
+    value: usize,
+) {
+    parent
+        .spawn((Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(2.0),
+            margin: UiRect::right(Val::Px(16.0)),
+            ..default()
+        },))
+        .with_children(|item| {
+            // 标签文本
+            item.spawn((
+                Text::new(format!("{}: ", stat_label(stat_type))),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT_SECONDARY),
+            ));
+            // 数字文本（带颜色 + 标记组件，用于动态更新）
+            item.spawn((
+                DownloadStatText { stat_type },
+                Text::new(format!("{value}")),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(stat_value_color(stat_type)),
+            ));
+        });
+}
+
+/// 创建下载统计面板
+fn spawn_download_stats_panel(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    download_state: &DownloadManagerState,
+) {
+    let stats = count_download_stats(download_state);
+
+    parent
+        .spawn((
+            DownloadStatsPanel,
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(8.0), Val::Px(8.0)),
+                align_items: AlignItems::Center,
+                row_gap: Val::Px(4.0),
+                border: UiRect::bottom(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+            BorderColor::all(AppColors::BORDER),
+        ))
+        .with_children(|panel| {
+            for (stat_type, value) in &stats {
+                spawn_stat_item(panel, font, *stat_type, *value);
+            }
         });
 }
 
@@ -1168,6 +1334,38 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                     ..default()
                 },))
                 .with_children(|btn_group| {
+                    // 全部更新按钮
+                    btn_group
+                        .spawn((
+                            UpdateAllDownloadsButton,
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::new(
+                                    Val::Px(12.0),
+                                    Val::Px(12.0),
+                                    Val::Px(6.0),
+                                    Val::Px(6.0),
+                                ),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                ..default()
+                            },
+                            BackgroundColor(AppColors::PRIMARY),
+                            BorderColor::all(AppColors::PRIMARY),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(format!("{ICON_REFRESH} 全部更新")),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(Color::WHITE),
+                            ));
+                        });
+
                     // 打开原图文件夹按钮
                     btn_group
                         .spawn((
@@ -1930,7 +2128,7 @@ fn spawn_downloads_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container
         });
 }
 
-/// 清理下载页面
+/// 清理下载页面（隐藏而非销毁）
 pub fn cleanup_downloads_ui(mut commands: Commands, query: Query<Entity, With<DownloadsRoot>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
@@ -2028,6 +2226,27 @@ pub fn open_cbz_folder_interaction(
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
             }
+        }
+    }
+}
+
+/// 更新下载统计面板数字
+///
+/// 只在 `DownloadManagerState` 变化时重新统计并更新文本节点。
+pub fn update_download_stats(
+    download_state: Res<DownloadManagerState>,
+    mut stat_text_query: Query<(&DownloadStatText, &mut Text)>,
+) {
+    if !download_state.is_changed() {
+        return;
+    }
+
+    let stats = count_download_stats(&download_state);
+
+    for (stat_text, mut text) in stat_text_query.iter_mut() {
+        // 查找对应类型的统计值
+        if let Some((_, value)) = stats.iter().find(|(t, _)| *t == stat_text.stat_type) {
+            **text = format!("{value}");
         }
     }
 }
@@ -2658,25 +2877,13 @@ pub fn update_download_titles(
 
 /// 处理下载页面滚动
 pub fn handle_downloads_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<DownloadsScrollContainer>,
     >,
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = match event.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-        };
-
-        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-            let max_scroll = content_info
-                .map(|info| (info.content_height - info.viewport_height).max(0.0))
-                .unwrap_or(0.0);
-            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 更新下载页面内容尺寸
@@ -4263,7 +4470,7 @@ pub fn delete_completed_download_interaction(
                                 .with_children(|cb| {
                                     // 初始状态：空（未勾选）
                                     cb.spawn((
-                                        Text::new(""),
+                                        Text::new(" "),
                                         TextFont {
                                             font: font.clone(),
                                             font_size: 13.0,
@@ -4496,6 +4703,43 @@ pub fn cancel_delete_button_interaction(
         for (panel_entity, panel) in panel_query.iter() {
             if panel.comic_id == btn.comic_id {
                 commands.entity(panel_entity).despawn();
+            }
+        }
+    }
+}
+
+/// "全部更新"按钮交互：对所有已下载漫画发送重新下载请求（检查新章节）
+pub fn update_all_downloads_button_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<UpdateAllDownloadsButton>),
+    >,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    mut redownload_messages: MessageWriter<RedownloadRequest>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.7));
+
+                let mut count = 0;
+                for (entity, item) in completed_item_query.iter() {
+                    redownload_messages.write(RedownloadRequest {
+                        comic_id: item.comic_id.clone(),
+                        new_base_path: None,
+                    });
+                    // 从已下载列表中移除（避免重复显示）
+                    commands.entity(entity).despawn();
+                    count += 1;
+                }
+                tracing::info!("全部更新：已对 {} 个已下载漫画发送检查更新请求", count);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(AppColors::PRIMARY);
             }
         }
     }

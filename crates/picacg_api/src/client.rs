@@ -53,12 +53,12 @@ pub struct ApiClient {
 impl ApiClient {
     /// 创建新的 API 客户端（不使用代理，直连通道）
     pub fn new() -> Result<Self> {
-        Self::with_config(None, ChannelType::Direct, "")
+        Self::with_config(None, ChannelType::Direct, "", false, false)
     }
 
     /// 创建带代理的 API 客户端（直连通道，向后兼容）
     pub fn with_proxy(proxy_url: Option<String>) -> Result<Self> {
-        Self::with_config(proxy_url, ChannelType::Direct, "")
+        Self::with_config(proxy_url, ChannelType::Direct, "", false, false)
     }
 
     /// 创建带完整配置的 API 客户端
@@ -66,9 +66,17 @@ impl ApiClient {
         proxy_url: Option<String>,
         api_channel: ChannelType,
         custom_cdn_api_ip: &str,
+        use_sni_pretend: bool,
+        prefer_ipv6: bool,
     ) -> Result<Self> {
         let channel_route = resolve_api_route(api_channel, custom_cdn_api_ip);
-        let client = Self::build_client(proxy_url, api_channel, custom_cdn_api_ip)?;
+        let client = Self::build_client(
+            proxy_url,
+            api_channel,
+            custom_cdn_api_ip,
+            use_sni_pretend,
+            prefer_ipv6,
+        )?;
 
         Ok(ApiClient {
             client,
@@ -80,24 +88,34 @@ impl ApiClient {
 
     /// 重新加载代理配置（向后兼容）
     pub fn reload_proxy(&mut self, proxy_url: Option<String>) -> Result<()> {
-        self.reload_config(proxy_url, ChannelType::Direct, "")
+        self.reload_config(proxy_url, ChannelType::Direct, "", false, false)
     }
 
-    /// 重新加载完整配置（代理 + 分流通道）
+    /// 重新加载完整配置（代理 + 分流通道 + SNI/IPv6）
     pub fn reload_config(
         &mut self,
         proxy_url: Option<String>,
         api_channel: ChannelType,
         custom_cdn_api_ip: &str,
+        use_sni_pretend: bool,
+        prefer_ipv6: bool,
     ) -> Result<()> {
         tracing::info!(
-            "重新加载 API 客户端配置: 通道={:?}, 代理={:?}",
+            "重新加载 API 客户端配置: 通道={:?}, 代理={:?}, SNI伪装={}, IPv6优先={}",
             api_channel,
-            proxy_url.as_deref().unwrap_or("无")
+            proxy_url.as_deref().unwrap_or("无"),
+            use_sni_pretend,
+            prefer_ipv6,
         );
 
         self.channel_route = resolve_api_route(api_channel, custom_cdn_api_ip);
-        self.client = Self::build_client(proxy_url, api_channel, custom_cdn_api_ip)?;
+        self.client = Self::build_client(
+            proxy_url,
+            api_channel,
+            custom_cdn_api_ip,
+            use_sni_pretend,
+            prefer_ipv6,
+        )?;
         Ok(())
     }
 
@@ -106,11 +124,25 @@ impl ApiClient {
         proxy_url: Option<String>,
         api_channel: ChannelType,
         custom_cdn_api_ip: &str,
+        use_sni_pretend: bool,
+        prefer_ipv6: bool,
     ) -> Result<Client> {
         let mut builder = Client::builder()
             .danger_accept_invalid_certs(true)
             .timeout(Duration::from_secs(30))
             .connect_timeout(Duration::from_secs(10));
+
+        // SNI 伪装：使用 rustls 配置禁用 SNI 扩展，绕过 SNI 封锁
+        if use_sni_pretend {
+            tracing::info!("启用 SNI 伪装模式");
+            builder = builder.tls_sni(false);
+        }
+
+        // IPv6 优先：绑定本地 IPv6 地址，强制优先使用 IPv6
+        if prefer_ipv6 {
+            tracing::info!("启用 IPv6 优先模式");
+            builder = builder.local_address("::".parse::<std::net::IpAddr>().ok());
+        }
 
         // 添加代理
         if let Some(url) = proxy_url {
@@ -308,13 +340,13 @@ mod tests {
 
     #[test]
     fn test_client_with_channel() {
-        let client = ApiClient::with_config(None, ChannelType::JpProxy, "");
+        let client = ApiClient::with_config(None, ChannelType::JpProxy, "", false, false);
         assert!(client.is_ok());
     }
 
     #[test]
     fn test_client_with_cdn() {
-        let client = ApiClient::with_config(None, ChannelType::CdnIp1, "");
+        let client = ApiClient::with_config(None, ChannelType::CdnIp1, "", false, false);
         assert!(client.is_ok());
     }
 }

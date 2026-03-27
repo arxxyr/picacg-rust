@@ -10,9 +10,7 @@ use crate::{
     systems::{
         login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{
-            GridLayoutParams, calculate_scroll_delta, measure_grid_content_height, spawn_scrollbar,
-        },
+        ui_common::{GridLayoutParams, Scrollable, measure_grid_content_height, spawn_scrollbar},
         waterfall::CategoriesCardCreationState,
     },
     utils::content_filter::{
@@ -38,14 +36,21 @@ mod category_layout {
     pub const PADDING_BOTTOM: f32 = 20.0;
 }
 
-/// 创建分类界面（在 ContentArea 内部）
+/// 创建分类界面（如果已存在则只显示）
 pub fn setup_categories_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
     categories_state: Res<CategoriesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<CategoriesCardCreationState>,
+    mut existing_query: Query<&mut Node, With<CategoriesRoot>>,
 ) {
+    // 如果 CategoriesRoot 已存在（被 Display::None 隐藏了），直接显示
+    if let Ok(mut node) = existing_query.single_mut() {
+        node.display = Display::Flex;
+        return;
+    }
+
     let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
@@ -121,6 +126,7 @@ pub fn setup_categories_ui(
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
+                            Scrollable,
                             ScrollPosition::default(),
                             ContentSizeInfo::default(),
                         ))
@@ -244,18 +250,16 @@ fn spawn_category_card(
         .id()
 }
 
-/// 清理分类界面
+/// 清理分类界面（用 Display::None 隐藏，保留 UI 结构）
 pub fn cleanup_categories_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<CategoriesRoot>>,
+    mut query: Query<&mut Node, With<CategoriesRoot>>,
     mut creation_state: ResMut<CategoriesCardCreationState>,
 ) {
-    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    // 清空瀑布式创建状态（防止对已隐藏的 Entity 操作）
     creation_state.clear();
 
-    for entity in query.iter() {
-        // Bevy 0.17: despawn() 自动递归删除子实体
-        commands.entity(entity).despawn();
+    for mut node in query.iter_mut() {
+        node.display = Display::None;
     }
 }
 
@@ -466,48 +470,23 @@ pub fn category_card_interaction(
 
 /// 分类页面滚动处理系统
 pub fn handle_categories_scroll(
-    mut mouse_wheel_events: MessageReader<MouseWheel>,
-    mut scroll_query: Query<
+    mut _mouse_wheel_events: MessageReader<MouseWheel>,
+    _scroll_query: Query<
         (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
         With<CategoriesScrollContainer>,
     >,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = calculate_scroll_delta(event);
-
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let (content_height, viewport_height) = content_size_info
-                .map(|info| (info.content_height, info.viewport_height))
-                .unwrap_or_else(|| {
-                    let size = computed_node.size();
-                    (size.y, size.y)
-                });
-
-            let max_scroll = (content_height - viewport_height).max(0.0);
-            scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 限制分类页面滚动范围（防止越界）
 pub fn clamp_categories_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<CategoriesScrollContainer>,
     >,
 ) {
-    for (mut scroll_position, content_size_info) in &mut scroll_query {
-        if scroll_position.y < 0.0 {
-            scroll_position.y = 0.0;
-        }
-
-        if let Some(content_info) = content_size_info {
-            let max_scroll = (content_info.content_height - content_info.viewport_height).max(0.0);
-            if scroll_position.y > max_scroll {
-                scroll_position.y = max_scroll;
-            }
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动范围限制
 }
 
 /// 更新分类页面内容尺寸信息

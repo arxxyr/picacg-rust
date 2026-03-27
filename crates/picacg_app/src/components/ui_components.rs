@@ -159,9 +159,19 @@ pub enum SidebarRoute {
     Categories,
     Search,
     Rankings,
+    Games,
+    Fried,
     Favorites,
+    History,
+    LikeRecords,
+    Profile,
+    LocalRead,
     Downloads,
     Settings,
+    ImageConvert,
+    Waifu2x,
+    Nas,
+    Chat,
 }
 
 /// 内容区域
@@ -272,6 +282,15 @@ pub enum ZoomType {
     Reset,
 }
 
+// ==================== 右键菜单目标 ====================
+
+/// 右键菜单目标（添加到所有漫画卡片上，供全局右键菜单系统使用）
+#[derive(Component)]
+pub struct ContextMenuTarget {
+    pub comic_id: String,
+    pub comic_title: String,
+}
+
 // ==================== 通用组件 ====================
 
 /// 加载指示器
@@ -307,3 +326,70 @@ pub struct DetailScrollContainer;
 // 注意：滚动条组件（ScrollbarContainer, ScrollbarTrack, ScrollbarThumb,
 // ScrollbarDragState, ContentSizeInfo） 已移至 bevy_ui_toolkit
 // crate，在文件顶部通过 pub use 重新导出
+
+// ==================== 忘记密码页面组件 ====================
+
+/// 忘记密码页面根节点
+#[derive(Component)]
+pub struct ForgotPasswordRoot;
+
+/// 忘记密码输入框类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForgotPasswordInputType {
+    /// 邮箱/用户名
+    Email,
+    /// 安全问题答案
+    Answer,
+}
+
+/// 忘记密码输入框标记（配合 TextInput 使用）
+#[derive(Component)]
+pub struct ForgotPasswordInputField {
+    pub input_type: ForgotPasswordInputType,
+}
+
+/// 忘记密码安全问题选择按钮
+#[derive(Component)]
+pub struct ForgotPasswordQuestionButton {
+    pub question_no: i32,
+}
+
+/// 忘记密码提交按钮
+#[derive(Component)]
+pub struct ForgotPasswordSubmitButton;
+
+/// 忘记密码返回登录按钮
+#[derive(Component)]
+pub struct ForgotPasswordBackButton;
+
+/// 忘记密码错误消息文本
+#[derive(Component)]
+pub struct ForgotPasswordErrorText;
+
+/// 忘记密码成功消息文本
+#[derive(Component)]
+pub struct ForgotPasswordSuccessText;
+
+/// 忘记密码安全问题显示区域
+#[derive(Component)]
+pub struct ForgotPasswordQuestionsArea;
+
+/// 忘记密码"忘记密码"链接（登录页）
+#[derive(Component)]
+pub struct ForgotPasswordLink;
+
+// ==================== 个人资料页面组件 ====================
+
+/// 个人资料页面根节点
+#[derive(Component)]
+pub struct ProfileRoot;
+
+/// 个人资料页面滚动容器
+#[derive(Component)]
+pub struct ProfileScrollContainer;
+
+/// 个人资料头像图片
+#[derive(Component)]
+pub struct ProfileAvatarImage {
+    pub url: String,
+}

@@ -5,11 +5,16 @@
 use bevy::{
     prelude::*,
     ui::{FocusPolicy, RelativeCursorPosition},
+    window::PrimaryWindow,
 };
 
-use crate::systems::{
-    ScrollbarContainer, ScrollbarThumb, ScrollbarTrack, login::AppColors,
-    scrollbar::scrollbar_config::*,
+use crate::{
+    components::{ContentSizeInfo, ContextMenuTarget},
+    events::DownloadComicRequest,
+    systems::{
+        ScrollbarContainer, ScrollbarThumb, ScrollbarTrack, login::AppColors,
+        scrollbar::scrollbar_config::*,
+    },
 };
 
 // ==================== 标签徽章 ====================
@@ -163,12 +168,146 @@ pub fn spawn_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Enti
 
 // ==================== 滚动处理 ====================
 
+/// 可滚动容器标记（所有需要鼠标滚轮滚动的容器都应添加此组件）
+#[derive(Component)]
+pub struct Scrollable;
+
 /// 计算滚动增量（统一处理 Line 和 Pixel 单位）
 #[must_use]
 pub fn calculate_scroll_delta(event: &bevy::input::mouse::MouseWheel) -> f32 {
     match event.unit {
         bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
         bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
+    }
+}
+
+/// 从子节点计算滚动容器的实际内容高度
+///
+/// 统一处理 margin / row_gap / padding，避免每个模块各自补偿。
+fn compute_content_height(
+    container_node: &Node,
+    children: &Children,
+    children_query: &Query<(&ComputedNode, &Node)>,
+    scale: f32,
+) -> f32 {
+    let mut h = 0.0_f32;
+    for child in children.iter() {
+        if let Ok((cn, child_node)) = children_query.get(child) {
+            h += cn.size().y / scale;
+            // 加上子节点的上下 margin（ComputedNode::size 不含 margin）
+            if let Val::Px(mt) = child_node.margin.top {
+                h += mt;
+            }
+            if let Val::Px(mb) = child_node.margin.bottom {
+                h += mb;
+            }
+        }
+    }
+    // row_gap（子节点间距）
+    if children.len() > 1 {
+        let gap = match container_node.row_gap {
+            Val::Px(px) => px,
+            _ => 0.0,
+        };
+        h += gap * (children.len() - 1) as f32;
+    }
+    // 容器的 padding
+    if let Val::Px(pt) = container_node.padding.top {
+        h += pt;
+    }
+    if let Val::Px(pb) = container_node.padding.bottom {
+        h += pb;
+    }
+    h
+}
+
+/// 全局滚轮分发系统
+///
+/// 根据光标 X 坐标判断在侧边栏还是内容区域，分发滚轮事件到对应容器。
+/// 内容高度统一从子节点计算（含 margin/gap/padding），不依赖各模块的
+/// ContentSizeInfo。 仅 flex-wrap 网格布局的页面使用
+/// ContentSizeInfo（网格高度无法从子节点直接累加）。
+pub fn global_scroll_dispatch(
+    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut sidebar_scroll: Query<
+        (&Node, &mut ScrollPosition, &ComputedNode, &Children),
+        With<super::main_layout::SidebarMenuArea>,
+    >,
+    mut content_scroll: Query<
+        (
+            &Node,
+            &mut ScrollPosition,
+            &ComputedNode,
+            Option<&ContentSizeInfo>,
+            Option<&Children>,
+        ),
+        (
+            With<Scrollable>,
+            Without<super::main_layout::SidebarMenuArea>,
+        ),
+    >,
+    children_query: Query<(&ComputedNode, &Node)>,
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let Some(window) = window_query.single().ok() else {
+        return;
+    };
+    let Some(cursor_pos) = window.cursor_position() else {
+        return;
+    };
+    let scale = window.scale_factor();
+
+    // 收集本帧所有滚轮事件的总增量
+    let mut total_delta = 0.0_f32;
+    for event in mouse_wheel_events.read() {
+        total_delta += calculate_scroll_delta(event);
+    }
+    if total_delta == 0.0 {
+        return;
+    }
+
+    let sidebar_width = super::main_layout::SIDEBAR_WIDTH;
+
+    if cursor_pos.x < sidebar_width {
+        // 侧边栏区域
+        for (node, mut scroll_pos, computed, children) in sidebar_scroll.iter_mut() {
+            let viewport_h = computed.size().y / scale;
+            let content_h = compute_content_height(node, children, &children_query, scale);
+            let max_scroll = (content_h - viewport_h).max(0.0);
+            scroll_pos.y = (scroll_pos.y - total_delta).clamp(0.0, max_scroll);
+        }
+    } else {
+        // 内容区域
+        for (node, mut scroll_pos, computed, content_info, children) in content_scroll.iter_mut() {
+            if node.display == Display::None {
+                continue;
+            }
+            let size = computed.size();
+            if size.y < 1.0 {
+                continue;
+            }
+            let viewport_h = size.y / scale;
+
+            // flex-wrap 网格布局使用 ContentSizeInfo（子节点不是简单纵向排列）
+            // 普通 column 布局从子节点精确计算
+            let content_h = match (content_info, children) {
+                (Some(info), _)
+                    if info.content_height > 0.0 && node.flex_wrap != FlexWrap::NoWrap =>
+                {
+                    // 网格布局：信任各模块计算的 ContentSizeInfo
+                    info.content_height
+                }
+                (_, Some(ch)) => {
+                    // 纵向布局：从子节点精确计算
+                    compute_content_height(node, ch, &children_query, scale)
+                }
+                (Some(info), None) if info.content_height > 0.0 => info.content_height,
+                _ => 0.0,
+            };
+
+            let max_scroll = (content_h - viewport_h).max(0.0);
+            scroll_pos.y = (scroll_pos.y - total_delta).clamp(0.0, max_scroll);
+        }
     }
 }
 
@@ -313,4 +452,232 @@ pub fn spawn_comic_time_info(
                 ));
             }
         });
+}
+
+// ==================== 全局右键菜单系统 ====================
+
+/// 右键菜单根节点
+#[derive(Component)]
+pub struct ComicContextMenu;
+
+/// 右键菜单项类型
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum ContextMenuAction {
+    Download,
+    Block,
+}
+
+/// 右键菜单项
+#[derive(Component)]
+pub struct ComicContextMenuItem {
+    pub action: ContextMenuAction,
+    pub comic_id: String,
+    pub comic_title: String,
+}
+
+/// 检测漫画卡片上的右键点击，弹出上下文菜单（全局，作用于所有带
+/// ContextMenuTarget 的卡片）
+pub fn comic_card_context_menu(
+    mut commands: Commands,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    card_query: Query<(&ContextMenuTarget, &Interaction)>,
+    existing_menu: Query<Entity, With<ComicContextMenu>>,
+) {
+    // 右键刚按下
+    if !mouse_button.just_pressed(MouseButton::Right) {
+        return;
+    }
+
+    // 关闭已有菜单
+    for entity in existing_menu.iter() {
+        commands.entity(entity).despawn();
+    }
+
+    // 找到悬停中的卡片
+    let hovered_card = card_query
+        .iter()
+        .find(|(_, interaction)| **interaction == Interaction::Hovered);
+
+    let Some((target, _)) = hovered_card else {
+        return;
+    };
+
+    // 获取光标位置
+    let Some(window) = window_query.single().ok() else {
+        return;
+    };
+    let Some(cursor) = window.cursor_position() else {
+        return;
+    };
+
+    let font = super::font_loader::get_font();
+    let comic_id = target.comic_id.clone();
+    let comic_title = target.comic_title.clone();
+
+    // 创建菜单
+    commands
+        .spawn((
+            ComicContextMenu,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(cursor.x),
+                top: Val::Px(cursor.y),
+                min_width: Val::Px(140.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::all(Val::Px(4.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                ..default()
+            },
+            GlobalZIndex(100),
+            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
+            BorderColor::all(AppColors::BORDER),
+        ))
+        .with_children(|menu| {
+            // 下载按钮
+            spawn_context_menu_item(
+                menu,
+                &font,
+                &format!("{} 下载", crate::utils::icons::ICON_DOWNLOAD),
+                ContextMenuAction::Download,
+                &comic_id,
+                &comic_title,
+            );
+
+            // 分割线
+            menu.spawn((
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(1.0),
+                    margin: UiRect::vertical(Val::Px(3.0)),
+                    ..default()
+                },
+                BackgroundColor(AppColors::BORDER),
+            ));
+
+            // 屏蔽按钮
+            spawn_context_menu_item(
+                menu,
+                &font,
+                &format!("{} 屏蔽", crate::utils::icons::ICON_EYE_OFF),
+                ContextMenuAction::Block,
+                &comic_id,
+                &comic_title,
+            );
+        });
+}
+
+/// 创建菜单项
+fn spawn_context_menu_item(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    label: &str,
+    action: ContextMenuAction,
+    comic_id: &str,
+    comic_title: &str,
+) {
+    parent
+        .spawn((
+            ComicContextMenuItem {
+                action,
+                comic_id: comic_id.to_string(),
+                comic_title: comic_title.to_string(),
+            },
+            Button,
+            Interaction::default(),
+            Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(6.0), Val::Px(6.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ))
+        .with_children(|btn| {
+            btn.spawn((
+                Text::new(label),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+        });
+}
+
+/// 处理右键菜单项点击
+pub fn comic_context_menu_interaction(
+    mut commands: Commands,
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &ComicContextMenuItem),
+        Changed<Interaction>,
+    >,
+    menu_query: Query<Entity, With<ComicContextMenu>>,
+    mut download_messages: MessageWriter<DownloadComicRequest>,
+) {
+    for (interaction, mut bg_color, item) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                match item.action {
+                    ContextMenuAction::Download => {
+                        download_messages.write(DownloadComicRequest {
+                            comic_id: item.comic_id.clone(),
+                            comic_title: item.comic_title.clone(),
+                            episodes: vec![], // 空 = 下载全部
+                        });
+                        tracing::info!("右键菜单：下载漫画 {}", item.comic_title);
+                    }
+                    ContextMenuAction::Block => {
+                        // 将标题添加到屏蔽词
+                        let title = item.comic_title.clone();
+                        if !title.is_empty() {
+                            let settings = picacg_config::AppSettings::global();
+                            let mut s = settings.write();
+                            if !s.filter.blocked_keywords.contains(&title) {
+                                s.filter.blocked_keywords.push(title.clone());
+                                if let Err(e) = s.save() {
+                                    tracing::error!("保存屏蔽设置失败: {}", e);
+                                } else {
+                                    tracing::info!("右键菜单：已屏蔽「{}」", title);
+                                }
+                            }
+                        }
+                    }
+                }
+                // 关闭菜单
+                for entity in menu_query.iter() {
+                    commands.entity(entity).despawn();
+                }
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.28));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::NONE);
+            }
+        }
+    }
+}
+
+/// 点击菜单外区域关闭菜单
+pub fn dismiss_context_menu(
+    mut commands: Commands,
+    mouse_button: Res<ButtonInput<MouseButton>>,
+    menu_query: Query<Entity, With<ComicContextMenu>>,
+    menu_item_query: Query<&Interaction, With<ComicContextMenuItem>>,
+) {
+    if !mouse_button.just_pressed(MouseButton::Left) {
+        return;
+    }
+    // 如果有菜单项被悬停/按下，说明点的是菜单内部，不关闭
+    let hovering_menu = menu_item_query.iter().any(|i| *i != Interaction::None);
+    if hovering_menu {
+        return;
+    }
+    // 关闭所有菜单
+    for entity in menu_query.iter() {
+        commands.entity(entity).despawn();
+    }
 }

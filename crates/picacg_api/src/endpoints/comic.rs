@@ -267,3 +267,28 @@ impl ApiRequest for SearchComicsRequest {
         Some(body)
     }
 }
+
+// 获取热门搜索关键词
+#[derive(Debug, Serialize)]
+pub struct GetKeywordsRequest;
+
+#[derive(Debug, Deserialize)]
+pub struct GetKeywordsResponse {
+    pub keywords: Vec<String>,
+}
+
+impl ApiRequest for GetKeywordsRequest {
+    type Response = GetKeywordsResponse;
+
+    fn method(&self) -> Method {
+        Method::GET
+    }
+
+    fn path(&self) -> String {
+        "/keywords".to_string()
+    }
+
+    fn body(&self) -> Option<serde_json::Value> {
+        None
+    }
+}

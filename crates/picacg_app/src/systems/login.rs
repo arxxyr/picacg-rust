@@ -296,6 +296,40 @@ pub fn setup_login_ui(
                                     TextColor(AppColors::PRIMARY),
                                 ));
                             });
+
+                            // 分隔符
+                            row.spawn((
+                                Text::new("|"),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_MUTED),
+                            ));
+
+                            // "忘记密码" 链接按钮
+                            row.spawn((
+                                ForgotPasswordLink,
+                                Button,
+                                Interaction::default(),
+                                Node {
+                                    padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::NONE),
+                            ))
+                            .with_children(|btn| {
+                                btn.spawn((
+                                    Text::new("忘记密码"),
+                                    TextFont {
+                                        font: font.clone(),
+                                        font_size: 14.0,
+                                        ..default()
+                                    },
+                                    TextColor(AppColors::PRIMARY),
+                                ));
+                            });
                         });
                 });
 
@@ -869,6 +903,38 @@ pub fn register_button_interaction(
             }
             Interaction::None => {
                 // 恢复原始颜色
+                for child in children.iter() {
+                    if let Ok(mut color) = text_query.get_mut(child) {
+                        *color = TextColor(AppColors::PRIMARY);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 忘记密码链接交互
+pub fn forgot_password_link_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &Children),
+        (Changed<Interaction>, With<ForgotPasswordLink>),
+    >,
+    mut text_query: Query<&mut TextColor>,
+    mut next_route: ResMut<NextState<AppRoute>>,
+) {
+    for (interaction, children) in &mut interaction_query {
+        match *interaction {
+            Interaction::Pressed => {
+                next_route.set(AppRoute::ForgotPassword);
+            }
+            Interaction::Hovered => {
+                for child in children.iter() {
+                    if let Ok(mut color) = text_query.get_mut(child) {
+                        *color = TextColor(AppColors::PRIMARY_HOVER);
+                    }
+                }
+            }
+            Interaction::None => {
                 for child in children.iter() {
                     if let Ok(mut color) = text_query.get_mut(child) {
                         *color = TextColor(AppColors::PRIMARY);

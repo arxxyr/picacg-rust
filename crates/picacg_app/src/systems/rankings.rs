@@ -1,7 +1,7 @@
 //! 排行榜页面系统
 
 use bevy::{prelude::*, window::PrimaryWindow};
-use picacg_api::endpoints::RankTimeType;
+use picacg_api::endpoints::{RankTimeType, rank::KnightUser};
 
 use super::font_loader::get_font;
 use crate::{
@@ -12,9 +12,8 @@ use crate::{
         login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            GridLayoutParams, TagColor, calculate_scroll_delta, format_number,
-            measure_grid_content_height, spawn_comic_time_info, spawn_scrollbar,
-            spawn_tag_badge_truncated, truncate_text,
+            GridLayoutParams, Scrollable, TagColor, format_number, measure_grid_content_height,
+            spawn_comic_time_info, spawn_scrollbar, spawn_tag_badge_truncated, truncate_text,
         },
         waterfall::{RankingsCardCreationState, RankingsContext},
     },
@@ -48,8 +47,19 @@ pub struct RankingsContentContainer;
 /// Tab 按钮标记
 #[derive(Component)]
 pub struct RankingsTabButton {
-    pub time_type: RankTimeType,
+    pub tab_type: RankingsTabType,
 }
+
+/// 骑士榜卡片标记
+#[derive(Component)]
+pub struct KnightRankCard {
+    #[allow(dead_code)]
+    pub user_id: String,
+}
+
+/// 骑士榜列表容器标记
+#[derive(Component)]
+pub struct KnightListContainer;
 
 /// 排行榜卡片标记
 #[derive(Component)]
@@ -90,13 +100,20 @@ mod layout {
 
 // ==================== 设置/清理 ====================
 
-/// 创建排行榜 UI
+/// 创建排行榜 UI（如果已存在则只显示）
 pub fn setup_rankings_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
     content_area_query: Query<Entity, With<ContentArea>>,
     rankings_state: Res<RankingsState>,
+    mut existing_query: Query<&mut Node, With<RankingsRoot>>,
 ) {
+    // 如果 RankingsRoot 已存在（被 Display::None 隐藏了），直接显示
+    if let Ok(mut node) = existing_query.single_mut() {
+        node.display = Display::Flex;
+        return;
+    }
+
     let font: Handle<Font> = get_font();
 
     let content_area = match content_area_query.iter().next() {
@@ -156,6 +173,7 @@ pub fn setup_rankings_ui(
                                     overflow: Overflow::scroll_y(),
                                     ..default()
                                 },
+                                Scrollable,
                                 ScrollPosition::default(),
                                 ContentSizeInfo::default(),
                             ))
@@ -208,11 +226,16 @@ fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, state: 
                 },
             ));
 
-            // Tab 按钮
+            // 漫画排行 Tab 按钮
             for time_type in [RankTimeType::H24, RankTimeType::D7, RankTimeType::D30] {
-                let is_active = state.current_type == time_type;
-                spawn_tab_button(bar, font, time_type, is_active);
+                let tab_type = RankingsTabType::Comics(time_type);
+                let is_active = state.current_tab == tab_type;
+                spawn_tab_button(bar, font, tab_type, is_active);
             }
+
+            // 骑士榜 Tab 按钮
+            let is_active = state.current_tab.is_knight();
+            spawn_tab_button(bar, font, RankingsTabType::Knight, is_active);
         });
 }
 
@@ -220,7 +243,7 @@ fn spawn_tab_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, state: 
 fn spawn_tab_button(
     parent: &mut ChildSpawnerCommands,
     font: &Handle<Font>,
-    time_type: RankTimeType,
+    tab_type: RankingsTabType,
     is_active: bool,
 ) {
     let bg_color = if is_active {
@@ -231,7 +254,7 @@ fn spawn_tab_button(
 
     parent
         .spawn((
-            RankingsTabButton { time_type },
+            RankingsTabButton { tab_type },
             Button,
             Interaction::default(),
             Node {
@@ -243,7 +266,7 @@ fn spawn_tab_button(
         ))
         .with_children(|btn| {
             btn.spawn((
-                Text::new(time_type.display_name()),
+                Text::new(tab_type.display_name()),
                 TextFont {
                     font: font.clone(),
                     font_size: 14.0,
@@ -254,17 +277,16 @@ fn spawn_tab_button(
         });
 }
 
-/// 清理排行榜 UI
+/// 清理排行榜 UI（用 Display::None 隐藏，保留 UI 结构）
 pub fn cleanup_rankings_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<RankingsRoot>>,
+    mut query: Query<&mut Node, With<RankingsRoot>>,
     mut creation_state: ResMut<RankingsCardCreationState>,
 ) {
-    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    // 清空瀑布式创建状态（防止对已隐藏的 Entity 操作）
     creation_state.clear();
 
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
+    for mut node in query.iter_mut() {
+        node.display = Display::None;
     }
 }
 
@@ -279,20 +301,31 @@ pub fn rankings_tab_interaction(
     >,
     mut rankings_state: ResMut<RankingsState>,
     mut load_messages: MessageWriter<LoadRankingsRequest>,
+    mut load_knight_messages: MessageWriter<LoadKnightRankingsRequest>,
     mut creation_state: ResMut<RankingsCardCreationState>,
-    card_query: Query<Entity, With<RankingsComicCard>>,
+    comic_card_query: Query<Entity, With<RankingsComicCard>>,
+    knight_card_query: Query<Entity, With<KnightRankCard>>,
+    knight_container_query: Query<Entity, With<KnightListContainer>>,
     mut scroll_query: Query<&mut ScrollPosition, With<RankingsScrollContainer>>,
 ) {
     for (interaction, mut bg_color, tab) in interaction_query.iter_mut() {
-        let is_active = rankings_state.current_type == tab.time_type;
+        let is_active = rankings_state.current_tab == tab.tab_type;
 
         match *interaction {
             Interaction::Pressed => {
                 if !is_active {
                     let start = std::time::Instant::now();
 
-                    // 立即清除旧卡片
-                    for entity in card_query.iter() {
+                    // 立即清除旧漫画卡片
+                    for entity in comic_card_query.iter() {
+                        commands.entity(entity).despawn();
+                    }
+
+                    // 清除骑士榜卡片和容器
+                    for entity in knight_card_query.iter() {
+                        commands.entity(entity).despawn();
+                    }
+                    for entity in knight_container_query.iter() {
                         commands.entity(entity).despawn();
                     }
 
@@ -304,27 +337,42 @@ pub fn rankings_tab_interaction(
                         scroll_pos.y = 0.0;
                     }
 
-                    // 切换当前类型
-                    rankings_state.current_type = tab.time_type;
+                    // 切换当前标签类型
+                    rankings_state.current_tab = tab.tab_type;
                     *bg_color = BackgroundColor(AppColors::PRIMARY);
 
-                    // 如果该类型还没有加载数据，发送加载请求
-                    if !rankings_state.is_loaded(tab.time_type) {
-                        rankings_state.is_loading = true;
-                        load_messages.write(LoadRankingsRequest {
-                            time_type: tab.time_type,
-                        });
-                        tracing::info!(
-                            "切换到 {} 榜（需要加载）: {:?}",
-                            tab.time_type.display_name(),
-                            start.elapsed()
-                        );
-                    } else {
-                        tracing::info!(
-                            "切换到 {} 榜（使用缓存）: {:?}",
-                            tab.time_type.display_name(),
-                            start.elapsed()
-                        );
+                    match tab.tab_type {
+                        RankingsTabType::Comics(time_type) => {
+                            // 更新漫画排行类型
+                            rankings_state.current_type = time_type;
+
+                            // 如果该类型还没有加载数据，发送加载请求
+                            if !rankings_state.is_loaded(time_type) {
+                                rankings_state.is_loading = true;
+                                load_messages.write(LoadRankingsRequest { time_type });
+                                tracing::info!(
+                                    "切换到 {} 榜（需要加载）: {:?}",
+                                    time_type.display_name(),
+                                    start.elapsed()
+                                );
+                            } else {
+                                tracing::info!(
+                                    "切换到 {} 榜（使用缓存）: {:?}",
+                                    time_type.display_name(),
+                                    start.elapsed()
+                                );
+                            }
+                        }
+                        RankingsTabType::Knight => {
+                            // 如果骑士榜数据还没有加载，发送加载请求
+                            if !rankings_state.is_knight_loaded() {
+                                rankings_state.knight_loading = true;
+                                load_knight_messages.write(LoadKnightRankingsRequest);
+                                tracing::info!("切换到骑士榜（需要加载）: {:?}", start.elapsed());
+                            } else {
+                                tracing::info!("切换到骑士榜（使用缓存）: {:?}", start.elapsed());
+                            }
+                        }
                     }
                 }
             }
@@ -392,13 +440,22 @@ pub fn refresh_rankings_ui(
 
     // 更新 Tab 按钮状态
     for (entity, tab) in tab_query.iter() {
-        let is_active = rankings_state.current_type == tab.time_type;
+        let is_active = rankings_state.current_tab == tab.tab_type;
         let bg_color = if is_active {
             AppColors::PRIMARY
         } else {
             Color::srgba(0.2, 0.2, 0.25, 0.8)
         };
         commands.entity(entity).insert(BackgroundColor(bg_color));
+    }
+
+    // 骑士榜模式下跳过漫画排行的刷新逻辑，由 refresh_knight_rankings_ui 处理
+    if rankings_state.current_tab.is_knight() {
+        tracing::debug!(
+            "refresh_rankings_ui 跳过（当前为骑士榜）: {:?}",
+            start.elapsed()
+        );
+        return;
     }
 
     // 如果已有卡片或数据已加载，让 waterfall_create_cards 处理
@@ -452,6 +509,11 @@ pub fn waterfall_create_cards(
     time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
+    // 骑士榜模式下跳过漫画卡片创建
+    if rankings_state.current_tab.is_knight() {
+        return;
+    }
+
     // 构建屏蔽过滤配置
     let blocked_keywords = load_filter_keywords();
     let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
@@ -695,7 +757,12 @@ fn spawn_comic_card(
                 comic_id: comic.id.clone(),
                 rank,
             },
+            ContextMenuTarget {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
+            },
             Button,
+            Interaction::default(),
             Node {
                 width: Val::Px(layout::CARD_WIDTH),
                 height: Val::Px(layout::CARD_HEIGHT),
@@ -942,22 +1009,13 @@ pub fn update_rankings_images(
 
 /// 处理排行榜滚动
 pub fn handle_rankings_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<RankingsScrollContainer>,
     >,
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = calculate_scroll_delta(event);
-
-        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-            let max_scroll = content_info
-                .map(|info| (info.content_height - info.viewport_height).max(0.0))
-                .unwrap_or(0.0);
-            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 更新排行榜内容尺寸
@@ -1013,15 +1071,281 @@ pub fn update_rankings_content_size(
 pub fn trigger_load_rankings(
     rankings_state: Res<RankingsState>,
     mut load_messages: MessageWriter<LoadRankingsRequest>,
+    mut load_knight_messages: MessageWriter<LoadKnightRankingsRequest>,
 ) {
-    let current_type = rankings_state.current_type;
-
-    // 如果数据还没有加载，发送加载请求
-    // 预创建由 waterfall_create_cards 的自动检测来处理
-    if !rankings_state.is_loaded(current_type) && !rankings_state.is_loading {
-        load_messages.write(LoadRankingsRequest {
-            time_type: current_type,
-        });
-        tracing::info!("自动加载 {} 榜", current_type.display_name());
+    match rankings_state.current_tab {
+        RankingsTabType::Comics(time_type) => {
+            // 如果漫画排行数据还没有加载，发送加载请求
+            if !rankings_state.is_loaded(time_type) && !rankings_state.is_loading {
+                load_messages.write(LoadRankingsRequest { time_type });
+                tracing::info!("自动加载 {} 榜", time_type.display_name());
+            }
+        }
+        RankingsTabType::Knight => {
+            // 如果骑士榜数据还没有加载，发送加载请求
+            if !rankings_state.is_knight_loaded() && !rankings_state.knight_loading {
+                load_knight_messages.write(LoadKnightRankingsRequest);
+                tracing::info!("自动加载骑士榜");
+            }
+        }
     }
+}
+
+// ==================== 骑士榜系统 ====================
+
+/// 刷新骑士榜 UI
+pub fn refresh_knight_rankings_ui(
+    mut commands: Commands,
+    rankings_state: Res<RankingsState>,
+    scroll_container_query: Query<(Entity, Option<&Children>), With<RankingsScrollContainer>>,
+    knight_container_query: Query<Entity, With<KnightListContainer>>,
+) {
+    if !rankings_state.is_changed() {
+        return;
+    }
+
+    // 只在骑士榜标签激活时处理
+    if !rankings_state.current_tab.is_knight() {
+        return;
+    }
+
+    let font: Handle<Font> = get_font();
+
+    let Ok((container_entity, children)) = scroll_container_query.single() else {
+        return;
+    };
+
+    // 如果已有骑士榜容器且数据未变化，跳过
+    if !knight_container_query.is_empty() && !rankings_state.knight_users.is_empty() {
+        return;
+    }
+
+    // 清除现有内容
+    if let Some(children) = children {
+        for child in children.iter() {
+            if let Ok(mut entity_commands) = commands.get_entity(child) {
+                entity_commands.despawn();
+            }
+        }
+    }
+
+    if rankings_state.knight_loading {
+        // 显示加载中
+        commands.entity(container_entity).with_children(|parent| {
+            spawn_loading_indicator(parent, &font);
+        });
+    } else if let Some(ref error) = rankings_state.knight_error {
+        // 显示错误
+        let error_msg = error.clone();
+        commands.entity(container_entity).with_children(|parent| {
+            spawn_empty_state(parent, &font, &format!("加载失败: {}", error_msg));
+        });
+    } else if rankings_state.knight_users.is_empty() {
+        // 显示空状态
+        commands.entity(container_entity).with_children(|parent| {
+            spawn_empty_state(parent, &font, "暂无骑士榜数据");
+        });
+    } else {
+        // 渲染骑士榜用户列表
+        // 骑士榜卡片直接作为滚动容器的子节点
+        // 滚动容器已有 padding，无需额外 padding
+        commands.entity(container_entity).with_children(|parent| {
+            parent
+                .spawn((
+                    KnightListContainer,
+                    Node {
+                        width: Val::Percent(100.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|list| {
+                    for (index, user) in rankings_state.knight_users.iter().enumerate() {
+                        spawn_knight_card(list, &font, user, index + 1);
+                    }
+                });
+        });
+
+        tracing::info!(
+            "骑士榜 UI 已渲染: {} 位骑士",
+            rankings_state.knight_users.len()
+        );
+    }
+}
+
+/// 创建骑士榜用户卡片
+fn spawn_knight_card(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    user: &KnightUser,
+    rank: usize,
+) {
+    // 排名颜色
+    let (badge_color, badge_text_color) = match rank {
+        1 => (Color::srgb(1.0, 0.84, 0.0), Color::BLACK), // 金色
+        2 => (Color::srgb(0.75, 0.75, 0.75), Color::BLACK), // 银色
+        3 => (Color::srgb(0.8, 0.5, 0.2), Color::WHITE),  // 铜色
+        _ => (Color::srgba(0.3, 0.3, 0.35, 0.9), Color::WHITE), // 普通
+    };
+
+    parent
+        .spawn((
+            KnightRankCard {
+                user_id: user.id.clone(),
+            },
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                padding: UiRect::all(Val::Px(12.0)),
+                column_gap: Val::Px(16.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(AppColors::CARD_BG),
+            BorderColor::all(AppColors::BORDER),
+        ))
+        .with_children(|card| {
+            // 排名标签
+            card.spawn((
+                Node {
+                    min_width: Val::Px(40.0),
+                    height: Val::Px(32.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    padding: UiRect::horizontal(Val::Px(8.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BackgroundColor(badge_color),
+            ))
+            .with_children(|badge| {
+                badge.spawn((
+                    Text::new(format!("#{}", rank)),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(badge_text_color),
+                ));
+            });
+
+            // 用户头像占位（圆形）
+            card.spawn((
+                Node {
+                    width: Val::Px(48.0),
+                    height: Val::Px(48.0),
+                    border_radius: BorderRadius::all(Val::Px(24.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::srgba(0.25, 0.25, 0.3, 1.0)),
+            ))
+            .with_children(|avatar| {
+                // 用首字母作为头像占位
+                let initial = user.name.chars().next().unwrap_or('?').to_string();
+                avatar.spawn((
+                    Text::new(initial),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT),
+                ));
+            });
+
+            // 用户信息区域
+            card.spawn((Node {
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                row_gap: Val::Px(4.0),
+                ..default()
+            },))
+                .with_children(|info| {
+                    // 用户名 + 称号
+                    info.spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(8.0),
+                        ..default()
+                    },))
+                        .with_children(|name_row| {
+                            name_row.spawn((
+                                Text::new(truncate_text(&user.name, 20)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 15.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT),
+                            ));
+
+                            // 称号标签
+                            if !user.title.is_empty() {
+                                name_row
+                                    .spawn((
+                                        Node {
+                                            padding: UiRect::new(
+                                                Val::Px(6.0),
+                                                Val::Px(6.0),
+                                                Val::Px(2.0),
+                                                Val::Px(2.0),
+                                            ),
+                                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::srgba(0.6, 0.4, 0.0, 0.3)),
+                                    ))
+                                    .with_children(|badge| {
+                                        badge.spawn((
+                                            Text::new(truncate_text(&user.title, 10)),
+                                            TextFont {
+                                                font: font.clone(),
+                                                font_size: 11.0,
+                                                ..default()
+                                            },
+                                            TextColor(Color::srgb(1.0, 0.84, 0.0)),
+                                        ));
+                                    });
+                            }
+                        });
+
+                    // 等级 + 上传数
+                    info.spawn((Node {
+                        flex_direction: FlexDirection::Row,
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(16.0),
+                        ..default()
+                    },))
+                        .with_children(|stats_row| {
+                            stats_row.spawn((
+                                Text::new(format!("Lv.{}", user.level)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::PRIMARY),
+                            ));
+
+                            stats_row.spawn((
+                                Text::new(format!(
+                                    "上传: {}",
+                                    format_number(user.comics_uploaded as i64)
+                                )),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 13.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::TEXT_SECONDARY),
+                            ));
+                        });
+                });
+        });
 }

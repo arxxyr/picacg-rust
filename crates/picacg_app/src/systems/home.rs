@@ -14,7 +14,11 @@ use crate::{
     components::*,
     events::*,
     resources::*,
-    systems::{login::AppColors, scrollbar::scrollbar_config::*, ui_common::spawn_comic_time_info},
+    systems::{
+        login::AppColors,
+        scrollbar::scrollbar_config::*,
+        ui_common::{Scrollable, spawn_comic_time_info},
+    },
 };
 
 /// 首页卡片布局常量
@@ -101,7 +105,7 @@ impl HomeCardCreationState {
     }
 }
 
-/// 创建首页界面
+/// 创建首页界面（如果已存在则只显示）
 pub fn setup_home_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
@@ -109,7 +113,18 @@ pub fn setup_home_ui(
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<HomeCardCreationState>,
     mut load_recommendations: MessageWriter<LoadRecommendationsRequest>,
+    mut existing_query: Query<&mut Node, With<HomeRoot>>,
 ) {
+    // 如果 HomeRoot 已存在（被 Display::None 隐藏了），直接显示
+    if let Ok(mut node) = existing_query.single_mut() {
+        node.display = Display::Flex;
+        // 仍然触发加载（刷新数据）
+        if home_state.recommendations.is_empty() && !home_state.is_loading {
+            load_recommendations.write(LoadRecommendationsRequest);
+        }
+        return;
+    }
+
     let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
@@ -217,6 +232,7 @@ pub fn setup_home_ui(
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
+                            Scrollable,
                             ScrollPosition::default(),
                             ContentSizeInfo::default(),
                         ))
@@ -326,6 +342,10 @@ fn spawn_home_card(
         .spawn((
             HomeComicCard {
                 comic_id: comic.id.clone(),
+            },
+            ContextMenuTarget {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
             },
             Button,
             Interaction::default(),
@@ -480,14 +500,13 @@ fn spawn_tag_badge(
 
 /// 清理首页
 pub fn cleanup_home_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<HomeRoot>>,
+    mut query: Query<&mut Node, With<HomeRoot>>,
     mut creation_state: ResMut<HomeCardCreationState>,
 ) {
     creation_state.clear();
 
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
+    for mut node in query.iter_mut() {
+        node.display = Display::None;
     }
 }
 
@@ -568,30 +587,13 @@ pub fn home_refresh_button_interaction(
 
 /// 首页滚动处理
 pub fn handle_home_scroll(
-    mut mouse_wheel_events: MessageReader<MouseWheel>,
-    mut scroll_query: Query<
+    mut _mouse_wheel_events: MessageReader<MouseWheel>,
+    _scroll_query: Query<
         (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
         With<HomeScrollContainer>,
     >,
 ) {
-    for event in mouse_wheel_events.read() {
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let scroll_delta = match event.unit {
-                bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-                bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-            };
-
-            let (content_height, viewport_height) = if let Some(info) = content_size_info {
-                (info.content_height, info.viewport_height)
-            } else {
-                let size = computed_node.size();
-                (size.y, size.y)
-            };
-
-            let max_scroll = (content_height - viewport_height).max(0.0);
-            scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 瀑布式创建首页卡片
@@ -810,5 +812,114 @@ pub fn handle_recommendations_load_failed(
         home_state.is_loading = false;
         home_state.error = Some(event.error.clone());
         tracing::warn!("推荐漫画加载失败: {}", event.error);
+    }
+}
+
+// ==================== 签到 Toast 通知 ====================
+
+/// 签到 Toast 通知标记
+#[derive(Component)]
+pub struct PunchInToast;
+
+/// 签到 Toast 计时器
+#[derive(Resource)]
+pub struct PunchInToastTimer(pub Timer);
+
+/// 签到成功背景色
+const PUNCH_IN_SUCCESS_COLOR: Color = Color::srgb(0.2, 0.6, 0.3);
+/// 签到失败背景色
+const PUNCH_IN_ERROR_COLOR: Color = Color::srgb(0.7, 0.2, 0.2);
+
+/// 显示签到 Toast 通知
+///
+/// 监听 `PunchInState` 变化，在首页内容区域顶部创建 Toast 通知条。
+pub fn display_punch_in_toast(
+    mut commands: Commands,
+    punch_in_state: Res<PunchInState>,
+    toast_query: Query<Entity, With<PunchInToast>>,
+    home_root_query: Query<Entity, With<HomeRoot>>,
+) {
+    if !punch_in_state.is_changed() {
+        return;
+    }
+
+    let Some(ref message) = punch_in_state.message else {
+        return;
+    };
+
+    // 如果已有 Toast，先移除旧的
+    for entity in toast_query.iter() {
+        commands.entity(entity).despawn();
+    }
+    // 同时移除旧的计时器
+    commands.remove_resource::<PunchInToastTimer>();
+
+    let Ok(home_root) = home_root_query.single() else {
+        return;
+    };
+
+    let font = get_font();
+    let bg_color = if punch_in_state.is_success {
+        PUNCH_IN_SUCCESS_COLOR
+    } else {
+        PUNCH_IN_ERROR_COLOR
+    };
+
+    // 创建 Toast 通知条
+    let toast = commands
+        .spawn((
+            PunchInToast,
+            Node {
+                width: Val::Percent(100.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(bg_color),
+            ZIndex(100),
+        ))
+        .with_children(|toast| {
+            toast.spawn((
+                Text::new(message.as_str()),
+                TextFont {
+                    font,
+                    font_size: 14.0,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        })
+        .id();
+
+    // 将 Toast 插入到 HomeRoot 的第一个子节点位置
+    commands.entity(home_root).insert_children(0, &[toast]);
+
+    // 插入 3 秒自动消失计时器
+    commands.insert_resource(PunchInToastTimer(Timer::from_seconds(3.0, TimerMode::Once)));
+
+    tracing::debug!("显示签到 Toast: {}", message);
+}
+
+/// 自动隐藏签到 Toast 通知
+///
+/// 计时器到期后移除 Toast 实体和计时器资源。
+pub fn auto_hide_punch_in_toast(
+    mut commands: Commands,
+    time: Res<Time>,
+    timer: Option<ResMut<PunchInToastTimer>>,
+    toast_query: Query<Entity, With<PunchInToast>>,
+) {
+    let Some(mut timer) = timer else {
+        return;
+    };
+
+    timer.0.tick(time.delta());
+    if timer.0.just_finished() {
+        for entity in toast_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        commands.remove_resource::<PunchInToastTimer>();
     }
 }

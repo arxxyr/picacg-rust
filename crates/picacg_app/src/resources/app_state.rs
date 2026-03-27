@@ -4,8 +4,12 @@
 
 use bevy::prelude::*;
 use picacg_api::{
-    endpoints::RankTimeType,
-    models::{Category, Comic, Episode, Picture},
+    endpoints::{
+        RankTimeType,
+        fried::{AppInfo, FriedPost},
+        rank::KnightUser,
+    },
+    models::{Category, Comic, Episode, Game, Picture},
 };
 use picacg_config::{AppSettings, ProxyType};
 
@@ -39,6 +43,154 @@ pub enum AppRoute {
     Downloads,
     /// 设置
     Settings,
+    /// 阅读历史
+    History,
+    /// 评论页面
+    Comments,
+    /// 忘记密码
+    ForgotPassword,
+    /// 个人资料
+    Profile,
+    /// 本地阅读（已下载漫画离线浏览）
+    LocalRead,
+    /// 游戏列表
+    Games,
+    /// 游戏详情
+    GameDetail,
+    /// 点赞记录
+    LikeRecords,
+    /// 锅贴社区
+    Fried,
+    /// 图片格式转换工具
+    ImageConvert,
+    /// Waifu2x 超分辨率工具
+    Waifu2x,
+    /// 聊天大厅（房间列表）
+    Chat,
+    /// 聊天室
+    ChatRoom,
+    /// NAS 远程存储
+    Nas,
+}
+
+/// 版本更新检查状态
+#[derive(Resource, Default)]
+pub struct UpdateCheckState {
+    /// 是否正在检查
+    pub is_checking: bool,
+    /// 最新版本号
+    pub latest_version: Option<String>,
+    /// 是否有更新
+    pub has_update: Option<bool>,
+    /// 更新说明
+    pub release_notes: Option<String>,
+    /// 下载链接
+    pub download_url: Option<String>,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 本地漫画条目（扫描到的已下载漫画）
+#[derive(Debug, Clone)]
+pub struct LocalComicEntry {
+    /// 漫画文件夹名称
+    pub name: String,
+    /// 漫画文件夹完整路径
+    pub path: String,
+    /// 封面图片路径（第一个章节的第一张图片）
+    pub cover_path: Option<String>,
+    /// 章节数量（子文件夹数量）
+    pub chapter_count: usize,
+}
+
+/// 本地阅读状态
+#[derive(Resource, Default)]
+pub struct LocalReadState {
+    /// 本地漫画列表
+    pub entries: Vec<LocalComicEntry>,
+    /// 是否正在扫描
+    pub is_scanning: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 用户个人资料状态
+#[derive(Resource, Default)]
+pub struct UserProfileState {
+    /// 用户信息
+    pub user: Option<picacg_api::models::User>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 点赞记录状态
+#[derive(Resource, Default)]
+pub struct LikeRecordsState {
+    /// 点赞记录列表
+    pub records: Vec<picacg_db::DbLikeRecord>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 总数
+    pub total_count: i64,
+}
+
+/// 阅读历史状态
+#[derive(Resource, Default)]
+pub struct HistoryState {
+    /// 历史记录列表
+    pub records: Vec<picacg_db::DbHistory>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 历史总数
+    pub total_count: i64,
+}
+
+/// 子评论状态
+#[derive(Default, Clone)]
+pub struct ChildCommentsState {
+    /// 子评论列表
+    pub comments: Vec<picacg_api::models::Comment>,
+    /// 当前页码
+    pub page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 是否加载中
+    pub is_loading: bool,
+}
+
+/// 评论页面状态
+#[derive(Resource, Default)]
+pub struct CommentsState {
+    /// 漫画 ID（评论目标）
+    pub comic_id: String,
+    /// 评论列表
+    pub comments: Vec<picacg_api::models::Comment>,
+    /// 当前页码
+    pub page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 是否加载中
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 输入框文本
+    pub input_text: String,
+    /// 正在回复的评论 ID（None = 顶层评论）
+    pub reply_to: Option<String>,
+    /// 正在回复的用户名（用于显示提示）
+    pub reply_to_name: Option<String>,
+    /// 子评论展开状态（comment_id -> ChildCommentsState）
+    pub children_map: std::collections::HashMap<String, ChildCommentsState>,
+    /// 是否需要重建 UI
+    pub needs_rebuild: bool,
+    /// 输入框是否获取焦点
+    pub input_focused: bool,
 }
 
 /// 认证状态
@@ -87,6 +239,29 @@ impl Default for LoginFormState {
             auto_punch_in: settings.login.auto_punch_in,
         }
     }
+}
+
+/// 忘记密码页面状态
+#[derive(Resource, Default)]
+pub struct ForgotPasswordState {
+    /// 邮箱/用户名
+    pub email: String,
+    /// 当前步骤: 0=输入邮箱获取安全问题, 1=回答安全问题重置密码
+    pub step: u8,
+    /// 安全问题列表（由 API 返回）
+    pub question1: String,
+    pub question2: String,
+    pub question3: String,
+    /// 选择的安全问题编号 (1, 2, 3)
+    pub question_no: i32,
+    /// 安全问题答案
+    pub answer: String,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 成功信息
+    pub success: Option<String>,
 }
 
 /// 性别选项
@@ -236,6 +411,10 @@ pub struct SearchState {
     /// 是否需要重建 UI（仅在搜索结果/排序/分类/翻页/错误变化时设置，
     /// 输入文字不触发）
     pub needs_rebuild: bool,
+    /// 热门搜索关键词
+    pub hot_keywords: Vec<String>,
+    /// 热词是否已加载
+    pub hot_keywords_loaded: bool,
 }
 
 impl Default for SearchState {
@@ -252,14 +431,47 @@ impl Default for SearchState {
             selected_categories: Vec::new(),
             show_category_filter: false,
             needs_rebuild: false,
+            hot_keywords: Vec::new(),
+            hot_keywords_loaded: false,
         }
+    }
+}
+
+/// 排行榜标签类型（包含漫画排行和骑士榜）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RankingsTabType {
+    /// 漫画排行（日/周/月）
+    Comics(RankTimeType),
+    /// 骑士榜
+    Knight,
+}
+
+impl RankingsTabType {
+    /// 显示名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            RankingsTabType::Comics(time_type) => time_type.display_name(),
+            RankingsTabType::Knight => "骑士榜",
+        }
+    }
+
+    /// 是否为漫画排行标签
+    pub fn is_comics(&self) -> bool {
+        matches!(self, RankingsTabType::Comics(_))
+    }
+
+    /// 是否为骑士榜标签
+    pub fn is_knight(&self) -> bool {
+        matches!(self, RankingsTabType::Knight)
     }
 }
 
 /// 排行榜状态
 #[derive(Resource)]
 pub struct RankingsState {
-    /// 当前选中的时间类型
+    /// 当前选中的标签类型
+    pub current_tab: RankingsTabType,
+    /// 当前选中的时间类型（仅漫画排行时使用）
     pub current_type: RankTimeType,
     /// 日榜数据
     pub h24_comics: Vec<Comic>,
@@ -267,19 +479,29 @@ pub struct RankingsState {
     pub d7_comics: Vec<Comic>,
     /// 月榜数据
     pub d30_comics: Vec<Comic>,
-    /// 是否正在加载
+    /// 骑士榜数据
+    pub knight_users: Vec<KnightUser>,
+    /// 骑士榜是否加载中
+    pub knight_loading: bool,
+    /// 骑士榜错误
+    pub knight_error: Option<String>,
+    /// 是否正在加载（漫画排行）
     pub is_loading: bool,
-    /// 错误信息
+    /// 错误信息（漫画排行）
     pub error: Option<String>,
 }
 
 impl Default for RankingsState {
     fn default() -> Self {
         Self {
+            current_tab: RankingsTabType::Comics(RankTimeType::H24),
             current_type: RankTimeType::H24,
             h24_comics: Vec::new(),
             d7_comics: Vec::new(),
             d30_comics: Vec::new(),
+            knight_users: Vec::new(),
+            knight_loading: false,
+            knight_error: None,
             is_loading: false,
             error: None,
         }
@@ -313,6 +535,11 @@ impl RankingsState {
             RankTimeType::D30 => !self.d30_comics.is_empty(),
         }
     }
+
+    /// 检查骑士榜是否已加载
+    pub fn is_knight_loaded(&self) -> bool {
+        !self.knight_users.is_empty()
+    }
 }
 
 /// 收藏列表状态
@@ -343,6 +570,17 @@ impl Default for FavoritesState {
             error: None,
         }
     }
+}
+
+/// 签到状态
+#[derive(Resource, Default)]
+pub struct PunchInState {
+    /// 是否已签到
+    pub is_punched: bool,
+    /// 签到结果消息
+    pub message: Option<String>,
+    /// 是否签到成功
+    pub is_success: bool,
 }
 
 /// 首页状态
@@ -1139,4 +1377,397 @@ impl DownloadManagerState {
 
         tracing::info!("加载了 {} 个未完成的下载任务", self.active_tasks().len());
     }
+}
+
+// ==================== 游戏系统 ====================
+
+/// 游戏列表状态
+#[derive(Resource, Default)]
+pub struct GamesState {
+    /// 游戏列表
+    pub games: Vec<Game>,
+    /// 当前页码
+    pub page: i32,
+    /// 总页数
+    pub total_pages: i32,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 游戏详情状态
+#[derive(Resource, Default)]
+pub struct GameDetailState {
+    /// 游戏 ID
+    pub game_id: String,
+    /// 游戏详情
+    pub game: Option<Game>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 网络诊断状态
+#[derive(Resource, Default)]
+pub struct NetworkDiagState {
+    /// 是否正在测速
+    pub is_testing_speed: bool,
+    /// 是否正在 Ping
+    pub is_testing_ping: bool,
+    /// 下载速度（KB/s）
+    pub download_speed: Option<f64>,
+    /// 延迟（毫秒）
+    pub latency_ms: Option<u64>,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+// ==================== 锅贴社区 ====================
+
+/// 锅贴社区状态
+#[derive(Resource, Default)]
+pub struct FriedState {
+    /// 小程序列表（从 /pica-apps 获取）
+    pub apps: Vec<AppInfo>,
+    /// 锅贴帖子列表
+    pub posts: Vec<FriedPost>,
+    /// 锅贴 token（通过 PicACG token 换取）
+    pub fried_token: Option<String>,
+    /// 当前页码（从 0 开始的偏移量）
+    pub page: i32,
+    /// 总帖子数
+    pub total: i32,
+    /// 每页条数
+    pub limit: i32,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+// ==================== 图片格式转换 ====================
+
+/// 目标图片格式
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TargetImageFormat {
+    #[default]
+    Png,
+    Jpeg,
+    Webp,
+    Bmp,
+}
+
+impl TargetImageFormat {
+    /// 显示名称
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Png => "PNG",
+            Self::Jpeg => "JPEG",
+            Self::Webp => "WebP",
+            Self::Bmp => "BMP",
+        }
+    }
+
+    /// 文件扩展名
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Webp => "webp",
+            Self::Bmp => "bmp",
+        }
+    }
+
+    /// 所有可选格式
+    pub const ALL: [TargetImageFormat; 4] = [Self::Png, Self::Jpeg, Self::Webp, Self::Bmp];
+}
+
+/// 图片格式转换状态
+#[derive(Resource, Default)]
+pub struct ImageConvertState {
+    /// 源目录路径
+    pub source_dir: String,
+    /// 目标格式
+    pub target_format: TargetImageFormat,
+    /// 是否正在转换
+    pub is_converting: bool,
+    /// 已完成数量
+    pub progress: u32,
+    /// 总文件数量
+    pub total: u32,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 成功信息
+    pub success: Option<String>,
+}
+
+/// 目录选择器异步结果（图片转换专用）
+#[derive(Resource, Default)]
+pub struct ImageConvertPickerResult {
+    /// 异步接收通道
+    pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Option<String>>>>,
+}
+
+/// 图片转换进度异步结果
+#[derive(Resource, Default)]
+pub struct ImageConvertProgressResult {
+    /// 异步接收通道（进度: (已完成, 总数, 错误信息)）
+    pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<ImageConvertProgressMsg>>>,
+}
+
+/// 图片转换进度消息
+#[derive(Debug, Clone)]
+pub enum ImageConvertProgressMsg {
+    /// 进度更新
+    Progress { done: u32, total: u32 },
+    /// 转换完成
+    Completed { done: u32, total: u32 },
+    /// 转换出错
+    Error(String),
+}
+
+// ==================== Waifu2x 超分辨率 ====================
+
+/// Waifu2x 超分辨率状态
+#[derive(Resource)]
+pub struct Waifu2xState {
+    /// waifu2x-ncnn-vulkan 可执行文件路径
+    pub executable_path: String,
+    /// 缩放倍数
+    pub scale: i32,
+    /// 降噪等级
+    pub noise_level: i32,
+    /// GPU ID
+    pub gpu_id: i32,
+    /// 输出格式
+    pub output_format: String,
+    /// 输入目录
+    pub input_dir: String,
+    /// 输出目录
+    pub output_dir: String,
+    /// 是否正在处理
+    pub is_processing: bool,
+    /// 已完成数量
+    pub progress: u32,
+    /// 总文件数量
+    pub total: u32,
+    /// 当前正在处理的文件名
+    pub current_file: String,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 成功信息
+    pub success: Option<String>,
+}
+
+impl Default for Waifu2xState {
+    fn default() -> Self {
+        // 从配置加载已保存的设置
+        let settings = picacg_config::AppSettings::global().read();
+        Self {
+            executable_path: settings.waifu2x.executable_path.clone(),
+            scale: settings.waifu2x.scale,
+            noise_level: settings.waifu2x.noise_level,
+            gpu_id: settings.waifu2x.gpu_id,
+            output_format: settings.waifu2x.output_format.clone(),
+            input_dir: String::new(),
+            output_dir: String::new(),
+            is_processing: false,
+            progress: 0,
+            total: 0,
+            current_file: String::new(),
+            error: None,
+            success: None,
+        }
+    }
+}
+
+/// Waifu2x 目录选择器接收通道类型
+type Waifu2xPickerReceiver =
+    std::sync::Mutex<std::sync::mpsc::Receiver<(Option<String>, Waifu2xPickerType)>>;
+
+/// Waifu2x 目录选择器异步结果
+#[derive(Resource, Default)]
+pub struct Waifu2xPickerResult {
+    /// 异步接收通道（(选择的路径, 选择类型)）
+    pub receiver: Option<Waifu2xPickerReceiver>,
+}
+
+/// Waifu2x 目录选择器类型
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Waifu2xPickerType {
+    /// 选择可执行文件路径
+    Executable,
+    /// 选择输入目录
+    InputDir,
+    /// 选择输出目录
+    OutputDir,
+}
+
+/// Waifu2x 处理进度异步结果
+#[derive(Resource, Default)]
+pub struct Waifu2xProgressResult {
+    /// 异步接收通道
+    pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Waifu2xProgressMsg>>>,
+}
+
+/// Waifu2x 处理进度消息
+#[derive(Debug, Clone)]
+pub enum Waifu2xProgressMsg {
+    /// 进度更新
+    Progress {
+        done: u32,
+        total: u32,
+        current_file: String,
+    },
+    /// 处理完成
+    Completed { done: u32, total: u32 },
+    /// 处理出错
+    Error(String),
+}
+
+// ==================== 聊天室 ====================
+
+/// 聊天大厅状态（房间列表）
+#[derive(Resource, Default)]
+pub struct ChatState {
+    /// 房间列表
+    pub rooms: Vec<picacg_api::endpoints::chat::ChatRoom>,
+    /// 聊天服务 token
+    pub chat_token: Option<String>,
+    /// 聊天用户资料
+    pub profile: Option<picacg_api::endpoints::chat::ChatProfile>,
+    /// 是否正在加载
+    pub is_loading: bool,
+    /// 错误信息
+    pub error: Option<String>,
+}
+
+/// 聊天室状态
+#[derive(Resource)]
+pub struct ChatRoomState {
+    /// 当前房间 ID
+    pub room_id: String,
+    /// 当前房间标题
+    pub room_title: String,
+    /// 聊天消息列表（解析后的）
+    pub messages: Vec<picacg_api::endpoints::chat::ParsedChatMessage>,
+    /// 在线人数
+    pub online_count: u32,
+    /// 输入框文本
+    pub input_text: String,
+    /// 是否已连接 WebSocket
+    pub is_connected: bool,
+    /// 是否正在连接
+    pub is_connecting: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 最大消息缓存数量
+    pub max_messages: usize,
+    /// WebSocket 消息接收通道
+    pub ws_receiver: Option<std::sync::Mutex<tokio::sync::mpsc::UnboundedReceiver<String>>>,
+    /// WebSocket 消息发送通道（发送给 WebSocket 写入端）
+    pub ws_sender: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    /// WebSocket 关闭信号发送端
+    pub ws_close_sender: Option<tokio::sync::oneshot::Sender<()>>,
+    /// 是否需要自动滚动到底部
+    pub auto_scroll: bool,
+    /// 需要重建 UI
+    pub needs_rebuild: bool,
+}
+
+impl Default for ChatRoomState {
+    fn default() -> Self {
+        Self {
+            room_id: String::new(),
+            room_title: String::new(),
+            messages: Vec::new(),
+            online_count: 0,
+            input_text: String::new(),
+            is_connected: false,
+            is_connecting: false,
+            error: None,
+            max_messages: 500,
+            ws_receiver: None,
+            ws_sender: None,
+            ws_close_sender: None,
+            auto_scroll: true,
+            needs_rebuild: false,
+        }
+    }
+}
+
+// ==================== NAS 远程存储状态 ====================
+
+/// NAS 上传任务状态
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NasUploadStatus {
+    /// 等待中
+    Waiting,
+    /// 上传中
+    Uploading,
+    /// 已完成
+    Completed,
+    /// 失败
+    Failed(String),
+}
+
+/// NAS 上传任务条目
+#[derive(Debug, Clone)]
+pub struct NasUploadTask {
+    /// 漫画标题
+    pub comic_title: String,
+    /// 本地文件路径
+    pub local_path: String,
+    /// 远程目标路径
+    pub remote_path: String,
+    /// 上传状态
+    pub status: NasUploadStatus,
+    /// 已上传文件数
+    pub uploaded_files: u32,
+    /// 总文件数
+    pub total_files: u32,
+}
+
+/// WebDAV 远程文件条目
+#[derive(Debug, Clone)]
+pub struct NasRemoteEntry {
+    /// 文件/目录名称
+    pub name: String,
+    /// 完整远程路径
+    pub path: String,
+    /// 是否为目录
+    pub is_dir: bool,
+    /// 文件大小（字节）
+    pub size: u64,
+}
+
+/// NAS 页面状态
+#[derive(Resource, Default)]
+pub struct NasState {
+    /// WebDAV 连接状态
+    pub is_connected: bool,
+    /// 是否正在测试连接
+    pub is_testing: bool,
+    /// 连接测试结果消息
+    pub test_message: Option<String>,
+    /// 测试是否成功
+    pub test_success: bool,
+    /// 是否正在上传
+    pub is_uploading: bool,
+    /// 上传任务列表
+    pub upload_tasks: Vec<NasUploadTask>,
+    /// 远程文件列表（浏览用）
+    pub remote_entries: Vec<NasRemoteEntry>,
+    /// 当前浏览的远程路径
+    pub browse_path: String,
+    /// 是否正在浏览
+    pub is_browsing: bool,
+    /// 错误信息
+    pub error: Option<String>,
+    /// 成功消息
+    pub success: Option<String>,
+    /// 需要重建 UI
+    pub needs_rebuild: bool,
 }

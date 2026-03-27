@@ -1,9 +1,11 @@
 //! 工具模块
 
 pub mod content_filter;
+pub mod i18n;
 pub mod icons;
 pub mod text_input;
 pub mod tokio_tasks;
+pub mod websocket;
 
 pub use tokio_tasks::{TaskContext, TokioTasksPlugin, TokioTasksRuntime};
 

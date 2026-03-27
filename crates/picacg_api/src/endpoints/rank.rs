@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::{client::ApiRequest, models::Comic};
 
 /// 排行榜时间类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize)]
 pub enum RankTimeType {
     /// 日榜（24小时）
     #[default]

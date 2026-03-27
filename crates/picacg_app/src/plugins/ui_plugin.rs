@@ -3,13 +3,17 @@
 //! 管理应用的用户界面
 
 use bevy::prelude::*;
+use picacg_config::AppSettings;
 
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::*,
-    utils::text_input::{self, TextInputCursorBlink},
+    utils::{
+        i18n::I18n,
+        text_input::{self, TextInputCursorBlink},
+    },
 };
 
 /// UI 插件
@@ -17,9 +21,13 @@ pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        // 从配置加载界面语言，初始化 I18n 资源
+        let language = AppSettings::global().read().language;
         app
             // 注册状态
             .init_state::<AppRoute>()
+            // 注册多语言资源
+            .insert_resource(I18n::new(language))
             // 注册资源
             .init_resource::<AuthState>()
             .init_resource::<LoginFormState>()
@@ -43,8 +51,29 @@ impl Plugin for UiPlugin {
             .init_resource::<FavoritesCardCreationState>()
             .init_resource::<HomeState>()
             .init_resource::<HomeCardCreationState>()
+            .init_resource::<PunchInState>()
             .init_resource::<DownloadSectionCollapseState>()
             .init_resource::<RegisterFormState>()
+            .init_resource::<ForgotPasswordState>()
+            .init_resource::<HistoryState>()
+            .init_resource::<LikeRecordsState>()
+            .init_resource::<CommentsState>()
+            .init_resource::<UserProfileState>()
+            .init_resource::<LocalReadState>()
+            .init_resource::<GamesState>()
+            .init_resource::<GameDetailState>()
+            .init_resource::<FriedState>()
+            .init_resource::<ImageConvertState>()
+            .init_resource::<ImageConvertPickerResult>()
+            .init_resource::<ImageConvertProgressResult>()
+            .init_resource::<Waifu2xState>()
+            .init_resource::<Waifu2xPickerResult>()
+            .init_resource::<Waifu2xProgressResult>()
+            .init_resource::<NasState>()
+            .init_resource::<ChatState>()
+            .init_resource::<ChatRoomState>()
+            .init_resource::<NetworkDiagState>()
+            .init_resource::<UpdateCheckState>()
             // 注册 UI 消息 (Bevy 0.17 使用 add_message)
             .add_message::<NavigateToCategoriesEvent>()
             .add_message::<NavigateToComicsListEvent>()
@@ -54,10 +83,17 @@ impl Plugin for UiPlugin {
             .add_message::<NavigateBackEvent>()
             .add_message::<NavigateForwardEvent>()
             .add_message::<NavigateToLoginEvent>()
+            .add_message::<NavigateToCommentsEvent>()
+            .add_message::<NavigateToGameDetailEvent>()
+            .add_message::<NavigateToChatRoomEvent>()
             .add_message::<PrevPageEvent>()
             .add_message::<NextPageEvent>()
             .add_message::<ShowErrorEvent>()
             .add_message::<ShowSuccessEvent>()
+            // 本地阅读消息
+            .add_message::<ScanLocalComicsRequest>()
+            .add_message::<ScanLocalComicsCompletedEvent>()
+            .add_message::<ScanLocalComicsFailedEvent>()
             // 通用文本输入框系统（全局注册，所有页面共享）
             .init_resource::<TextInputCursorBlink>()
             .add_systems(
@@ -88,6 +124,7 @@ impl Plugin for UiPlugin {
                     register_button_interaction,
                     show_password_toggle_interaction,
                     update_login_error,
+                    forgot_password_link_interaction,
                 )
                     .run_if(in_state(AppRoute::Login)),
             )
@@ -124,6 +161,26 @@ impl Plugin for UiPlugin {
                     unfocus_register_input,
                 )
                     .run_if(in_state(AppRoute::Register)),
+            )
+            // 忘记密码页面
+            .add_systems(OnEnter(AppRoute::ForgotPassword), setup_forgot_password_ui)
+            .add_systems(OnExit(AppRoute::ForgotPassword), cleanup_forgot_password_ui)
+            .add_systems(
+                Update,
+                (
+                    forgot_password_input_interaction,
+                    forgot_password_sync_focus,
+                    forgot_password_sync_text_values,
+                    forgot_password_keyboard_input,
+                    forgot_password_submit_interaction,
+                    forgot_password_back_interaction,
+                    forgot_password_question_interaction,
+                    handle_forgot_password_response,
+                    handle_reset_password_response,
+                    rebuild_forgot_password_ui,
+                    unfocus_forgot_password_input,
+                )
+                    .run_if(in_state(AppRoute::ForgotPassword)),
             )
             // 分类页面（进入时先确保主布局存在）
             .add_systems(
@@ -251,6 +308,7 @@ impl Plugin for UiPlugin {
                     handle_read_mode_change,
                     update_webtoon_images_from_cache,
                     update_webtoon_scale,
+                    save_reading_history,
                 )
                     .run_if(in_state(AppRoute::ReadView)),
             )
@@ -274,6 +332,12 @@ impl Plugin for UiPlugin {
                     handle_settings_scroll,
                     clamp_settings_scroll,
                     update_settings_content_size,
+                )
+                    .run_if(in_state(AppRoute::Settings)),
+            )
+            .add_systems(
+                Update,
+                (
                     // 代理设置交互
                     proxy_enabled_checkbox_interaction,
                     proxy_type_button_interaction,
@@ -328,6 +392,29 @@ impl Plugin for UiPlugin {
                     custom_cdn_ip_input_interaction,
                     custom_cdn_ip_keyboard_input,
                     sync_cdn_ip_input_values,
+                    // 网络诊断交互
+                    speed_test_button_interaction,
+                    ping_test_button_interaction,
+                    update_network_diag_result,
+                )
+                    .run_if(in_state(AppRoute::Settings)),
+            )
+            .add_systems(
+                Update,
+                (
+                    // 高级设置交互
+                    ui_scale_button_interaction,
+                    custom_font_path_input_interaction,
+                    custom_font_path_keyboard_input,
+                    sync_custom_font_path_value,
+                    custom_font_path_picker_interaction,
+                    handle_custom_font_path_picker_result,
+                    sni_pretend_checkbox_interaction,
+                    prefer_ipv6_checkbox_interaction,
+                    // 主题/语言/关闭行为设置交互
+                    theme_mode_button_interaction,
+                    language_button_interaction,
+                    close_behavior_button_interaction,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
@@ -355,6 +442,7 @@ impl Plugin for UiPlugin {
                     retry_download_button_interaction,
                     delete_download_button_interaction,
                     start_all_downloads_button_interaction,
+                    update_all_downloads_button_interaction,
                     // 已下载项按钮交互
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
@@ -374,6 +462,7 @@ impl Plugin for UiPlugin {
                     task_path_select_interaction,
                     task_cbz_toggle_interaction,
                     refresh_downloads_ui,
+                    update_download_stats,
                     add_new_task_ui,
                     handle_download_completed_ui,
                 )
@@ -420,6 +509,8 @@ impl Plugin for UiPlugin {
                     update_home_images,
                     handle_recommendations_loaded,
                     handle_recommendations_load_failed,
+                    display_punch_in_toast,
+                    auto_hide_punch_in_toast,
                     // 滚动条系统
                     update_all_scrollbar_thumbs,
                     scrollbar_thumb_interaction,
@@ -449,6 +540,7 @@ impl Plugin for UiPlugin {
                     refresh_search_ui,
                     waterfall_create_search_cards,
                     unfocus_search_input,
+                    hot_keyword_tag_interaction,
                 )
                     .run_if(in_state(AppRoute::Search)),
             )
@@ -482,6 +574,7 @@ impl Plugin for UiPlugin {
                     rankings_tab_interaction,
                     rankings_card_interaction,
                     refresh_rankings_ui,
+                    refresh_knight_rankings_ui,
                     waterfall_create_cards,
                     update_rankings_images,
                     handle_rankings_scroll,
@@ -494,6 +587,84 @@ impl Plugin for UiPlugin {
                     reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Rankings)),
+            )
+            // 游戏列表页
+            .add_systems(
+                OnEnter(AppRoute::Games),
+                (ensure_main_layout, setup_games_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Games), cleanup_games_ui)
+            .add_systems(
+                Update,
+                (
+                    game_card_interaction,
+                    games_pagination_interaction,
+                    handle_games_scroll,
+                    update_games_content_size,
+                    update_games_images,
+                    refresh_games_ui,
+                    handle_games_loaded,
+                    handle_games_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Games)),
+            )
+            // 游戏详情页
+            .add_systems(
+                OnEnter(AppRoute::GameDetail),
+                (ensure_main_layout, setup_game_detail_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::GameDetail), cleanup_game_detail_ui)
+            .add_systems(
+                Update,
+                (
+                    game_detail_back_interaction,
+                    refresh_game_detail_ui,
+                    handle_game_detail_scroll,
+                    update_game_detail_content_size,
+                    update_game_detail_images,
+                    handle_game_detail_loaded,
+                    handle_game_detail_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::GameDetail)),
+            )
+            // 锅贴社区页
+            .add_systems(
+                OnEnter(AppRoute::Fried),
+                (ensure_main_layout, setup_fried_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Fried), cleanup_fried_ui)
+            .add_systems(
+                Update,
+                (
+                    fried_refresh_interaction,
+                    fried_pagination_interaction,
+                    handle_fried_scroll,
+                    update_fried_content_size,
+                    refresh_fried_ui,
+                    handle_apps_loaded,
+                    handle_apps_load_failed,
+                    handle_fried_posts_loaded,
+                    handle_fried_posts_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Fried)),
             )
             // 收藏页
             .add_systems(
@@ -521,12 +692,317 @@ impl Plugin for UiPlugin {
                 )
                     .run_if(in_state(AppRoute::Favorites)),
             )
+            // 阅读历史页
+            .add_systems(
+                OnEnter(AppRoute::History),
+                (ensure_main_layout, setup_history_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::History), cleanup_history_ui)
+            .add_systems(
+                Update,
+                (
+                    history_card_interaction,
+                    history_delete_interaction,
+                    clear_all_history_interaction,
+                    handle_history_scroll,
+                    update_history_content_size,
+                    update_history_images,
+                    refresh_history_ui,
+                    handle_history_loaded,
+                    handle_history_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::History)),
+            )
+            // 点赞记录页
+            .add_systems(
+                OnEnter(AppRoute::LikeRecords),
+                (ensure_main_layout, setup_like_records_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::LikeRecords), cleanup_like_records_ui)
+            .add_systems(
+                Update,
+                (
+                    like_record_card_interaction,
+                    like_record_delete_interaction,
+                    handle_like_records_scroll,
+                    update_like_records_content_size,
+                    update_like_records_images,
+                    refresh_like_records_ui,
+                    handle_like_records_loaded,
+                    handle_like_records_load_failed,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::LikeRecords)),
+            )
+            // 个人资料页面
+            .add_systems(
+                OnEnter(AppRoute::Profile),
+                (ensure_main_layout, setup_profile_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Profile), cleanup_profile_ui)
+            .add_systems(
+                Update,
+                (
+                    profile_refresh_interaction,
+                    refresh_profile_ui,
+                    update_profile_avatar,
+                    handle_profile_scroll,
+                    update_profile_content_size,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Profile)),
+            )
+            // 评论页面
+            .add_systems(
+                OnEnter(AppRoute::Comments),
+                (ensure_main_layout, setup_comments_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Comments), cleanup_comments_ui)
+            .add_systems(
+                Update,
+                (
+                    comments_back_interaction,
+                    comment_like_interaction,
+                    comment_reply_interaction,
+                    cancel_reply_interaction,
+                    expand_children_interaction,
+                    load_more_children_interaction,
+                    comment_send_interaction,
+                    comment_input_interaction,
+                    unfocus_comment_input,
+                    comment_keyboard_input,
+                    comment_ime_input,
+                    comments_pagination_interaction,
+                )
+                    .run_if(in_state(AppRoute::Comments)),
+            )
+            .add_systems(
+                Update,
+                (
+                    refresh_comments_ui,
+                    handle_comments_loaded,
+                    handle_child_comments_loaded,
+                    handle_post_comment_response,
+                    handle_like_comment_response,
+                    handle_comments_scroll,
+                    update_comments_content_size,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Comments)),
+            )
+            // 本地阅读页面
+            .add_systems(
+                OnEnter(AppRoute::LocalRead),
+                (ensure_main_layout, setup_local_read_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::LocalRead), cleanup_local_read_ui)
+            .add_systems(
+                Update,
+                (
+                    local_read_scan_button_interaction,
+                    local_comic_card_interaction,
+                    open_local_folder_interaction,
+                    handle_scan_local_comics,
+                    handle_scan_completed,
+                    handle_scan_failed,
+                    refresh_local_read_ui,
+                    handle_local_read_scroll,
+                    update_local_read_content_size,
+                    update_local_cover_images,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::LocalRead)),
+            )
+            // 图片格式转换页面
+            .add_systems(
+                OnEnter(AppRoute::ImageConvert),
+                (ensure_main_layout, setup_image_convert_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::ImageConvert), cleanup_image_convert_ui)
+            .add_systems(
+                Update,
+                (
+                    select_source_dir_interaction,
+                    handle_source_dir_picker_result,
+                    target_format_button_interaction,
+                    refresh_format_buttons,
+                    start_convert_interaction,
+                    refresh_convert_progress,
+                )
+                    .run_if(in_state(AppRoute::ImageConvert)),
+            )
+            // Waifu2x 超分辨率页面
+            .add_systems(
+                OnEnter(AppRoute::Waifu2x),
+                (ensure_main_layout, setup_waifu2x_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Waifu2x), cleanup_waifu2x_ui)
+            .add_systems(
+                Update,
+                (
+                    waifu2x_select_exe_interaction,
+                    waifu2x_select_input_dir_interaction,
+                    waifu2x_select_output_dir_interaction,
+                    handle_waifu2x_picker_result,
+                    waifu2x_scale_interaction,
+                    waifu2x_noise_interaction,
+                    waifu2x_gpu_interaction,
+                    waifu2x_format_interaction,
+                    refresh_waifu2x_option_buttons,
+                    waifu2x_start_interaction,
+                    refresh_waifu2x_progress,
+                )
+                    .run_if(in_state(AppRoute::Waifu2x)),
+            )
+            // NAS 远程存储页面
+            .add_systems(
+                OnEnter(AppRoute::Nas),
+                (ensure_main_layout, setup_nas_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Nas), cleanup_nas_ui)
+            .add_systems(
+                Update,
+                (
+                    nas_input_interaction,
+                    sync_nas_input_values,
+                    nas_enabled_checkbox_interaction,
+                    nas_test_connection_interaction,
+                    nas_upload_button_interaction,
+                    nas_browse_button_interaction,
+                    auto_save_nas_settings,
+                    handle_nas_test_connection,
+                    handle_nas_test_response,
+                    handle_nas_upload_request,
+                    handle_nas_upload_progress,
+                    handle_nas_upload_completed,
+                )
+                    .run_if(in_state(AppRoute::Nas)),
+            )
+            .add_systems(
+                Update,
+                (
+                    handle_nas_upload_failed,
+                    handle_nas_browse_request,
+                    handle_nas_browse_response,
+                    handle_nas_browse_failed,
+                    refresh_nas_status_ui,
+                    handle_nas_scroll,
+                    update_nas_content_size,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Nas)),
+            )
+            // 聊天大厅页面
+            .add_systems(
+                OnEnter(AppRoute::Chat),
+                (ensure_main_layout, setup_chat_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::Chat), cleanup_chat_ui)
+            .add_systems(
+                Update,
+                (
+                    chat_room_card_interaction,
+                    chat_refresh_interaction,
+                    refresh_chat_ui,
+                    handle_chat_scroll,
+                    update_chat_content_size,
+                    handle_chat_rooms_loaded,
+                    update_chat_room_icons,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::Chat)),
+            )
+            // 聊天室页面
+            .add_systems(
+                OnEnter(AppRoute::ChatRoom),
+                (ensure_main_layout, setup_chat_room_ui).chain(),
+            )
+            .add_systems(OnExit(AppRoute::ChatRoom), cleanup_chat_room_ui)
+            .add_systems(
+                Update,
+                (
+                    poll_chat_messages,
+                    rebuild_chat_messages_ui,
+                    update_connection_status,
+                    auto_scroll_chat,
+                    chat_room_back_interaction,
+                    chat_room_send_interaction,
+                    chat_room_keyboard_input,
+                    chat_room_ime_input,
+                    handle_chat_room_scroll,
+                    update_chat_room_content_size,
+                    handle_send_chat_message_response,
+                    // 滚动条系统
+                    update_all_scrollbar_thumbs,
+                    scrollbar_thumb_interaction,
+                    scrollbar_track_click,
+                    scrollbar_thumb_drag,
+                    reset_drag_state_on_release,
+                )
+                    .run_if(in_state(AppRoute::ChatRoom)),
+            )
             // 侧边栏交互（在主布局存在时运行）
             .add_systems(
                 Update,
-                (sidebar_button_interaction, update_sidebar_active_state)
+                (
+                    sidebar_button_interaction,
+                    update_sidebar_active_state,
+                    auto_load_user_profile,
+                    handle_profile_loaded,
+                    update_sidebar_avatar_url,
+                    update_sidebar_avatar_image,
+                    update_download_count_badge,
+                )
                     .run_if(any_with_component::<MainLayoutRoot>),
             )
+            // 全局右键菜单系统（所有带 ContextMenuTarget 的漫画卡片通用）
+            .add_systems(
+                Update,
+                (
+                    comic_card_context_menu,
+                    comic_context_menu_interaction,
+                    dismiss_context_menu,
+                )
+                    .run_if(any_with_component::<MainLayoutRoot>),
+            )
+            // 全局滚轮分发（根据鼠标悬停位置分发滚动事件到对应容器）
+            .add_systems(Update, global_scroll_dispatch)
             // 全局导航（handle_back_navigation 处理键盘输入，handle_navigation_messages
             // 处理导航消息，track_route_changes 追踪路由变化）
             .add_systems(
@@ -536,7 +1012,10 @@ impl Plugin for UiPlugin {
                     handle_navigation_messages,
                     track_route_changes,
                 ),
-            );
+            )
+            // 全局窗口管理系统
+            .init_resource::<WindowPositionSaveTimer>()
+            .add_systems(Update, (handle_window_close, save_window_position));
     }
 }
 
@@ -544,6 +1023,7 @@ impl Plugin for UiPlugin {
 fn ensure_main_layout(
     commands: Commands,
     asset_server: Res<AssetServer>,
+    i18n: Res<I18n>,
     main_layout_query: Query<Entity, With<MainLayoutRoot>>,
 ) {
     // 如果主布局已存在，跳过
@@ -552,7 +1032,7 @@ fn ensure_main_layout(
     }
 
     // 创建主布局
-    setup_main_layout(commands, asset_server);
+    setup_main_layout(commands, asset_server, i18n);
 }
 
 /// 触发加载分类（进入分类页面时）

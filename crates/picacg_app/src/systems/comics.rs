@@ -11,8 +11,8 @@ use crate::{
         login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
         ui_common::{
-            GridLayoutParams, calculate_scroll_delta, measure_grid_content_height,
-            spawn_comic_time_info, spawn_scrollbar,
+            GridLayoutParams, Scrollable, measure_grid_content_height, spawn_comic_time_info,
+            spawn_scrollbar,
         },
         waterfall::ComicsCardCreationState,
     },
@@ -43,14 +43,20 @@ mod comic_layout {
     pub const PADDING_BOTTOM: f32 = 30.0;
 }
 
-/// 创建漫画列表界面（在 ContentArea 内部）
+/// 创建漫画列表界面（如果已存在则只显示）
 pub fn setup_comics_list_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
     comics_state: Res<ComicsListState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<ComicsCardCreationState>,
+    existing_query: Query<Entity, With<ComicsListRoot>>,
 ) {
+    // 参数化页面：每次进入可能是不同分类，直接 despawn 重建
+    for entity in existing_query.iter() {
+        commands.entity(entity).despawn();
+    }
+
     let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
@@ -158,6 +164,7 @@ pub fn setup_comics_list_ui(
                                 overflow: Overflow::scroll_y(),
                                 ..default()
                             },
+                            Scrollable,
                             ScrollPosition(Vec2::new(0.0, comics_state.scroll_y)),
                             ContentSizeInfo::default(),
                         ))
@@ -210,7 +217,12 @@ fn spawn_comic_card(
             ComicCard {
                 comic_id: comic.id.clone(),
             },
+            ContextMenuTarget {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
+            },
             Button,
+            Interaction::default(),
             Node {
                 width: Val::Px(180.0),
                 flex_direction: FlexDirection::Column,
@@ -389,16 +401,12 @@ pub fn cleanup_comics_list_ui(
     scroll_query: Query<&ScrollPosition, With<ComicsScrollContainer>>,
     mut comics_state: ResMut<ComicsListState>,
 ) {
-    // 保存滚动位置，返回时恢复
+    // 保存滚动位置
     if let Ok(scroll_pos) = scroll_query.single() {
         comics_state.scroll_y = scroll_pos.y;
     }
-
-    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
     creation_state.clear();
-
     for entity in query.iter() {
-        // Bevy 0.17: despawn() 自动递归删除子实体
         commands.entity(entity).despawn();
     }
 }
@@ -474,53 +482,23 @@ pub fn auto_load_more_comics(
 
 /// 漫画列表页面滚动处理系统
 pub fn handle_comics_scroll(
-    mut mouse_wheel_events: MessageReader<MouseWheel>,
-    mut scroll_query: Query<
+    mut _mouse_wheel_events: MessageReader<MouseWheel>,
+    _scroll_query: Query<
         (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
         With<ComicsScrollContainer>,
     >,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = calculate_scroll_delta(event);
-
-        for (mut scroll_position, computed_node, content_size_info) in &mut scroll_query {
-            let (content_height, viewport_height) = content_size_info
-                .map(|info| (info.content_height, info.viewport_height))
-                .unwrap_or_else(|| {
-                    let size = computed_node.size();
-                    (size.y, size.y)
-                });
-
-            let max_scroll = (content_height - viewport_height).max(0.0);
-            scroll_position.y = (scroll_position.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 限制漫画列表页面滚动范围（防止越界）
 pub fn clamp_comics_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<ComicsScrollContainer>,
     >,
 ) {
-    for (mut scroll_position, content_size_info) in &mut scroll_query {
-        if scroll_position.y < 0.0 {
-            scroll_position.y = 0.0;
-        }
-
-        if let Some(content_info) = content_size_info {
-            // 内容尺寸尚未计算时（卡片还没创建），不做上限 clamp，
-            // 避免返回页面时滚动位置在卡片创建前被错误重置为 0
-            if content_info.content_height > 0.0 {
-                let max_scroll =
-                    (content_info.content_height - content_info.viewport_height).max(0.0);
-                if scroll_position.y > max_scroll {
-                    scroll_position.y = max_scroll;
-                }
-            }
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动范围限制
 }
 
 /// 更新漫画列表内容尺寸信息
@@ -796,7 +774,7 @@ pub fn update_comics_images(
         // 找到父卡片
         let parent_entity: Entity = child_of.parent();
         let Ok(card) = card_query.get(parent_entity) else {
-            tracing::warn!("[Comics] 找不到占位符的父卡片");
+            // 其他页面（如分类页）的占位符，跳过
             continue;
         };
 

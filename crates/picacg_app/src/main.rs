@@ -18,6 +18,7 @@ mod utils;
 use bevy::{
     asset::{AssetPlugin, UnapprovedPathMode},
     prelude::*,
+    window::{ExitCondition, WindowPosition},
 };
 use picacg_config::{AppSettings, set_log_level_handle};
 use picacg_db::{Database, db_runtime};
@@ -56,6 +57,12 @@ fn main() {
         tracing::info!("代理未启用");
     }
 
+    // 读取窗口位置和大小（在 drop settings 之前）
+    let saved_window_x = settings.window_x;
+    let saved_window_y = settings.window_y;
+    let saved_window_width = settings.window_width;
+    let saved_window_height = settings.window_height;
+
     // 获取数据库路径
     let db_path = settings.get_database_path();
     drop(settings);
@@ -93,10 +100,27 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "PicACG - Rust Bevy 版".to_string(),
-                        resolution: (1024u32, 768u32).into(),
+                        resolution: {
+                            // 恢复保存的窗口大小，默认 1024x768
+                            let w = saved_window_width.unwrap_or(1024.0);
+                            let h = saved_window_height.unwrap_or(768.0);
+                            (w as u32, h as u32).into()
+                        },
+                        position: {
+                            // 恢复保存的窗口位置
+                            match (saved_window_x, saved_window_y) {
+                                (Some(x), Some(y)) => {
+                                    WindowPosition::At(IVec2::new(x as i32, y as i32))
+                                }
+                                _ => WindowPosition::default(),
+                            }
+                        },
                         ime_enabled: false, // 输入法在输入框获得焦点时动态启用
                         ..default()
                     }),
+                    // 禁用默认关闭行为，由 handle_window_close 系统自行处理
+                    close_when_requested: false,
+                    exit_condition: ExitCondition::OnAllClosed,
                     ..default()
                 })
                 // 已在上方用 tracing_subscriber 初始化日志，禁用 Bevy 内置的 LogPlugin 避免冲突
@@ -106,5 +130,7 @@ fn main() {
         .add_plugins(TokioTasksPlugin::default())
         // 自定义插件
         .add_plugins((UiPlugin, ApiPlugin))
+        // 设置全局 panic handler 为 warn（防止 text_system 等内部系统 panic 导致崩溃）
+        .set_error_handler(bevy::ecs::error::warn)
         .run();
 }

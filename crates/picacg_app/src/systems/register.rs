@@ -15,7 +15,7 @@ use crate::{
     components::*,
     events::*,
     resources::*,
-    systems::login::AppColors,
+    systems::{login::AppColors, ui_common::Scrollable},
     utils::text_input::{TextInput, TextInputDisplay},
 };
 
@@ -82,6 +82,8 @@ pub fn setup_register_ui(
             parent
                 .spawn((
                     RegisterScrollContainer,
+                    Scrollable,
+                    ScrollPosition::default(),
                     Node {
                         width: Val::Px(500.0),
                         max_height: Val::Percent(80.0),
@@ -607,7 +609,8 @@ fn get_field_mut(state: &mut RegisterFormState, field_type: RegisterInputType) -
     }
 }
 
-/// 获取字段值（只读）
+/// 获取字段值（只读，预留工具函数）
+#[allow(dead_code)]
 fn get_field_value(state: &RegisterFormState, field_type: RegisterInputType) -> &str {
     match field_type {
         RegisterInputType::Email => &state.email,
@@ -624,7 +627,8 @@ fn get_field_value(state: &RegisterFormState, field_type: RegisterInputType) -> 
     }
 }
 
-/// 获取字段占位符
+/// 获取字段占位符（预留工具函数）
+#[allow(dead_code)]
 fn get_field_placeholder(field_type: RegisterInputType) -> &'static str {
     match field_type {
         RegisterInputType::Email => "只能包含字母、数字、.和_",
@@ -641,7 +645,8 @@ fn get_field_placeholder(field_type: RegisterInputType) -> &'static str {
     }
 }
 
-/// 是否为密码字段
+/// 是否为密码字段（预留工具函数）
+#[allow(dead_code)]
 fn is_password_field(field_type: RegisterInputType) -> bool {
     matches!(
         field_type,

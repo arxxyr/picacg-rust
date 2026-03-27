@@ -125,6 +125,15 @@ pub struct DbHistory {
     pub last_read: i64,
     pub last_eps: i64,
     pub last_page: i64,
+    /// 漫画标题（冗余存储，用于历史列表展示）
+    #[sqlx(default)]
+    pub comic_title: Option<String>,
+    /// 封面缩略图 URL（冗余存储，用于历史列表展示）
+    #[sqlx(default)]
+    pub thumb_url: Option<String>,
+    /// 最后阅读的章节标题
+    #[sqlx(default)]
+    pub last_eps_title: Option<String>,
 }
 
 impl DbHistory {
@@ -134,6 +143,29 @@ impl DbHistory {
             last_read: Utc::now().timestamp(),
             last_eps: 0,
             last_page: 0,
+            comic_title: None,
+            thumb_url: None,
+            last_eps_title: None,
+        }
+    }
+
+    /// 创建包含完整信息的历史记录
+    pub fn with_info(
+        book_id: String,
+        comic_title: String,
+        thumb_url: String,
+        last_eps: i64,
+        last_eps_title: String,
+        last_page: i64,
+    ) -> Self {
+        Self {
+            book_id,
+            last_read: Utc::now().timestamp(),
+            last_eps,
+            last_page,
+            comic_title: Some(comic_title),
+            thumb_url: Some(thumb_url),
+            last_eps_title: Some(last_eps_title),
         }
     }
 
@@ -141,6 +173,32 @@ impl DbHistory {
         self.last_read = Utc::now().timestamp();
         self.last_eps = eps;
         self.last_page = page;
+    }
+}
+
+// 点赞记录实体
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DbLikeRecord {
+    /// 漫画 ID
+    pub comic_id: String,
+    /// 漫画标题
+    pub comic_title: String,
+    /// 封面缩略图 URL
+    #[sqlx(default)]
+    pub thumb_url: Option<String>,
+    /// 点赞时间（时间戳）
+    pub liked_at: i64,
+}
+
+impl DbLikeRecord {
+    /// 创建新的点赞记录
+    pub fn new(comic_id: String, comic_title: String, thumb_url: Option<String>) -> Self {
+        Self {
+            comic_id,
+            comic_title,
+            thumb_url,
+            liked_at: Utc::now().timestamp(),
+        }
     }
 }
 

@@ -11,7 +11,7 @@ use crate::{
         downloads::ScrollContainer,
         login::AppColors,
         scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{calculate_scroll_delta, spawn_comic_time_info, spawn_scrollbar},
+        ui_common::{Scrollable, spawn_comic_time_info, spawn_scrollbar},
         waterfall::SearchCardCreationState,
     },
     utils::{
@@ -145,6 +145,16 @@ pub struct SelectAllCategoriesButton;
 /// 清空分类按钮
 #[derive(Component)]
 pub struct ClearAllCategoriesButton;
+
+/// 热词标签按钮标记
+#[derive(Component)]
+pub struct HotKeywordTag {
+    pub keyword: String,
+}
+
+/// 热词容器标记
+#[derive(Component)]
+pub struct HotKeywordsContainer;
 
 // ==================== 系统函数 ====================
 
@@ -706,6 +716,7 @@ fn spawn_scroll_area(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
+                    Scrollable,
                     ScrollPosition::default(),
                     ContentSizeInfo::default(),
                 ))
@@ -783,6 +794,11 @@ fn spawn_scroll_content(
                 ..default()
             },
         ));
+
+        // 热门搜索标签云
+        if !search_state.hot_keywords.is_empty() {
+            spawn_hot_keywords_section(scroll, font, &search_state.hot_keywords);
+        }
     } else {
         // 搜索结果
         scroll.spawn((
@@ -819,6 +835,83 @@ fn spawn_scroll_content(
             },
         ));
     }
+}
+
+/// 创建热门搜索标签云
+fn spawn_hot_keywords_section(
+    parent: &mut ChildSpawnerCommands,
+    font: &Handle<Font>,
+    hot_keywords: &[String],
+) {
+    parent
+        .spawn((
+            HotKeywordsContainer,
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(0.0), Val::Px(20.0)),
+                row_gap: Val::Px(12.0),
+                ..default()
+            },
+        ))
+        .with_children(|container| {
+            // 标题
+            container.spawn((
+                Text::new("热门搜索"),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 15.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+
+            // 标签云容器
+            container
+                .spawn((Node {
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(5.0),
+                    row_gap: Val::Px(5.0),
+                    ..default()
+                },))
+                .with_children(|tags| {
+                    for keyword in hot_keywords {
+                        spawn_hot_keyword_tag(tags, font, keyword);
+                    }
+                });
+        });
+}
+
+/// 创建单个热词标签按钮
+fn spawn_hot_keyword_tag(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, keyword: &str) {
+    parent
+        .spawn((
+            HotKeywordTag {
+                keyword: keyword.to_string(),
+            },
+            Button,
+            Interaction::default(),
+            Node {
+                padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.18, 0.18, 0.25)),
+        ))
+        .with_children(|tag| {
+            tag.spawn((
+                Text::new(keyword),
+                TextFont {
+                    font: font.clone(),
+                    font_size: 13.0,
+                    ..default()
+                },
+                TextColor(AppColors::TEXT),
+            ));
+        });
 }
 
 /// 创建分页控件
@@ -932,11 +1025,28 @@ pub fn setup_search_ui(
     categories_state: Res<CategoriesState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut creation_state: ResMut<SearchCardCreationState>,
+    mut keywords_messages: MessageWriter<LoadKeywordsRequest>,
+    mut existing_query: Query<&mut Node, With<SearchRoot>>,
 ) {
+    // 如果 SearchRoot 已存在（被 Display::None 隐藏了），直接显示
+    if let Ok(mut node) = existing_query.single_mut() {
+        node.display = Display::Flex;
+        // 仍然触发热词加载
+        if !search_state.hot_keywords_loaded {
+            keywords_messages.write(LoadKeywordsRequest);
+        }
+        return;
+    }
+
     let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     creation_state.clear();
+
+    // 如果热词未加载，触发加载请求
+    if !search_state.hot_keywords_loaded {
+        keywords_messages.write(LoadKeywordsRequest);
+    }
 
     let available_categories: Vec<String> = categories_state
         .categories
@@ -987,7 +1097,12 @@ fn spawn_search_result_card(
             SearchResultCard {
                 comic_id: comic.id.clone(),
             },
+            ContextMenuTarget {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
+            },
             Button,
+            Interaction::default(),
             Node {
                 width: Val::Px(180.0),
                 flex_direction: FlexDirection::Column,
@@ -1180,15 +1295,15 @@ fn spawn_search_result_card(
 
 /// 清理搜索界面
 pub fn cleanup_search_ui(
-    mut commands: Commands,
-    query: Query<Entity, With<SearchRoot>>,
+    mut query: Query<&mut Node, With<SearchRoot>>,
     mut creation_state: ResMut<SearchCardCreationState>,
 ) {
-    // 清空瀑布式创建状态（防止对已销毁的 Entity 操作）
+    // 清空瀑布式创建状态
     creation_state.clear();
 
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
+    // 隐藏而非销毁
+    for mut node in query.iter_mut() {
+        node.display = Display::None;
     }
 }
 
@@ -1437,22 +1552,13 @@ pub fn search_pagination_interaction(
 
 /// 处理搜索滚动
 pub fn handle_search_scroll(
-    mut scroll_query: Query<
+    _scroll_query: Query<
         (&mut ScrollPosition, Option<&ContentSizeInfo>),
         With<SearchScrollContainer>,
     >,
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
 ) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = calculate_scroll_delta(event);
-
-        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-            let max_scroll = content_info
-                .map(|info| (info.content_height - info.viewport_height).max(0.0))
-                .unwrap_or(0.0);
-            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
+    // Bevy 内置 overflow: scroll_y() 自动处理滚动
 }
 
 /// 更新搜索内容尺寸
@@ -1898,6 +2004,56 @@ pub fn clear_all_categories_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+        }
+    }
+}
+
+// ==================== 热词交互系统 ====================
+
+/// 热词标签点击交互：点击热词填入搜索框并触发搜索
+pub fn hot_keyword_tag_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &HotKeywordTag),
+        Changed<Interaction>,
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut search_messages: MessageWriter<SearchComicsRequestEvent>,
+    mut input_query: Query<&mut TextInput, With<SearchInputField>>,
+) {
+    for (interaction, mut bg_color, tag) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+
+                // 设置关键词
+                search_state.keyword.clone_from(&tag.keyword);
+
+                // 同步到输入框
+                for mut input in input_query.iter_mut() {
+                    input.value.clone_from(&tag.keyword);
+                    input.cursor = tag.keyword.len();
+                    input.focused = false;
+                }
+
+                // 触发搜索
+                search_state.is_loading = true;
+                search_state.needs_rebuild = true;
+                search_state.page = 1;
+                search_messages.write(SearchComicsRequestEvent {
+                    keyword: tag.keyword.clone(),
+                    page: 1,
+                    sort: search_state.sort.clone(),
+                    categories: search_state.selected_categories.clone(),
+                });
+
+                tracing::info!("点击热词搜索: {}", tag.keyword);
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.25, 0.25, 0.35));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.25));
             }
         }
     }
