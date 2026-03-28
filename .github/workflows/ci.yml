@@ -357,69 +357,45 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2  # 获取前一个 commit 用于比较版本
 
-      - name: Detect version change
-        id: detect
+      - name: Check version and tag
+        id: check
         run: |
-          # 当前版本
-          CURRENT_VERSION=$(grep -A5 '^\[workspace\.package\]' Cargo.toml | grep '^version' | sed 's/.*= *"\([^"]*\)".*/\1/')
-          echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-
-          # 上一个 commit 的版本
-          PREV_VERSION=$(git show HEAD~1:Cargo.toml 2>/dev/null | grep -A5 '^\[workspace\.package\]' | grep '^version' | sed 's/.*= *"\([^"]*\)".*/\1/' || echo "")
-
-          echo "当前版本: $CURRENT_VERSION"
-          echo "上一版本: $PREV_VERSION"
-
-          if [ "$CURRENT_VERSION" != "$PREV_VERSION" ] && [ -n "$PREV_VERSION" ]; then
-            echo "版本已变更: $PREV_VERSION → $CURRENT_VERSION"
-            echo "changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "版本未变更，跳过发布"
-            echo "changed=false" >> $GITHUB_OUTPUT
-          fi
-
-          TAG_NAME="v${CURRENT_VERSION}"
-          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
-
+          # 从 Cargo.toml 读取当前版本
+          VERSION=$(grep -A5 '^\[workspace\.package\]' Cargo.toml | grep '^version' | sed 's/.*= *"\([^"]*\)".*/\1/')
+          TAG_NAME="v${VERSION}"
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          FULL_VERSION="v${CURRENT_VERSION}+${SHORT_SHA}"
-          echo "full_version=$FULL_VERSION" >> $GITHUB_OUTPUT
 
-          BUILD_DATE=$(date -u +%Y-%m-%d)
-          echo "build_date=$BUILD_DATE" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "full_version=${TAG_NAME}+${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "build_date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
 
-      - name: Check tag exists
-        if: steps.detect.outputs.changed == 'true'
-        id: check_tag
-        run: |
-          TAG="${{ steps.detect.outputs.tag_name }}"
-          if git ls-remote --tags origin "refs/tags/$TAG" | grep -q "$TAG"; then
-            echo "Tag $TAG 已存在，跳过"
-            echo "exists=true" >> $GITHUB_OUTPUT
+          # 检查该 tag 是否已存在于远程
+          if git ls-remote --tags origin "refs/tags/$TAG_NAME" | grep -q "$TAG_NAME"; then
+            echo "Tag $TAG_NAME 已存在，跳过发布"
+            echo "should_release=false" >> $GITHUB_OUTPUT
           else
-            echo "Tag $TAG 不存在，将创建"
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag $TAG_NAME 不存在，将创建并发布"
+            echo "should_release=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Create tag
-        if: steps.detect.outputs.changed == 'true' && steps.check_tag.outputs.exists == 'false'
+        if: steps.check.outputs.should_release == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.detect.outputs.tag_name }}" -m "Release ${{ steps.detect.outputs.tag_name }}"
-          git push origin "${{ steps.detect.outputs.tag_name }}"
+          git tag -a "${{ steps.check.outputs.tag_name }}" -m "Release ${{ steps.check.outputs.tag_name }}"
+          git push origin "${{ steps.check.outputs.tag_name }}"
 
       - name: Download all artifacts
-        if: steps.detect.outputs.changed == 'true' && steps.check_tag.outputs.exists == 'false'
+        if: steps.check.outputs.should_release == 'true'
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Collect release files
-        if: steps.detect.outputs.changed == 'true' && steps.check_tag.outputs.exists == 'false'
+        if: steps.check.outputs.should_release == 'true'
         run: |
           mkdir -p release
           find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" \) -exec cp {} release/ \;
@@ -427,25 +403,25 @@ jobs:
           ls -la release/
 
       - name: Create GitHub Release
-        if: steps.detect.outputs.changed == 'true' && steps.check_tag.outputs.exists == 'false'
+        if: steps.check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          name: "Release ${{ steps.detect.outputs.full_version }}"
-          tag_name: ${{ steps.detect.outputs.tag_name }}
+          name: "Release ${{ steps.check.outputs.full_version }}"
+          tag_name: ${{ steps.check.outputs.tag_name }}
           files: release/*
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(steps.detect.outputs.tag_name, 'beta') || contains(steps.detect.outputs.tag_name, 'alpha') || contains(steps.detect.outputs.tag_name, 'rc') }}
+          prerelease: ${{ contains(steps.check.outputs.tag_name, 'beta') || contains(steps.check.outputs.tag_name, 'alpha') || contains(steps.check.outputs.tag_name, 'rc') }}
           body: |
             ## 版本信息
-            - **版本号**: ${{ steps.detect.outputs.full_version }}
-            - **构建日期**: ${{ steps.detect.outputs.build_date }}
+            - **版本号**: ${{ steps.check.outputs.full_version }}
+            - **构建日期**: ${{ steps.check.outputs.build_date }}
             - **Commit**: ${{ github.sha }}
 
             ## 下载
-            - Linux x64: `picacg-${{ steps.detect.outputs.full_version }}-linux-x64.tar.gz`
-            - Windows x64: `picacg-${{ steps.detect.outputs.full_version }}-windows-x64.zip`
-            - macOS ARM64: `picacg-${{ steps.detect.outputs.full_version }}-macos-arm64.dmg`
+            - Linux x64: `picacg-${{ steps.check.outputs.full_version }}-linux-x64.tar.gz`
+            - Windows x64: `picacg-${{ steps.check.outputs.full_version }}-windows-x64.zip`
+            - macOS ARM64: `picacg-${{ steps.check.outputs.full_version }}-macos-arm64.dmg`
 
             ## 说明
             - 已内置 Sarasa（更纱黑体）字体，无需额外安装
