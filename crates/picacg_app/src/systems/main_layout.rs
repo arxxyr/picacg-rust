@@ -604,13 +604,16 @@ pub fn update_sidebar_active_state(
 }
 
 /// 主布局创建后自动加载用户资料（获取头像 URL）
+/// 主布局创建后自动预加载用户资料和分类数据
 pub fn auto_load_user_profile(
     mut has_loaded: Local<bool>,
-    mut load_messages: MessageWriter<crate::events::LoadUserProfileRequest>,
+    mut load_profile: MessageWriter<crate::events::LoadUserProfileRequest>,
+    mut load_categories: MessageWriter<crate::events::LoadCategoriesRequest>,
 ) {
     if !*has_loaded {
         *has_loaded = true;
-        load_messages.write(crate::events::LoadUserProfileRequest);
+        load_profile.write(crate::events::LoadUserProfileRequest);
+        load_categories.write(crate::events::LoadCategoriesRequest);
     }
 }
 

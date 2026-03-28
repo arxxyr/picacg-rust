@@ -634,13 +634,19 @@ pub enum ReadMode {
 pub struct ReaderState {
     /// 漫画 ID
     pub comic_id: String,
-    /// 章节顺序
+    /// 漫画标题（本地文件查找用）
+    pub comic_title: String,
+    /// 所有章节列表（从 ComicDetailState 复制）
+    pub episodes: Vec<Episode>,
+    /// 当前章节在 episodes 中的索引
+    pub current_episode_idx: usize,
+    /// 当前章节 order
     pub episode_order: i32,
-    /// 当前页码（单页模式）
-    pub current_page: i32,
-    /// 总页数
-    pub total_pages: i32,
-    /// 图片列表
+    /// 当前页码（0-indexed）
+    pub current_page: usize,
+    /// 总图片数
+    pub total_pages: usize,
+    /// 当前章节图片列表
     pub pictures: Vec<Picture>,
     /// 缩放比例 (1.0 = 100%)
     pub scale: f32,
@@ -650,31 +656,60 @@ pub struct ReaderState {
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
-    // === Webtoon 模式专用 ===
-    /// 当前滚动位置（像素）
-    pub scroll_offset: f32,
-    /// 已加载图片的起始索引
-    pub loaded_start: usize,
-    /// 已加载图片的结束索引（不包含）
-    pub loaded_end: usize,
+    /// 是否正在加载下一章（跨章节切换时）
+    pub is_loading_next_chapter: bool,
+    /// 下一章的图片列表（预加载，到章节末尾自动追加到条漫）
+    pub next_chapter_pictures: Vec<Picture>,
 }
 
 impl Default for ReaderState {
     fn default() -> Self {
         Self {
             comic_id: String::new(),
+            comic_title: String::new(),
+            episodes: Vec::new(),
+            current_episode_idx: 0,
             episode_order: 1,
-            current_page: 1,
+            current_page: 0,
             total_pages: 0,
             pictures: Vec::new(),
             scale: 1.0,
-            read_mode: ReadMode::default(), // 使用 ReadMode 的默认值（Webtoon）
+            read_mode: ReadMode::default(),
             is_loading: false,
             error: None,
-            scroll_offset: 0.0,
-            loaded_start: 0,
-            loaded_end: 0,
+            is_loading_next_chapter: false,
+            next_chapter_pictures: Vec::new(),
         }
+    }
+}
+
+impl ReaderState {
+    /// 获取下一章的 episode（如果存在）
+    pub fn next_episode(&self) -> Option<&Episode> {
+        if self.current_episode_idx + 1 < self.episodes.len() {
+            Some(&self.episodes[self.current_episode_idx + 1])
+        } else {
+            None
+        }
+    }
+
+    /// 获取上一章的 episode（如果存在）
+    pub fn prev_episode(&self) -> Option<&Episode> {
+        if self.current_episode_idx > 0 {
+            Some(&self.episodes[self.current_episode_idx - 1])
+        } else {
+            None
+        }
+    }
+
+    /// 是否为当前章节的最后一页
+    pub fn is_last_page(&self) -> bool {
+        self.total_pages == 0 || self.current_page >= self.total_pages.saturating_sub(1)
+    }
+
+    /// 是否为当前章节的第一页
+    pub fn is_first_page(&self) -> bool {
+        self.current_page == 0
     }
 }
 

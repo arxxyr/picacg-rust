@@ -448,6 +448,10 @@ fn handle_load_categories(
     mut categories_state: ResMut<CategoriesState>,
 ) {
     for _event in messages.read() {
+        // 防止重复请求（预加载和页面进入可能同时触发）
+        if categories_state.is_loading || !categories_state.categories.is_empty() {
+            continue;
+        }
         categories_state.is_loading = true;
         categories_state.error = None;
 
@@ -2857,8 +2861,12 @@ fn handle_load_keywords(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<LoadKeywordsRequest>,
     api_client: Res<ApiClientResource>,
+    search_state: Res<crate::resources::SearchState>,
 ) {
     for _event in messages.read() {
+        if search_state.hot_keywords_loaded {
+            continue;
+        }
         let client = api_client.0.clone();
 
         tracing::info!("加载热门搜索关键词");
@@ -3076,6 +3084,9 @@ fn handle_load_knight_rankings(
     mut rankings_state: ResMut<RankingsState>,
 ) {
     for _event in messages.read() {
+        if rankings_state.knight_loading {
+            continue;
+        }
         rankings_state.knight_loading = true;
         rankings_state.knight_error = None;
 

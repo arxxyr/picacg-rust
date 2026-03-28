@@ -195,14 +195,37 @@ pub fn handle_navigation_messages(
     // 处理导航到阅读界面
     for event in reader_events.read() {
         history.push(current.clone());
+
+        // 从 ComicDetailState 获取漫画标题和章节列表
+        let comic_title = detail_state
+            .comic
+            .as_ref()
+            .map(|c| c.title.clone())
+            .unwrap_or_default();
+
+        // 复制章节列表并按 order 升序排序
+        let mut episodes = detail_state.episodes.clone();
+        episodes.sort_by_key(|ep| ep.order);
+
+        // 查找当前章节在排序后列表中的索引
+        let current_episode_idx = episodes
+            .iter()
+            .position(|ep| ep.order == event.episode_order)
+            .unwrap_or(0);
+
         // 设置阅读器状态
         reader_state.comic_id = event.comic_id.clone();
+        reader_state.comic_title = comic_title;
+        reader_state.episodes = episodes;
+        reader_state.current_episode_idx = current_episode_idx;
         reader_state.episode_order = event.episode_order;
-        reader_state.current_page = 1;
+        reader_state.current_page = 0;
         reader_state.total_pages = 0;
         reader_state.pictures.clear();
         reader_state.is_loading = false;
         reader_state.error = None;
+        reader_state.is_loading_next_chapter = false;
+        reader_state.next_chapter_pictures.clear();
         next_route.set(AppRoute::ReadView);
     }
 

@@ -316,7 +316,7 @@ pub fn waterfall_create_category_cards(
     scroll_container_query: Query<(Entity, Option<&Children>), With<CategoriesScrollContainer>>,
     card_query: Query<&CategoryCard>,
     loading_query: Query<Entity, With<LoadingIndicator>>,
-    time: Res<Time>,
+    _time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
     // 构建屏蔽过滤配置
@@ -381,51 +381,19 @@ pub fn waterfall_create_category_cards(
             return;
         }
 
-        // 一次性创建所有隐藏卡片（使用过滤后的索引）
-        let mut entities = Vec::with_capacity(count);
+        // 分类数量少（~30个），直接全部创建为可见（不用瀑布流动画）
         commands.entity(container_entity).with_children(|parent| {
             for i in 0..count {
                 if let Some(&original_index) = filtered_indices.get(i)
                     && let Some(category) = categories.get(original_index)
                 {
-                    let entity = spawn_category_card(parent, category, &font, &image_cache, true);
-                    entities.push(entity);
+                    spawn_category_card(parent, category, &font, &image_cache, false);
                 }
             }
         });
 
-        // 设置预创建完成后的实体列表
-        creation_state.set_precreated_entities(entities);
-        tracing::debug!("分类卡片预创建完成: {} 个（过滤后）", count);
-        return;
-    }
-
-    // 检查是否应该显示下一批
-    if !creation_state.should_show_batch(time.delta()) {
-        return;
-    }
-
-    // 获取这一批要显示的实体
-    let batch = creation_state.take_batch();
-    if batch.is_empty() {
-        return;
-    }
-
-    // 显示这一批卡片（设置 Visibility::Inherited）
-    for entity in batch {
-        // 安全检查：实体可能在清理时已被销毁
-        if let Ok(mut entity_commands) = commands.get_entity(entity) {
-            entity_commands.insert(Visibility::Inherited);
-        }
-    }
-
-    // 标记显示完成
-    if !creation_state.has_pending() {
-        creation_state.finish();
-        tracing::debug!(
-            "分类卡片瀑布式显示完成: {} 个",
-            categories_state.categories.len()
-        );
+        creation_state.clear();
+        tracing::debug!("分类卡片直接创建完成: {} 个（过滤后）", count);
     }
 }
 

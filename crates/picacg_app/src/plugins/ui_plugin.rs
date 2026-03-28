@@ -267,6 +267,7 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     detail_back_button_interaction,
+                    author_button_interaction,
                     episode_card_interaction,
                     start_read_button_interaction,
                     like_button_interaction,
@@ -294,7 +295,18 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
+                    // 图片加载
                     trigger_load_pictures,
+                    handle_pictures_loaded,
+                    handle_pictures_load_failed,
+                    // 单页模式
+                    update_single_page_slots,
+                    update_reader_image_from_cache,
+                    // 条漫模式
+                    update_webtoon_window,
+                    update_webtoon_images_from_cache,
+                    update_webtoon_scale,
+                    // 交互
                     reader_back_button_interaction,
                     reader_prev_button_interaction,
                     reader_next_button_interaction,
@@ -302,12 +314,12 @@ impl Plugin for UiPlugin {
                     reader_mouse_wheel_control,
                     reader_zoom_keyboard_control,
                     reader_mode_button_interaction,
-                    handle_pictures_loaded,
-                    handle_pictures_load_failed,
-                    update_reader_image_from_cache,
                     handle_read_mode_change,
-                    update_webtoon_images_from_cache,
-                    update_webtoon_scale,
+                    // 章节切换
+                    handle_chapter_switch,
+                    // 页码更新
+                    update_page_info,
+                    // 历史保存
                     save_reading_history,
                 )
                     .run_if(in_state(AppRoute::ReadView)),

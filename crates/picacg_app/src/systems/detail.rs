@@ -50,6 +50,12 @@ pub struct DetailBackButton;
 #[derive(Component)]
 pub struct DownloadButton;
 
+/// 作者按钮（点击搜索该作者）
+#[derive(Component)]
+pub struct AuthorButton {
+    pub author: String,
+}
+
 /// 详情页点赞数文本
 #[derive(Component)]
 pub struct DetailLikesText;
@@ -273,16 +279,34 @@ pub fn setup_detail_ui(
                                                 TextColor(AppColors::TEXT),
                                             ));
 
-                                            // 作者
-                                            details.spawn((
-                                                Text::new(format!("作者: {}", comic.author)),
-                                                TextFont {
-                                                    font: font.clone(),
-                                                    font_size: 14.0,
-                                                    ..default()
-                                                },
-                                                TextColor(AppColors::TEXT_SECONDARY),
-                                            ));
+                                            // 作者（可点击搜索）
+                                            details
+                                                .spawn((
+                                                    AuthorButton {
+                                                        author: comic.author.clone(),
+                                                    },
+                                                    Button,
+                                                    Interaction::default(),
+                                                    Node {
+                                                        padding: UiRect::all(Val::Px(0.0)),
+                                                        ..default()
+                                                    },
+                                                    BackgroundColor(Color::NONE),
+                                                ))
+                                                .with_children(|btn| {
+                                                    btn.spawn((
+                                                        Text::new(format!(
+                                                            "作者: {}",
+                                                            comic.author
+                                                        )),
+                                                        TextFont {
+                                                            font: font.clone(),
+                                                            font_size: 14.0,
+                                                            ..default()
+                                                        },
+                                                        TextColor(AppColors::PRIMARY),
+                                                    ));
+                                                });
 
                                             // 分类
                                             if !comic.categories.is_empty() {
@@ -919,16 +943,31 @@ fn build_detail_content(
                         TextColor(AppColors::TEXT),
                     ));
 
-                    // 作者
-                    details.spawn((
-                        Text::new(format!("作者: {}", comic.author)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
+                    // 作者（可点击搜索）
+                    details
+                        .spawn((
+                            AuthorButton {
+                                author: comic.author.clone(),
+                            },
+                            Button,
+                            Interaction::default(),
+                            Node {
+                                padding: UiRect::all(Val::Px(0.0)),
+                                ..default()
+                            },
+                            BackgroundColor(Color::NONE),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn((
+                                Text::new(format!("作者: {}", comic.author)),
+                                TextFont {
+                                    font: font.clone(),
+                                    font_size: 14.0,
+                                    ..default()
+                                },
+                                TextColor(AppColors::PRIMARY),
+                            ));
+                        });
 
                     // 汉化组
                     if let Some(ref team) = comic.chinese_team
@@ -1588,6 +1627,55 @@ pub fn tag_button_interaction(
                 *bg_color = BackgroundColor(Color::srgb(0.15, 0.12, 0.2));
                 *border_color = BorderColor::all(Color::srgb(0.5, 0.4, 0.6));
             }
+        }
+    }
+}
+
+/// 作者按钮交互：点击跳转到搜索页并搜索该作者
+pub fn author_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &AuthorButton, &Children),
+        Changed<Interaction>,
+    >,
+    mut text_color_query: Query<&mut TextColor>,
+    mut search_state: ResMut<crate::resources::SearchState>,
+    mut next_route: ResMut<NextState<crate::resources::AppRoute>>,
+    mut search_messages: MessageWriter<crate::events::SearchComicsRequestEvent>,
+) {
+    for (interaction, btn, children) in interaction_query.iter_mut() {
+        // 更新文字颜色
+        let color = match *interaction {
+            Interaction::Pressed => AppColors::PRIMARY.with_alpha(0.6),
+            Interaction::Hovered => AppColors::PRIMARY.with_alpha(0.8),
+            Interaction::None => AppColors::PRIMARY,
+        };
+        for child in children.iter() {
+            if let Ok(mut tc) = text_color_query.get_mut(child) {
+                *tc = TextColor(color);
+            }
+        }
+
+        if *interaction == Interaction::Pressed {
+            // 设置搜索状态
+            search_state.keyword = btn.author.clone();
+            search_state.is_loading = true;
+            search_state.has_searched = true;
+            search_state.needs_rebuild = true;
+            search_state.page = 1;
+            search_state.results.clear();
+            search_state.selected_categories.clear();
+
+            // 发送搜索请求
+            search_messages.write(crate::events::SearchComicsRequestEvent {
+                keyword: btn.author.clone(),
+                page: 1,
+                sort: search_state.sort.clone(),
+                categories: vec![],
+            });
+
+            // 跳转到搜索页
+            next_route.set(crate::resources::AppRoute::Search);
+            tracing::info!("搜索作者: {}", btn.author);
         }
     }
 }
