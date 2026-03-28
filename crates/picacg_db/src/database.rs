@@ -206,6 +206,21 @@ impl Database {
         .execute(&pool)
         .await?;
 
+        // 章节图片缓存表
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS episode_pictures (
+                comic_id TEXT NOT NULL,
+                episode_order INTEGER NOT NULL,
+                pictures_json TEXT NOT NULL,
+                cached_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (comic_id, episode_order)
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await?;
+
         info!("数据库初始化完成");
         Ok(Self { pool })
     }
@@ -974,4 +989,48 @@ pub async fn get_like_count_async(pool: &SqlitePool) -> Result<i64> {
         .fetch_one(pool)
         .await?;
     Ok(count)
+}
+
+// ==================== 章节图片缓存 ====================
+
+/// 获取缓存的章节图片列表
+pub async fn get_episode_pictures_async(
+    pool: &SqlitePool,
+    comic_id: &str,
+    episode_order: i32,
+) -> Option<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT pictures_json FROM episode_pictures WHERE comic_id = ? AND episode_order = ?",
+    )
+    .bind(comic_id)
+    .bind(episode_order)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// 保存章节图片列表到缓存
+pub async fn save_episode_pictures_async(
+    pool: &SqlitePool,
+    comic_id: &str,
+    episode_order: i32,
+    pictures_json: &str,
+) {
+    let now = chrono::Utc::now().timestamp();
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO episode_pictures (comic_id, episode_order, pictures_json, cached_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(comic_id, episode_order) DO UPDATE SET
+            pictures_json = excluded.pictures_json,
+            cached_at = excluded.cached_at
+        "#,
+    )
+    .bind(comic_id)
+    .bind(episode_order)
+    .bind(pictures_json)
+    .bind(now)
+    .execute(pool)
+    .await;
 }

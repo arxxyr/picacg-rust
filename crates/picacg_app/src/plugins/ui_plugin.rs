@@ -298,6 +298,7 @@ impl Plugin for UiPlugin {
                     // 图片加载
                     trigger_load_pictures,
                     handle_pictures_loaded,
+                    handle_all_pictures_loaded,
                     handle_pictures_load_failed,
                     // 单页模式
                     update_single_page_slots,

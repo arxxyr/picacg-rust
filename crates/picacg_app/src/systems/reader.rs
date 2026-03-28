@@ -108,12 +108,10 @@ pub struct ImageSlot {
 #[derive(Component)]
 pub struct WebtoonScrollContainer;
 
-/// 条漫模式固定槽位（共 5 个，图片在槽位间流动）
+/// 条漫模式槽位（每页一个实体，图片按需懒加载）
 #[derive(Component)]
 pub struct WebtoonSlot {
-    /// 槽位编号（0-4，固定不变）
-    pub slot_index: usize,
-    /// 当前绑定的页码（None = 空槽）
+    /// 绑定的全局页码（None = 空槽）
     pub page_index: Option<usize>,
 }
 
@@ -128,10 +126,16 @@ mod consts {
     pub const MAX_SCALE: f32 = 3.0;
     /// 缩放步长
     pub const SCALE_STEP: f32 = 0.1;
-    /// 条漫模式固定槽位数量
-    pub const WEBTOON_SLOT_COUNT: usize = 5;
     /// 条漫模式滚动速度（每行滚动像素）
     pub const WEBTOON_SCROLL_SPEED: f32 = 60.0;
+    /// 条漫模式图片宽度百分比
+    pub const WEBTOON_IMAGE_WIDTH_PERCENT: f32 = 80.0;
+    /// 条漫模式预加载范围（可见区域上下各预加载多少张）
+    pub const WEBTOON_PRELOAD_RANGE: usize = 3;
+    /// 条漫模式占位高度（未加载图片的默认高度）
+    pub const WEBTOON_PLACEHOLDER_HEIGHT: f32 = 600.0;
+    /// 条漫模式图片间距
+    pub const WEBTOON_GAP: f32 = 8.0;
 }
 
 // ==================== 本地文件加载 ====================
@@ -194,12 +198,12 @@ fn single_page_image_style(scale: f32) -> Node {
     }
 }
 
-/// 条漫模式图片节点样式（宽度 100%，高度自动保持比例）
-#[allow(dead_code)]
+/// 条漫模式图片节点样式（宽度 80%，高度自动保持比例，底部间距）
 fn webtoon_image_style() -> Node {
     Node {
-        width: Val::Percent(100.0),
+        width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
         height: Val::Auto,
+        margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
         ..default()
     }
 }
@@ -561,29 +565,40 @@ pub fn cleanup_reader_ui(mut commands: Commands, query: Query<Entity, With<Reade
 // ==================== 图片加载 ====================
 
 /// 触发加载图片（进入阅读器时自动执行）
+///
+/// - 条漫模式 Phase 1：先加载当前章节（秒级），立即显示
+/// - 条漫模式 Phase 2：由 handle_pictures_loaded 触发后台加载全章节
+/// - 单页模式：发送 LoadPicturesRequest，只加载当前章节
 pub fn trigger_load_pictures(
     mut reader_state: ResMut<ReaderState>,
     mut load_messages: MessageWriter<LoadPicturesRequest>,
 ) {
-    if !reader_state.comic_id.is_empty()
-        && reader_state.pictures.is_empty()
-        && !reader_state.is_loading
+    if reader_state.comic_id.is_empty()
+        || !reader_state.pictures.is_empty()
+        || reader_state.is_loading
+        || reader_state.is_loading_all_chapters
     {
-        tracing::info!(
-            "触发加载图片: comic_id={}, episode={}",
-            reader_state.comic_id,
-            reader_state.episode_order
-        );
-        reader_state.is_loading = true;
-        load_messages.write(LoadPicturesRequest {
-            comic_id: reader_state.comic_id.clone(),
-            episode_order: reader_state.episode_order,
-            page: 1,
-        });
+        return;
     }
+
+    // 条漫和单页模式都先加载当前章节
+    tracing::info!(
+        "触发加载第 {} 章图片（模式={:?}）",
+        reader_state.episode_order,
+        reader_state.read_mode,
+    );
+    reader_state.is_loading = true;
+    load_messages.write(LoadPicturesRequest {
+        comic_id: reader_state.comic_id.clone(),
+        episode_order: reader_state.episode_order,
+        page: 1,
+    });
 }
 
-/// 处理图片加载完成事件 —— 初始化显示
+/// 处理单章节图片加载完成
+///
+/// - 单页模式：直接创建视图
+/// - 条漫模式 Phase 1：用当前章节创建视图，然后触发 Phase 2（后台加载全章节）
 pub fn handle_pictures_loaded(
     mut commands: Commands,
     mut reader_state: ResMut<ReaderState>,
@@ -594,9 +609,10 @@ pub fn handle_pictures_loaded(
     mut page_text_query: Query<&mut Text, With<ReaderPageText>>,
     image_cache: Res<ImageCache>,
     mut load_image_messages: MessageWriter<LoadImageRequest>,
+    mut load_all_messages: MessageWriter<LoadAllChapterPicturesRequest>,
 ) {
     for event in pictures_events.read() {
-        // 如果是下一章预加载的结果
+        // 单页模式的下一章预加载
         if reader_state.is_loading_next_chapter {
             reader_state.is_loading_next_chapter = false;
             reader_state.next_chapter_pictures = event.pictures.clone();
@@ -607,32 +623,36 @@ pub fn handle_pictures_loaded(
             continue;
         }
 
-        tracing::info!(
-            "图片加载完成: {} 张, API 页数={}, 模式={:?}",
-            event.pictures.len(),
-            event.total_pages,
-            reader_state.read_mode
-        );
+        // 全章节加载结果走 handle_all_pictures_loaded
+        if reader_state.is_loading_all_chapters {
+            continue;
+        }
 
-        // 更新状态
-        reader_state.pictures = event.pictures.clone();
-        reader_state.total_pages = reader_state.pictures.len();
         reader_state.is_loading = false;
+
+        // 构建当前章节的 page_metas
+        let ep_order = reader_state.episode_order;
+        let metas: Vec<_> = (0..event.pictures.len())
+            .map(|i| crate::events::WebtoonPageMeta {
+                episode_order: ep_order,
+                page_in_chapter: i,
+            })
+            .collect();
+
+        reader_state.pictures = event.pictures.clone();
+        reader_state.page_metas = metas;
+        reader_state.total_pages = reader_state.pictures.len();
         reader_state.current_page = 0;
 
-        // 移除加载指示器
         for entity in loading_query.iter() {
             commands.entity(entity).despawn();
         }
-
-        // 更新页码显示
         update_page_text(&reader_state, &mut page_text_query);
 
         let Ok(container) = container_query.single() else {
             continue;
         };
 
-        // 根据阅读模式创建视图
         match reader_state.read_mode {
             ReadMode::SinglePage => {
                 create_single_page_slots(
@@ -645,6 +665,10 @@ pub fn handle_pictures_loaded(
                 );
             }
             ReadMode::Webtoon => {
+                tracing::info!(
+                    "条漫 Phase 1：当前章节 {} 张图片已就绪，创建视图",
+                    reader_state.total_pages
+                );
                 create_webtoon_view(
                     &mut commands,
                     container,
@@ -653,8 +677,88 @@ pub fn handle_pictures_loaded(
                     &asset_server,
                     &mut load_image_messages,
                 );
+
+                // Phase 2：后台加载全章节（DB 缓存优先）
+                if reader_state.episodes.len() > 1 {
+                    tracing::info!(
+                        "条漫 Phase 2：后台加载全部 {} 个章节图片列表",
+                        reader_state.episodes.len()
+                    );
+                    reader_state.is_loading_all_chapters = true;
+                    load_all_messages.write(LoadAllChapterPicturesRequest {
+                        comic_id: reader_state.comic_id.clone(),
+                        episodes: reader_state.episodes.clone(),
+                    });
+                }
             }
         }
+    }
+}
+
+/// 处理全章节图片列表加载完成（条漫模式 Phase 2）
+///
+/// 销毁当前视图，用完整列表重建，保持在对应的全局页码位置
+pub fn handle_all_pictures_loaded(
+    mut commands: Commands,
+    mut reader_state: ResMut<ReaderState>,
+    mut events: MessageReader<AllChapterPicturesLoadedEvent>,
+    loading_query: Query<Entity, With<ReaderLoadingIndicator>>,
+    container_query: Query<Entity, With<ReaderImageContainer>>,
+    webtoon_container_query: Query<Entity, With<WebtoonScrollContainer>>,
+    asset_server: Res<AssetServer>,
+    mut page_text_query: Query<&mut Text, With<ReaderPageText>>,
+    image_cache: Res<ImageCache>,
+    mut load_image_messages: MessageWriter<LoadImageRequest>,
+) {
+    for event in events.read() {
+        reader_state.is_loading_all_chapters = false;
+
+        // 计算用户选择章节的起始页码 + 当前在章节内的偏移
+        let target_order = reader_state.episode_order;
+        let chapter_start = event
+            .page_metas
+            .iter()
+            .position(|m| m.episode_order == target_order)
+            .unwrap_or(0);
+        // 保持当前阅读偏移（Phase 1 时用户可能已经翻了几页）
+        let global_page = chapter_start + reader_state.current_page;
+
+        reader_state.pictures = event.pictures.clone();
+        reader_state.page_metas = event.page_metas.clone();
+        reader_state.total_pages = reader_state.pictures.len();
+        reader_state.current_page = global_page.min(reader_state.total_pages.saturating_sub(1));
+
+        tracing::info!(
+            "条漫 Phase 2 完成：共 {} 张，当前全局页={}（第 {} 章偏移 {}）",
+            reader_state.total_pages,
+            reader_state.current_page,
+            target_order,
+            reader_state.current_page - chapter_start,
+        );
+
+        for entity in loading_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        // 销毁旧的条漫视图
+        for entity in webtoon_container_query.iter() {
+            commands.entity(entity).despawn();
+        }
+
+        update_page_text(&reader_state, &mut page_text_query);
+
+        let Ok(container) = container_query.single() else {
+            continue;
+        };
+
+        // 用完整列表重建条漫视图
+        create_webtoon_view(
+            &mut commands,
+            container,
+            &reader_state,
+            &image_cache,
+            &asset_server,
+            &mut load_image_messages,
+        );
     }
 }
 
@@ -964,14 +1068,14 @@ pub fn update_single_page_slots(
 
 // ==================== 条漫模式：窗口化加载 ====================
 
-/// 创建条漫视图（初始化所有 slot，只加载窗口内的图片）
+/// 创建条漫视图（为每页创建一个槽位，图片按需懒加载）
 fn create_webtoon_view(
     commands: &mut Commands,
     container: Entity,
     reader_state: &ReaderState,
-    image_cache: &ImageCache,
+    _image_cache: &ImageCache,
     _asset_server: &AssetServer,
-    load_image_messages: &mut MessageWriter<LoadImageRequest>,
+    _load_image_messages: &mut MessageWriter<LoadImageRequest>,
 ) {
     let total = reader_state.total_pages;
     if total == 0 {
@@ -979,6 +1083,10 @@ fn create_webtoon_view(
     }
 
     let current = reader_state.current_page;
+
+    // 初始滚动到用户选择的章节位置
+    let initial_scroll_y =
+        current as f32 * (consts::WEBTOON_PLACEHOLDER_HEIGHT + consts::WEBTOON_GAP);
 
     commands.entity(container).with_children(|parent| {
         parent
@@ -995,26 +1103,18 @@ fn create_webtoon_view(
                 },
                 BackgroundColor(Color::BLACK),
                 Scrollable,
-                ScrollPosition::default(),
+                ScrollPosition(Vec2::new(0.0, initial_scroll_y)),
             ))
             .with_children(|scroll| {
-                // 只创建 5 个固定槽位，图片在槽位间流动
-                for i in 0..consts::WEBTOON_SLOT_COUNT {
-                    let page = if current >= 2 {
-                        current - 2 + i
-                    } else {
-                        i.saturating_sub(2 - current)
-                    };
-                    let page_index = if page < total { Some(page) } else { None };
-
+                for page in 0..total {
                     scroll.spawn((
                         WebtoonSlot {
-                            slot_index: i,
-                            page_index,
+                            page_index: Some(page),
                         },
                         Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Auto,
+                            width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
+                            height: Val::Px(consts::WEBTOON_PLACEHOLDER_HEIGHT),
+                            margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
                             ..default()
                         },
                         BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
@@ -1023,46 +1123,28 @@ fn create_webtoon_view(
             });
     });
 
-    // 初始加载前几页图片
-    let load_end = consts::WEBTOON_SLOT_COUNT.min(total);
-    for i in 0..load_end {
-        let page = if current >= 2 { current - 2 + i } else { i };
-        if page < total
-            && let Some(picture) = reader_state.pictures.get(page)
-        {
-            let url = picture.media.url();
-            if image_cache.get(&url).is_none()
-                && !image_cache.is_loading(&url)
-                && try_get_local_image_path(
-                    &reader_state.comic_title,
-                    reader_state.episode_order,
-                    &picture.media.original_name,
-                    page,
-                )
-                .is_none()
-            {
-                load_image_messages.write(LoadImageRequest { url });
-            }
-        }
-    }
+    // 图片加载由 update_webtoon_window 每帧自动处理（±3 范围）
 
     tracing::info!(
-        "条漫模式：创建 {} 个固定槽位，从第 {} 页开始",
-        consts::WEBTOON_SLOT_COUNT,
-        current + 1
+        "条漫模式：创建 {} 个槽位，从第 {} 页开始（scroll_y={}）",
+        total,
+        current + 1,
+        initial_scroll_y
     );
 }
 
-/// 条漫模式：根据滚动位置更新窗口内的图片加载/释放
+/// 条漫模式：根据滚动位置懒加载当前页 ±3 范围内的图片
+///
+/// 所有章节的图片列表已在初始化时全部获取完毕（仅 URL），
+/// 此系统只负责按需下载实际图片数据。不做卸载、不做锚点补偿。
 pub fn update_webtoon_window(
     mut commands: Commands,
     mut reader_state: ResMut<ReaderState>,
-    slot_query: Query<(Entity, &mut WebtoonSlot, &ComputedNode, Option<&ImageNode>)>,
+    slot_query: Query<(Entity, &WebtoonSlot, &ComputedNode, Option<&ImageNode>)>,
     scroll_query: Query<(&ScrollPosition, &ComputedNode), With<WebtoonScrollContainer>>,
     image_cache: Res<ImageCache>,
     asset_server: Res<AssetServer>,
     mut load_image_messages: MessageWriter<LoadImageRequest>,
-    mut load_pictures_messages: MessageWriter<LoadPicturesRequest>,
     window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     if reader_state.read_mode != ReadMode::Webtoon || reader_state.pictures.is_empty() {
@@ -1080,122 +1162,97 @@ pub fn update_webtoon_window(
         .unwrap_or(1.0);
 
     let viewport_h = scroll_computed.size().y / scale_factor;
+    let scroll_y = scroll_pos.y;
+    let gap = consts::WEBTOON_GAP;
 
-    // 收集槽位按 slot_index 排序
-    let mut slots: Vec<(Entity, usize, Option<usize>, f32, bool)> = slot_query
+    // 收集所有槽位的 (page, 实际高度)，按页码排序后累加找到视口中心所在页
+    // 注意：首帧 ComputedNode 可能返回 0，用占位高度兜底
+    let placeholder_h = consts::WEBTOON_PLACEHOLDER_HEIGHT;
+    let mut slot_infos: Vec<(usize, f32)> = slot_query
         .iter()
-        .map(|(e, slot, cn, img)| {
-            (e, slot.slot_index, slot.page_index, cn.size().y / scale_factor, img.is_some())
+        .filter_map(|(_, slot, cn, _)| {
+            slot.page_index.map(|p| {
+                let h = cn.size().y / scale_factor;
+                // ComputedNode 首帧为 0，用占位高度兜底
+                (p, if h > 1.0 { h } else { placeholder_h })
+            })
         })
         .collect();
-    slots.sort_by_key(|(_, idx, _, _, _)| *idx);
+    slot_infos.sort_unstable_by_key(|(p, _)| *p);
 
-    // 计算当前可见页码（基于中间槽位的页码）
-    let mid_slot = consts::WEBTOON_SLOT_COUNT / 2;
-    let current_page = slots
-        .get(mid_slot)
-        .and_then(|(_, _, page, _, _)| *page)
-        .unwrap_or(0);
+    let viewport_center = scroll_y + viewport_h / 2.0;
+    let mut cumulative = 0.0_f32;
+    let mut current_page = 0_usize;
+    for &(page, height) in &slot_infos {
+        let bottom = cumulative + height;
+        if viewport_center < bottom {
+            current_page = page;
+            break;
+        }
+        cumulative += height + gap;
+        current_page = page;
+    }
 
     if reader_state.current_page != current_page {
         reader_state.current_page = current_page;
     }
 
-    // 检查是否需要向下滚动回收（顶部槽位完全离开视口）
-    let scroll_y = scroll_pos.y;
-    let mut top_height = 0.0_f32;
-    if let Some((_, _, _, h, _)) = slots.first() {
-        top_height = if *h > 1.0 { *h } else { viewport_h };
-    }
+    // 加载范围：当前页 ± PRELOAD_RANGE
+    let load_start = current_page.saturating_sub(consts::WEBTOON_PRELOAD_RANGE);
+    let load_end = (current_page + consts::WEBTOON_PRELOAD_RANGE + 1).min(reader_state.total_pages);
 
-    if scroll_y > top_height && slots.len() == consts::WEBTOON_SLOT_COUNT {
-        // 顶部槽位滚出视口，回收到底部
-        if let Some(&(entity, _, _, _h, _)) = slots.first() {
-            let last_page = slots.last().and_then(|(_, _, p, _, _)| *p).unwrap_or(0);
-            let next_page = last_page + 1;
-
-            if next_page < reader_state.total_pages {
-                // 更新槽位页码
-                commands.entity(entity).insert(WebtoonSlot {
-                    slot_index: slots.last().map(|(_, i, _, _, _)| *i).unwrap_or(0) + 1,
-                    page_index: Some(next_page),
-                });
-                // 移除旧图片，等待加载
-                commands.entity(entity).remove::<ImageNode>();
-                commands.entity(entity).insert(BackgroundColor(Color::srgb(0.05, 0.05, 0.08)));
-
-                // 调整滚动位置补偿（减去回收槽位的高度）
-                // 这样画面不会跳动
-                // 注意：由于 Bevy 的 ScrollPosition 是 Bevy 管理的，我们不能直接修改
-                // 改为：通过 DOM 顺序让 Bevy 自然处理
-            }
+    // 只遍历需要加载的槽位
+    for (entity, slot, _cn, existing_img) in slot_query.iter() {
+        let Some(page) = slot.page_index else {
+            continue;
+        };
+        if page < load_start || page >= load_end {
+            continue;
         }
-    }
+        if existing_img.is_some() {
+            continue;
+        }
 
-    // 为每个槽位加载图片（如果还没有加载）
-    for (entity, _, page_index, _, has_image) in &slots {
-        let Some(page) = page_index else { continue };
-        if *has_image { continue; } // 已有图片
-
-        let Some(picture) = reader_state.pictures.get(*page) else { continue };
+        let Some(picture) = reader_state.pictures.get(page) else {
+            continue;
+        };
         let url = picture.media.url();
 
-        // 本地文件优先
+        // 用 page_metas 获取正确的章节 order 和章内页码
+        let (ep_order, page_in_chapter) = reader_state
+            .page_metas
+            .get(page)
+            .map(|m| (m.episode_order, m.page_in_chapter))
+            .unwrap_or((reader_state.episode_order, page));
+
         if let Some(local_path) = try_get_local_image_path(
             &reader_state.comic_title,
-            reader_state.episode_order,
+            ep_order,
             &picture.media.original_name,
-            *page,
+            page_in_chapter,
         ) {
             let handle: Handle<Image> = asset_server.load(local_path);
-            commands.entity(*entity).remove::<BackgroundColor>();
-            commands.entity(*entity).insert((
-                ImageNode { image: handle, ..default() },
-                Node { width: Val::Percent(100.0), height: Val::Auto, ..default() },
+            commands.entity(entity).remove::<BackgroundColor>();
+            commands.entity(entity).insert((
+                ImageNode {
+                    image: handle,
+                    ..default()
+                },
+                webtoon_image_style(),
             ));
         } else if let Some(handle) = image_cache.get(&url) {
-            commands.entity(*entity).remove::<BackgroundColor>();
-            commands.entity(*entity).insert((
-                ImageNode { image: handle.clone(), ..default() },
-                Node { width: Val::Percent(100.0), height: Val::Auto, ..default() },
+            commands.entity(entity).remove::<BackgroundColor>();
+            commands.entity(entity).insert((
+                ImageNode {
+                    image: handle.clone(),
+                    ..default()
+                },
+                webtoon_image_style(),
             ));
         } else if !image_cache.is_loading(&url) {
             load_image_messages.write(LoadImageRequest { url: url.clone() });
-            commands.entity(*entity).insert(ReaderImageLoading { url });
+            commands.entity(entity).insert(ReaderImageLoading { url });
         }
-    }
-
-    // 条漫模式：接近最后几页时预加载下一章
-    if current_page + 3 >= reader_state.total_pages
-        && !reader_state.is_loading
-        && !reader_state.is_loading_next_chapter
-    {
-        let next_ep = reader_state.next_episode().cloned();
-        if let Some(ep) = next_ep {
-            reader_state.is_loading_next_chapter = true;
-            load_pictures_messages.write(LoadPicturesRequest {
-                comic_id: reader_state.comic_id.clone(),
-                episode_order: ep.order,
-                page: 1,
-            });
-            tracing::info!("条漫模式：预加载下一章 {}", ep.title);
-        }
-    }
-
-    // 下一章图片就绪，追加到图片列表（槽位会自然加载）
-    if !reader_state.next_chapter_pictures.is_empty()
-        && current_page + 1 >= reader_state.total_pages
-    {
-        let next_pics = std::mem::take(&mut reader_state.next_chapter_pictures);
-        let next_idx = reader_state.current_episode_idx + 1;
-        let next_order = reader_state.episodes.get(next_idx).map(|e| e.order).unwrap_or(0);
-        let new_count = next_pics.len();
-        reader_state.pictures.extend(next_pics);
-        reader_state.total_pages = reader_state.pictures.len();
-        reader_state.current_episode_idx = next_idx;
-        reader_state.episode_order = next_order;
-        reader_state.is_loading_next_chapter = false;
-        tracing::info!("条漫模式：衔接第 {} 章，+{} 页", next_order, new_count);
     }
 }
 
@@ -1215,8 +1272,11 @@ pub fn update_webtoon_images_from_cache(
             commands.entity(entity).remove::<ReaderImageLoading>();
             commands.entity(entity).remove::<BackgroundColor>();
             commands.entity(entity).insert((
-                ImageNode { image: handle.clone(), ..default() },
-                Node { width: Val::Percent(100.0), height: Val::Auto, ..default() },
+                ImageNode {
+                    image: handle.clone(),
+                    ..default()
+                },
+                webtoon_image_style(),
             ));
         }
     }
@@ -1231,10 +1291,10 @@ pub fn update_webtoon_scale(
         return;
     }
 
-    // 所有已加载图片的宽度设为 100%
+    // 所有已加载图片的宽度设为 80%
     for (mut node, _slot, img) in webtoon_images_query.iter_mut() {
         if img.is_some() {
-            node.width = Val::Percent(100.0);
+            node.width = Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT);
             node.height = Val::Auto;
         }
     }
@@ -1352,6 +1412,7 @@ fn try_switch_chapter(
     reader_state.current_episode_idx = target_idx;
     reader_state.episode_order = episode.order;
     reader_state.pictures.clear();
+    reader_state.page_metas.clear();
     reader_state.total_pages = 0;
     reader_state.current_page = 0;
     reader_state.is_loading = true;
@@ -1484,7 +1545,7 @@ pub fn reader_mouse_wheel_control(
                     }
                 }
                 ReadMode::Webtoon => {
-                    // 手动更新 ScrollPosition（MessageReader 已消费事件）
+                    // 不手动限制 max_scroll，让 Bevy 的 overflow: scroll_y() 自然处理上限
                     for mut scroll_pos in webtoon_scroll_query.iter_mut() {
                         let scroll_amount = -scroll_delta * consts::WEBTOON_SCROLL_SPEED;
                         scroll_pos.y = (scroll_pos.y + scroll_amount).max(0.0);

@@ -642,12 +642,14 @@ pub struct ReaderState {
     pub current_episode_idx: usize,
     /// 当前章节 order
     pub episode_order: i32,
-    /// 当前页码（0-indexed）
+    /// 当前页码（0-indexed，条漫模式下为全局页码）
     pub current_page: usize,
     /// 总图片数
     pub total_pages: usize,
-    /// 当前章节图片列表
+    /// 图片列表（条漫模式：所有章节扁平化；单页模式：当前章节）
     pub pictures: Vec<Picture>,
+    /// 条漫模式：每张图片的章节归属元数据（与 pictures 平行）
+    pub page_metas: Vec<crate::events::WebtoonPageMeta>,
     /// 缩放比例 (1.0 = 100%)
     pub scale: f32,
     /// 阅读模式
@@ -656,10 +658,12 @@ pub struct ReaderState {
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
-    /// 是否正在加载下一章（跨章节切换时）
+    /// 是否正在加载下一章（单页模式跨章节切换时）
     pub is_loading_next_chapter: bool,
-    /// 下一章的图片列表（预加载，到章节末尾自动追加到条漫）
+    /// 下一章的图片列表（单页模式预加载）
     pub next_chapter_pictures: Vec<Picture>,
+    /// 条漫模式是否正在加载全章节图片列表
+    pub is_loading_all_chapters: bool,
 }
 
 impl Default for ReaderState {
@@ -673,12 +677,14 @@ impl Default for ReaderState {
             current_page: 0,
             total_pages: 0,
             pictures: Vec::new(),
+            page_metas: Vec::new(),
             scale: 1.0,
             read_mode: ReadMode::default(),
             is_loading: false,
             error: None,
             is_loading_next_chapter: false,
             next_chapter_pictures: Vec::new(),
+            is_loading_all_chapters: false,
         }
     }
 }

@@ -1633,10 +1633,7 @@ pub fn tag_button_interaction(
 
 /// 作者按钮交互：点击跳转到搜索页并搜索该作者
 pub fn author_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &AuthorButton, &Children),
-        Changed<Interaction>,
-    >,
+    mut interaction_query: Query<(&Interaction, &AuthorButton, &Children), Changed<Interaction>>,
     mut text_color_query: Query<&mut TextColor>,
     mut search_state: ResMut<crate::resources::SearchState>,
     mut next_route: ResMut<NextState<crate::resources::AppRoute>>,

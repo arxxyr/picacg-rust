@@ -222,10 +222,12 @@ pub fn handle_navigation_messages(
         reader_state.current_page = 0;
         reader_state.total_pages = 0;
         reader_state.pictures.clear();
+        reader_state.page_metas.clear();
         reader_state.is_loading = false;
         reader_state.error = None;
         reader_state.is_loading_next_chapter = false;
         reader_state.next_chapter_pictures.clear();
+        reader_state.is_loading_all_chapters = false;
         next_route.set(AppRoute::ReadView);
     }
 

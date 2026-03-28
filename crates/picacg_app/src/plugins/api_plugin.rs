@@ -46,6 +46,8 @@ impl Plugin for ApiPlugin {
             .add_message::<LoadPicturesRequest>()
             .add_message::<PicturesLoadedEvent>()
             .add_message::<PicturesLoadFailedEvent>()
+            .add_message::<LoadAllChapterPicturesRequest>()
+            .add_message::<AllChapterPicturesLoadedEvent>()
             .add_message::<LikeComicRequest>()
             .add_message::<LikeComicResponse>()
             .add_message::<FavoriteComicRequest>()
@@ -193,6 +195,7 @@ impl Plugin for ApiPlugin {
                     handle_load_episodes,
                     handle_episodes_response,
                     handle_load_pictures,
+                    handle_load_all_chapter_pictures,
                     handle_like_comic,
                     handle_like_response,
                     handle_favorite_comic,
@@ -1169,6 +1172,109 @@ fn handle_load_pictures(
                     .await;
                 }
             }
+        });
+    }
+}
+
+/// 并发加载所有章节的图片列表（条漫模式用，DB 缓存优先）
+fn handle_load_all_chapter_pictures(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadAllChapterPicturesRequest>,
+    api_client: Res<ApiClientResource>,
+) {
+    for event in messages.read() {
+        let client = api_client.0.clone();
+        let comic_id = event.comic_id.clone();
+        let episodes = event.episodes.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::{endpoints::comic::GetPicturesRequest, models::Picture};
+
+            let pool = picacg_db::get_pool();
+            let mut all_pictures: Vec<Picture> = Vec::new();
+            let mut all_metas = Vec::new();
+            let mut cache_hit = 0_usize;
+            let mut cache_miss = 0_usize;
+
+            for ep in &episodes {
+                // 1. 先查 DB 缓存
+                if let Some(json) =
+                    picacg_db::get_episode_pictures_async(&pool, &comic_id, ep.order).await
+                    && let Ok(pics) = serde_json::from_str::<Vec<Picture>>(&json)
+                {
+                    for (i, pic) in pics.into_iter().enumerate() {
+                        all_metas.push(crate::events::WebtoonPageMeta {
+                            episode_order: ep.order,
+                            page_in_chapter: i,
+                        });
+                        all_pictures.push(pic);
+                    }
+                    cache_hit += 1;
+                    continue;
+                }
+
+                // 2. 缓存未命中，从 API 加载
+                cache_miss += 1;
+                let mut page = 1;
+                let mut chapter_pics: Vec<Picture> = Vec::new();
+
+                loop {
+                    let request = GetPicturesRequest {
+                        comic_id: comic_id.clone(),
+                        episode_order: ep.order,
+                        page,
+                    };
+
+                    match client.request(request).await {
+                        Ok(response) => {
+                            let total_api_pages = response.pages.pages;
+                            chapter_pics.extend(response.pages.docs);
+                            if page >= total_api_pages {
+                                break;
+                            }
+                            page += 1;
+                        }
+                        Err(e) => {
+                            tracing::error!("加载第 {} 章图片列表失败: {}", ep.order, e);
+                            break;
+                        }
+                    }
+                }
+
+                // 3. 写入 DB 缓存
+                if !chapter_pics.is_empty()
+                    && let Ok(json) = serde_json::to_string(&chapter_pics)
+                {
+                    picacg_db::save_episode_pictures_async(&pool, &comic_id, ep.order, &json).await;
+                }
+
+                // 4. 追加到总列表
+                for (i, pic) in chapter_pics.into_iter().enumerate() {
+                    all_metas.push(crate::events::WebtoonPageMeta {
+                        episode_order: ep.order,
+                        page_in_chapter: i,
+                    });
+                    all_pictures.push(pic);
+                }
+            }
+
+            let total = all_pictures.len();
+            tracing::info!(
+                "全章节图片列表加载完成: {} 章, {} 张图片（缓存命中 {}, API {} 章）",
+                episodes.len(),
+                total,
+                cache_hit,
+                cache_miss,
+            );
+
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(AllChapterPicturesLoadedEvent {
+                    pictures: all_pictures,
+                    page_metas: all_metas,
+                    start_page: 0,
+                });
+            })
+            .await;
         });
     }
 }

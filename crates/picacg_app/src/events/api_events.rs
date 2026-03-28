@@ -172,6 +172,35 @@ pub struct PicturesLoadFailedEvent {
     pub error: String,
 }
 
+// ==================== 全章节图片列表消息（条漫模式） ====================
+
+/// 加载所有章节图片列表请求
+#[derive(Message)]
+pub struct LoadAllChapterPicturesRequest {
+    pub comic_id: String,
+    pub episodes: Vec<Episode>,
+}
+
+/// 每张图片的章节归属元数据
+#[derive(Debug, Clone)]
+pub struct WebtoonPageMeta {
+    /// 所属章节 order
+    pub episode_order: i32,
+    /// 在该章节内的页码（0-indexed）
+    pub page_in_chapter: usize,
+}
+
+/// 所有章节图片加载完成
+#[derive(Message)]
+pub struct AllChapterPicturesLoadedEvent {
+    /// 扁平化的图片列表（所有章节按 order 排列）
+    pub pictures: Vec<Picture>,
+    /// 每张图片的章节元数据（与 pictures 平行）
+    pub page_metas: Vec<WebtoonPageMeta>,
+    /// 用户选择的章节的起始页码（全局 0-indexed）
+    pub start_page: usize,
+}
+
 // ==================== 搜索消息 ====================
 
 /// 搜索漫画请求
