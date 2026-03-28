@@ -270,32 +270,31 @@ jobs:
 
           # 生成 Info.plist
           VERSION="${{ steps.version.outputs.base_version }}"
-          cat > "${APP_DIR}/Contents/Info.plist" << PLIST_EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleName</key>
-    <string>PicACG</string>
-    <key>CFBundleDisplayName</key>
-    <string>PicACG</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.picacg</string>
-    <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
-    <key>CFBundleExecutable</key>
-    <string>picacg</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-</dict>
-</plist>
-PLIST_EOF
+          printf '%s\n' \
+            '<?xml version="1.0" encoding="UTF-8"?>' \
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' \
+            '<plist version="1.0">' \
+            '<dict>' \
+            '    <key>CFBundleName</key>' \
+            '    <string>PicACG</string>' \
+            '    <key>CFBundleDisplayName</key>' \
+            '    <string>PicACG</string>' \
+            '    <key>CFBundleIdentifier</key>' \
+            '    <string>com.picacg</string>' \
+            '    <key>CFBundleVersion</key>' \
+            "    <string>${VERSION}</string>" \
+            '    <key>CFBundleShortVersionString</key>' \
+            "    <string>${VERSION}</string>" \
+            '    <key>CFBundleExecutable</key>' \
+            '    <string>picacg</string>' \
+            '    <key>CFBundlePackageType</key>' \
+            '    <string>APPL</string>' \
+            '    <key>NSHighResolutionCapable</key>' \
+            '    <true/>' \
+            '    <key>LSMinimumSystemVersion</key>' \
+            '    <string>11.0</string>' \
+            '</dict>' \
+            '</plist>' > "${APP_DIR}/Contents/Info.plist"
 
           # 创建 DMG 临时目录
           DMG_STAGING="dmg_staging"
