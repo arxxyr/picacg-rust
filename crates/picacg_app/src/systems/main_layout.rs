@@ -247,6 +247,7 @@ fn spawn_user_info_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, 
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(2.0)),
                     border_radius: BorderRadius::all(Val::Percent(50.0)),
+                    overflow: Overflow::clip(),
                     ..default()
                 },
                 BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
@@ -667,6 +668,7 @@ pub fn update_sidebar_avatar_image(
                     Node {
                         width: Val::Px(76.0),
                         height: Val::Px(76.0),
+                        border_radius: BorderRadius::all(Val::Percent(50.0)),
                         ..default()
                     },
                 ));

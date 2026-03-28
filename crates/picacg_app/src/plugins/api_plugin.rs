@@ -1860,7 +1860,10 @@ async fn execute_download_task(
                 total_episodes,
                 current_page: 0,
                 total_pages: 0,
-                status: format!("正在获取第 {} 章图片列表...", episode_order),
+                status: format!(
+                    "正在获取第 {}/{} 章图片列表...",
+                    episode_order, total_episodes
+                ),
             });
         })
         .await;
@@ -1902,8 +1905,8 @@ async fn execute_download_task(
                 Err(e) => {
                     let comic_id_clone = comic_id.clone();
                     let error = format!(
-                        "[{}] 获取第 {} 章图片列表失败: {}",
-                        comic_title, episode_order, e
+                        "[{}] 获取第 {}/{} 章图片列表失败: {}",
+                        comic_title, episode_order, total_episodes, e
                     );
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(DownloadFailedEvent {
@@ -1919,9 +1922,10 @@ async fn execute_download_task(
 
         let total_pages = all_pictures.len() as i32;
         tracing::info!(
-            "[{}] 第 {} 章共 {} 张图片",
+            "[{}] 第 {}/{} 章共 {} 张图片",
             comic_title,
             episode_order,
+            total_episodes,
             total_pages
         );
 
@@ -1950,8 +1954,10 @@ async fn execute_download_task(
 
         if missing_files.is_empty() {
             tracing::info!(
-                "第 {} 章本地已完整（{} 张），跳过下载",
+                "[{}] 第 {}/{} 章本地已完整（{} 张），跳过下载",
+                comic_title,
                 episode_order,
+                total_episodes,
                 total_pages
             );
 
@@ -1976,16 +1982,17 @@ async fn execute_download_task(
                     total_episodes,
                     current_page: total_pages,
                     total_pages,
-                    status: format!("第{}章 本地已完整，跳过", episode_order),
+                    status: format!("第{}/{}章 本地已完整，跳过", episode_order, total_episodes),
                 });
             })
             .await;
             continue; // 跳过该章节，继续下一章
         } else {
             tracing::info!(
-                "[{}] 第 {} 章缺少 {} 张图片，开始下载",
+                "[{}] 第 {}/{} 章缺少 {} 张图片，开始下载",
                 comic_title,
                 episode_order,
+                total_episodes,
                 missing_files.len()
             );
         }
@@ -2045,8 +2052,8 @@ async fn execute_download_task(
                 current_page: 0,
                 total_pages,
                 status: format!(
-                    "第{}章 并发下载中（{} 个线程，待下载 {} 张）",
-                    episode_order, download_workers, pending_count
+                    "第{}/{}章 并发下载中（{} 个线程，待下载 {} 张）",
+                    episode_order, total_episodes, download_workers, pending_count
                 ),
             });
         })
@@ -2096,9 +2103,10 @@ async fn execute_download_task(
                         // 记录失败的图片，稍后重试
                         failed_images.lock().push((pic_idx, url, file_path));
                         tracing::warn!(
-                            "⚠ [{}] 第{}章 {}/{} 首次下载失败（稍后重试）: {}",
+                            "⚠ [{}] 第{}/{}章 {}/{} 首次下载失败（稍后重试）: {}",
                             comic_title,
                             episode_order,
+                            total_episodes,
                             pic_idx + 1,
                             total_pages,
                             e
@@ -2138,8 +2146,8 @@ async fn execute_download_task(
                         current_page,
                         total_pages,
                         status: format!(
-                            "第{}章 下载中 {}/{}",
-                            episode_order, current_page, total_pages
+                            "第{}/{}章 下载中 {}/{}",
+                            episode_order, total_episodes, current_page, total_pages
                         ),
                     });
                 })
@@ -2174,8 +2182,10 @@ async fn execute_download_task(
             let retry_delay = std::time::Duration::from_secs(5 * retry_count as u64);
 
             tracing::info!(
-                "第 {} 章有 {} 张图片下载失败，{}秒后进行第 {} 次重试...",
+                "[{}] 第 {}/{} 章有 {} 张图片下载失败，{}秒后进行第 {} 次重试...",
+                comic_title,
                 episode_order,
+                total_episodes,
                 failed_images.len(),
                 retry_delay.as_secs(),
                 retry_count
@@ -2200,8 +2210,9 @@ async fn execute_download_task(
             // 发送重试进度
             let comic_id_clone = comic_id.clone();
             let retry_status = format!(
-                "第{}章 并发重试 {}/{}（剩余 {} 张）",
+                "第{}/{}章 并发重试 {}/{}（剩余 {} 张）",
                 episode_order,
+                total_episodes,
                 retry_count,
                 MAX_RETRIES,
                 failed_images.len()
@@ -2232,8 +2243,9 @@ async fn execute_download_task(
                 if file_path.exists() {
                     retry_success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     tracing::info!(
-                        "✓ 第{}章 {}/{} 文件已存在",
+                        "✓ 第{}/{}章 {}/{} 文件已存在",
                         episode_order,
+                        total_episodes,
                         pic_idx + 1,
                         total_pages
                     );
@@ -2258,8 +2270,9 @@ async fn execute_download_task(
                         Ok(_) => {
                             retry_success_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             tracing::info!(
-                                "✓ 第{}章 {}/{} 重试成功",
+                                "✓ 第{}/{}章 {}/{} 重试成功",
                                 episode_order,
+                                total_episodes,
                                 pic_idx + 1,
                                 total_pages
                             );
@@ -2267,9 +2280,10 @@ async fn execute_download_task(
                         Err(e) => {
                             still_failed.lock().push((pic_idx, url, file_path));
                             tracing::warn!(
-                                "⚠ [{}] 第{}章 {}/{} 重试失败: {}",
+                                "⚠ [{}] 第{}/{}章 {}/{} 重试失败: {}",
                                 comic_title,
                                 episode_order,
+                                total_episodes,
                                 pic_idx + 1,
                                 total_pages,
                                 e
@@ -2296,18 +2310,20 @@ async fn execute_download_task(
         let final_fail_count = failed_images.len();
         if final_fail_count > 0 {
             tracing::error!(
-                "[{}] ✗ 第 {} 章有 {} 张图片下载失败（已跳过）",
+                "[{}] ✗ 第 {}/{} 章有 {} 张图片下载失败（已跳过）",
                 comic_title,
                 episode_order,
+                total_episodes,
                 final_fail_count
             );
         }
 
         let episode_elapsed = episode_start.elapsed();
         tracing::info!(
-            "[{}] 第 {} 章下载完成: 成功={}, 跳过={}, 失败={}, 耗时 {:.1}s",
+            "[{}] 第 {}/{} 章下载完成: 成功={}, 跳过={}, 失败={}, 耗时 {:.1}s",
             comic_title,
             episode_order,
+            total_episodes,
             success_count,
             skip_count,
             final_fail_count,

@@ -2,7 +2,33 @@
 
 #![allow(dead_code)]
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// 兼容 API 返回数字或字符串格式的 i64
+fn deserialize_i64_or_string<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum I64OrString {
+        I64(i64),
+        Str(String),
+    }
+
+    match I64OrString::deserialize(deserializer)? {
+        I64OrString::I64(v) => Ok(v),
+        I64OrString::Str(s) => s.parse().map_err(serde::de::Error::custom),
+    }
+}
+
+/// 同上，带 default
+fn deserialize_i64_or_string_default<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_i64_or_string(deserializer).or(Ok(0))
+}
 
 // 图片信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +56,7 @@ pub struct User {
     pub email: Option<String>,
     pub name: String,
     pub level: i32,
+    #[serde(deserialize_with = "deserialize_i64_or_string_default")]
     pub exp: i64,
     pub gender: String,
     #[serde(default)]
@@ -69,11 +96,23 @@ pub struct Comic {
     #[serde(default)]
     pub tags: Vec<String>,
     pub thumb: ImageInfo,
-    #[serde(rename = "likesCount", default)]
+    #[serde(
+        rename = "likesCount",
+        default,
+        deserialize_with = "deserialize_i64_or_string_default"
+    )]
     pub likes_count: i64,
-    #[serde(rename = "viewsCount", default)]
+    #[serde(
+        rename = "viewsCount",
+        default,
+        deserialize_with = "deserialize_i64_or_string_default"
+    )]
     pub views_count: i64,
-    #[serde(rename = "commentsCount", default)]
+    #[serde(
+        rename = "commentsCount",
+        default,
+        deserialize_with = "deserialize_i64_or_string_default"
+    )]
     pub comments_count: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -146,9 +185,15 @@ pub struct Comment {
     pub hide: bool,
     #[serde(rename = "created_at")]
     pub created_at: String,
-    #[serde(rename = "likesCount")]
+    #[serde(
+        rename = "likesCount",
+        deserialize_with = "deserialize_i64_or_string_default"
+    )]
     pub likes_count: i64,
-    #[serde(rename = "commentsCount")]
+    #[serde(
+        rename = "commentsCount",
+        deserialize_with = "deserialize_i64_or_string_default"
+    )]
     pub comments_count: i64,
     #[serde(rename = "isLiked", skip_serializing_if = "Option::is_none")]
     pub is_liked: Option<bool>,

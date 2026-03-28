@@ -772,6 +772,7 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     profile_refresh_interaction,
+                    profile_punch_in_interaction,
                     refresh_profile_ui,
                     update_profile_avatar,
                     handle_profile_scroll,
