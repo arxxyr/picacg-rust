@@ -842,11 +842,7 @@ pub fn handle_chat_room_scroll(
 
         // 如果用户滚动到底部附近，恢复自动滚动；否则禁止自动滚动
         if max_scroll > 0.0 {
-            if (max_scroll - scroll_pos.y) < 50.0 {
-                chat_room_state.auto_scroll = true;
-            } else {
-                chat_room_state.auto_scroll = false;
-            }
+            chat_room_state.auto_scroll = (max_scroll - scroll_pos.y) < 50.0;
         }
     }
 }

@@ -68,6 +68,10 @@ pub struct SearchInputField;
 #[derive(Component)]
 pub struct SearchButton;
 
+/// 重置搜索按钮标记
+#[derive(Component)]
+pub struct SearchResetButton;
+
 /// 搜索结果滚动容器标记
 #[derive(Component)]
 pub struct SearchScrollContainer;
@@ -313,6 +317,36 @@ fn spawn_search_header(
                         ..default()
                     },
                     TextColor(AppColors::TEXT),
+                ));
+            });
+
+        // 重置按钮
+        header
+            .spawn((
+                SearchResetButton,
+                Button,
+                Interaction::default(),
+                Node {
+                    width: Val::Px(60.0),
+                    height: Val::Px(40.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                BorderColor::all(AppColors::BORDER),
+            ))
+            .with_children(|btn| {
+                btn.spawn((
+                    Text::new("重置"),
+                    TextFont {
+                        font: font.clone(),
+                        font_size: 14.0,
+                        ..default()
+                    },
+                    TextColor(AppColors::TEXT_SECONDARY),
                 ));
             });
     });
@@ -1433,6 +1467,54 @@ pub fn search_button_interaction(
             }
             Interaction::None => {
                 *bg_color = BackgroundColor(AppColors::PRIMARY);
+            }
+        }
+    }
+}
+
+/// 重置搜索按钮交互：清空关键词、搜索结果、排序、分类过滤
+pub fn search_reset_button_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor),
+        (Changed<Interaction>, With<SearchResetButton>),
+    >,
+    mut search_state: ResMut<SearchState>,
+    mut input_query: Query<&mut TextInput, With<SearchInputField>>,
+    mut creation_state: ResMut<crate::systems::waterfall::SearchCardCreationState>,
+) {
+    for (interaction, mut bg_color) in interaction_query.iter_mut() {
+        match *interaction {
+            Interaction::Pressed => {
+                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
+
+                // 清空状态（恢复到初始未搜索状态）
+                search_state.keyword.clear();
+                search_state.results.clear();
+                search_state.page = 1;
+                search_state.total_pages = 0;
+                search_state.error = None;
+                search_state.is_loading = false;
+                search_state.has_searched = false;
+                search_state.sort = "dd".to_string();
+                search_state.selected_categories.clear();
+                search_state.show_category_filter = false;
+                search_state.needs_rebuild = true;
+
+                // 清空输入框
+                for mut input in input_query.iter_mut() {
+                    input.value.clear();
+                }
+
+                // 清空瀑布流状态
+                creation_state.clear();
+
+                tracing::info!("搜索已重置");
+            }
+            Interaction::Hovered => {
+                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+            }
+            Interaction::None => {
+                *bg_color = BackgroundColor(Color::NONE);
             }
         }
     }

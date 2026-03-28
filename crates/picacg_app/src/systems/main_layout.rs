@@ -435,9 +435,9 @@ fn spawn_sidebar_button(
             // 下载按钮添加计数徽章（下载中 + 排队中）
             if config.route == SidebarRoute::Downloads {
                 // 下载中徽章（蓝色）
-                spawn_download_badge(btn, &font, DownloadingCountBadge, AppColors::PRIMARY);
+                spawn_download_badge(btn, font, DownloadingCountBadge, AppColors::PRIMARY);
                 // 排队中徽章（橙色）
-                spawn_download_badge(btn, &font, QueuedCountBadge, Color::srgb(0.9, 0.6, 0.2));
+                spawn_download_badge(btn, font, QueuedCountBadge, Color::srgb(0.9, 0.6, 0.2));
             }
         });
 }

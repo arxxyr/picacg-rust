@@ -1414,7 +1414,7 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                     // 全部开始按钮
                     spawn_header_button(
                         btn_group,
-                        &font,
+                        font,
                         StartAllHeaderButton,
                         &format!("{ICON_PLAY} 全部开始"),
                         Color::srgb(0.2, 0.5, 0.3),
@@ -1423,7 +1423,7 @@ fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>
                     // 全部暂停按钮
                     spawn_header_button(
                         btn_group,
-                        &font,
+                        font,
                         PauseAllHeaderButton,
                         &format!("{ICON_PAUSE} 全部暂停"),
                         Color::srgb(0.7, 0.5, 0.2),

@@ -535,6 +535,7 @@ impl Plugin for UiPlugin {
                     search_input_interaction,
                     handle_search_keyboard_input,
                     search_button_interaction,
+                    search_reset_button_interaction,
                     search_result_card_interaction,
                     search_pagination_interaction,
                     handle_search_scroll,

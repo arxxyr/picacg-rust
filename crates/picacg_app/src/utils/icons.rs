@@ -81,8 +81,6 @@ pub const ICON_THUMB_UP: &str = "\u{F0513}";
 pub const ICON_GAMEPAD: &str = "\u{F0296}";
 /// 󰀄 account - 个人资料
 pub const ICON_USER: &str = "\u{F0004}";
-/// 󰂺 book_open_variant - 本地阅读
-pub const ICON_BOOK_OPEN: &str = "\u{F05DA}";
 /// 󰍩 forum - 锅贴社区/论坛
 pub const ICON_FORUM: &str = "\u{F0369}";
 
