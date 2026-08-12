@@ -2,52 +2,43 @@
 //!
 //! 展示锅贴帖子列表，支持分页浏览
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        pagination::{Pagination, PaginationControl, pagination_controls},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        widgets::ButtonStyle,
     },
     utils::icons::*,
 };
 
+/// 锅贴页面标记类型（用于分页组件的泛型参数）
+pub struct FriedPage;
+
 // ==================== 组件定义 ====================
 
 /// 锅贴社区根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FriedRoot;
 
 /// 锅贴社区滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FriedScrollContainer;
 
 /// 锅贴帖子卡片
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FriedPostCard {
     #[allow(dead_code)]
     pub post_id: String,
 }
 
-/// 锅贴分页：上一页按钮
-#[derive(Component)]
-pub struct FriedPrevPageButton;
-
-/// 锅贴分页：下一页按钮
-#[derive(Component)]
-pub struct FriedNextPageButton;
-
-/// 锅贴分页：页码文本
-#[derive(Component)]
-pub struct FriedPageText;
-
 /// 刷新按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FriedRefreshButton;
 
 // ==================== 布局常量 ====================
@@ -92,192 +83,9 @@ pub fn setup_fried_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
-    let fried_root = commands
-        .spawn((
-            FriedRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 图标
-                header.spawn((
-                    Text::new(ICON_FORUM),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::PRIMARY),
-                ));
-
-                header.spawn((
-                    Text::new("锅贴社区"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 弹性占位
-                header.spawn(Node {
-                    flex_grow: 1.0,
-                    ..default()
-                });
-
-                // 刷新按钮
-                header
-                    .spawn((
-                        FriedRefreshButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(10.0),
-                                Val::Px(10.0),
-                                Val::Px(5.0),
-                                Val::Px(5.0),
-                            ),
-                            border_radius: BorderRadius::all(Val::Px(6.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(format!("{} 刷新", ICON_REFRESH)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
-            .with_children(|wrapper| {
-                // 可滚动内容区域
-                let scroll_container_id = wrapper
-                    .spawn((
-                        FriedScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect {
-                                left: Val::Px(fried_layout::PADDING_LEFT),
-                                right: Val::Px(fried_layout::PADDING_RIGHT),
-                                top: Val::Px(fried_layout::PADDING_TOP),
-                                bottom: Val::Px(fried_layout::PADDING_BOTTOM),
-                            },
-                            row_gap: Val::Px(fried_layout::CARD_GAP),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        Scrollable,
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|content| {
-                        if fried_state.is_loading {
-                            content.spawn((
-                                LoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        } else if let Some(ref error) = fried_state.error {
-                            content.spawn((
-                                ErrorMessage,
-                                Text::new(format!("加载失败: {}", error)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                            ));
-                        } else if fried_state.posts.is_empty() {
-                            content.spawn((
-                                Text::new("暂无帖子"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        } else {
-                            // 显示帖子列表
-                            for post in &fried_state.posts {
-                                spawn_fried_post_card(content, &font, post);
-                            }
-
-                            // 分页控件
-                            let total_pages = calculate_total_pages(&fried_state);
-                            if total_pages > 1 {
-                                spawn_fried_pagination(
-                                    content,
-                                    &font,
-                                    fried_state.page + 1, // 显示从 1 开始的页码
-                                    total_pages,
-                                );
-                            }
-                        }
-
-                        // 底部间距
-                        content.spawn(Node {
-                            height: Val::Px(30.0),
-                            min_height: Val::Px(30.0),
-                            ..default()
-                        });
-                    })
-                    .id();
-
-                // 滚动条
-                spawn_scrollbar(wrapper, scroll_container_id);
-            });
-        })
-        .id();
+    let fried_root = commands.spawn_scene(fried_page(&fried_state)).id();
 
     // 挂载到内容区域
     if let Some(content_area) = content_area {
@@ -306,288 +114,415 @@ fn calculate_total_pages(state: &FriedState) -> i32 {
     }
 }
 
-/// 创建单个帖子卡片
-fn spawn_fried_post_card(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    post: &picacg_api::endpoints::fried::FriedPost,
-) {
-    parent
-        .spawn((
-            FriedPostCard {
-                post_id: post.id.clone(),
-            },
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(14.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|card| {
-            // 用户信息行
-            card.spawn(Node {
-                width: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(|row| {
-                // 用户头像占位
-                row.spawn((
-                    Node {
-                        width: Val::Px(36.0),
-                        height: Val::Px(36.0),
-                        min_width: Val::Px(36.0),
-                        min_height: Val::Px(36.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Percent(50.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.18, 0.18, 0.22)),
-                    BorderColor::all(AppColors::BORDER),
-                ))
-                .with_children(|avatar| {
-                    avatar.spawn((
-                        Text::new(ICON_USER),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 16.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
+/// 锅贴社区页面场景
+fn fried_page(fried_state: &FriedState) -> impl Scene + use<> {
+    let scroll_padding = UiRect {
+        left: Val::Px(fried_layout::PADDING_LEFT),
+        right: Val::Px(fried_layout::PADDING_RIGHT),
+        top: Val::Px(fried_layout::PADDING_TOP),
+        bottom: Val::Px(fried_layout::PADDING_BOTTOM),
+    };
+    let refresh_label = format!("{} 刷新", ICON_REFRESH);
+    let content = fried_content(fried_state);
 
-                // 用户名 + 等级
-                row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    row_gap: Val::Px(2.0),
-                    ..default()
-                })
-                .with_children(|info| {
-                    if let Some(ref user) = post.user {
-                        // 用户名
-                        info.spawn(Node {
+    bsn! {
+        FriedRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 图标
+                        Text(ICON_FORUM)
+                        TextFont { font_size: FontSize::Px(20.0) }
+                        TextColor(AppColors::PRIMARY)
+                    ),
+                    (
+                        Text("锅贴社区")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 弹性占位
+                        Node { flex_grow: 1.0 }
+                    ),
+                    (
+                        // 刷新按钮
+                        FriedRefreshButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(10.0),
+                                Val::Px(10.0),
+                                Val::Px(5.0),
+                                Val::Px(5.0),
+                            ),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
-                            column_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|name_row| {
-                            name_row.spawn((
-                                Text::new(&user.name),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        Children [
+                            (
+                                Text({refresh_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 可滚动内容区域
+                        #FriedScroll
+                        FriedScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: {scroll_padding},
+                            row_gap: Val::Px(fried_layout::CARD_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {content} ]
+                    ),
+                    // 滚动条
+                    scrollbar(#FriedScroll),
+                ]
+            ),
+        ]
+    }
+}
 
-                            // 等级标签
-                            name_row
-                                .spawn((
-                                    Node {
-                                        padding: UiRect::new(
-                                            Val::Px(4.0),
-                                            Val::Px(4.0),
-                                            Val::Px(1.0),
-                                            Val::Px(1.0),
-                                        ),
-                                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(AppColors::PRIMARY),
-                                ))
-                                .with_children(|badge| {
-                                    badge.spawn((
-                                        Text::new(format!("Lv{}", user.level)),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 10.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::WHITE),
-                                    ));
-                                });
+/// 滚动容器内的内容（加载中 / 错误 / 空 / 帖子列表 + 分页，末尾附底部间距）
+///
+/// `setup_fried_ui` 与 `refresh_fried_ui` 共用，保证首次创建与刷新结构一致。
+fn fried_content(fried_state: &FriedState) -> Vec<Box<dyn Scene>> {
+    let mut items: Vec<Box<dyn Scene>> = Vec::new();
 
-                            // 称号
-                            if !user.title.is_empty() {
-                                name_row
-                                    .spawn((
-                                        Node {
-                                            padding: UiRect::new(
-                                                Val::Px(4.0),
-                                                Val::Px(4.0),
-                                                Val::Px(1.0),
-                                                Val::Px(1.0),
-                                            ),
-                                            border_radius: BorderRadius::all(Val::Px(3.0)),
-                                            ..default()
-                                        },
-                                        BackgroundColor(Color::srgb(0.6, 0.3, 0.8)),
-                                    ))
-                                    .with_children(|badge| {
-                                        badge.spawn((
-                                            Text::new(&user.title),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 10.0,
-                                                ..default()
-                                            },
-                                            TextColor(Color::WHITE),
-                                        ));
-                                    });
-                            }
-                        });
-                    }
+    if fried_state.is_loading {
+        items.push(Box::new(bsn! {
+            LoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        }));
+    } else if let Some(ref error) = fried_state.error {
+        let message = format!("加载失败: {}", error);
+        items.push(Box::new(bsn! {
+            ErrorMessage
+            Text({message})
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::ERROR)
+        }));
+    } else if fried_state.posts.is_empty() {
+        items.push(Box::new(bsn! {
+            Text("暂无帖子")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        }));
+    } else {
+        // 显示帖子列表
+        for post in &fried_state.posts {
+            items.push(Box::new(fried_post_card(post)));
+        }
 
-                    // 时间
-                    if !post.created_at.is_empty() {
-                        let time_display = format_time(&post.created_at);
-                        info.spawn((
-                            Text::new(time_display),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    }
-                });
-            });
+        // 分页控件（共享控件；state.page 是 0 起的偏移量，控件按 1 起显示）
+        let total_pages = calculate_total_pages(fried_state);
+        if total_pages > 1 {
+            items.push(Box::new(pagination_controls::<FriedPage>(
+                (fried_state.page + 1).max(1) as u32,
+                total_pages.max(0) as u32,
+            )));
+        }
+    }
 
-            // 帖子内容
-            if !post.content.is_empty() {
-                // 截取前 200 个字符
-                let content_text = if post.content.chars().count() > 200 {
-                    format!("{}...", post.content.chars().take(200).collect::<String>())
-                } else {
-                    post.content.clone()
-                };
-                card.spawn((
-                    Text::new(content_text),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                    Node {
-                        max_width: Val::Percent(100.0),
-                        ..default()
-                    },
-                ));
-            }
+    // 底部间距
+    items.push(Box::new(bsn! {
+        Node {
+            height: Val::Px(30.0),
+            min_height: Val::Px(30.0),
+        }
+    }));
 
-            // 媒体附件提示
-            if !post.medias.is_empty() {
-                card.spawn((
+    items
+}
+
+/// 单个帖子卡片场景
+fn fried_post_card(post: &picacg_api::endpoints::fried::FriedPost) -> impl Scene + use<> {
+    let post_id = post.id.clone();
+
+    // 用户名 + 等级 + 称号（无用户信息时为空列表）
+    let user_row: Box<dyn SceneList> = match post.user {
+        Some(ref user) => {
+            let user_name = user.name.clone();
+            let level_label = format!("Lv{}", user.level);
+
+            // 称号（为空时不显示）
+            let title_badge: Box<dyn SceneList> = if user.title.is_empty() {
+                Box::new(bsn_list![])
+            } else {
+                let title = user.title.clone();
+                Box::new(bsn_list![(
                     Node {
                         padding: UiRect::new(
-                            Val::Px(6.0),
-                            Val::Px(6.0),
-                            Val::Px(3.0),
-                            Val::Px(3.0),
+                            Val::Px(4.0),
+                            Val::Px(4.0),
+                            Val::Px(1.0),
+                            Val::Px(1.0),
                         ),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.3, 0.5, 0.8, 0.2)),
-                ))
-                .with_children(|media_hint| {
-                    media_hint.spawn((
-                        Text::new(format!("📷 {} 张图片", post.medias.len())),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.5, 0.7, 1.0)),
-                    ));
-                });
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                    }
+                    BackgroundColor(Color::srgb(0.6, 0.3, 0.8))
+                    Children [
+                        (
+                            Text({title})
+                            TextFont { font_size: FontSize::Px(10.0) }
+                            TextColor(Color::WHITE)
+                        )
+                    ]
+                )])
+            };
+
+            Box::new(bsn_list![(
+                // 用户名
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                }
+                Children [
+                    (
+                        Text({user_name})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 等级标签
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(4.0),
+                                Val::Px(4.0),
+                                Val::Px(1.0),
+                                Val::Px(1.0),
+                            ),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        Children [
+                            (
+                                Text({level_label})
+                                TextFont { font_size: FontSize::Px(10.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                    // 称号
+                    {title_badge},
+                ]
+            )])
+        }
+        None => Box::new(bsn_list![]),
+    };
+
+    // 时间（为空时不显示）
+    let time_row: Box<dyn SceneList> = if post.created_at.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        let time_display = format_time(&post.created_at);
+        Box::new(bsn_list![(
+            Text({time_display})
+            TextFont { font_size: FontSize::Px(11.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
+    };
+
+    // 帖子内容（为空时不显示）
+    let content_row: Box<dyn SceneList> = if post.content.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        // 截取前 200 个字符
+        let content_text = if post.content.chars().count() > 200 {
+            format!("{}...", post.content.chars().take(200).collect::<String>())
+        } else {
+            post.content.clone()
+        };
+        Box::new(bsn_list![(
+            Text({content_text})
+            TextFont { font_size: FontSize::Px(14.0) }
+            TextColor(AppColors::TEXT)
+            Node { max_width: Val::Percent(100.0) }
+        )])
+    };
+
+    // 媒体附件提示（无附件时不显示）
+    let media_hint: Box<dyn SceneList> = if post.medias.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        let media_label = format!("📷 {} 张图片", post.medias.len());
+        Box::new(bsn_list![(
+            Node {
+                padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(3.0), Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
             }
+            BackgroundColor(Color::srgba(0.3, 0.5, 0.8, 0.2))
+            Children [
+                (
+                    Text({media_label})
+                    TextFont { font_size: FontSize::Px(12.0) }
+                    TextColor(Color::srgb(0.5, 0.7, 1.0))
+                )
+            ]
+        )])
+    };
 
-            // 底部操作栏（点赞数、评论数）
-            card.spawn(Node {
-                width: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(20.0),
-                margin: UiRect::top(Val::Px(4.0)),
-                ..default()
-            })
-            .with_children(|footer| {
-                // 点赞
-                footer
-                    .spawn(Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|like_row| {
-                        let like_color = if post.liked {
-                            Color::srgb(1.0, 0.4, 0.4)
-                        } else {
-                            AppColors::TEXT_SECONDARY
-                        };
-                        like_row.spawn((
-                            Text::new(ICON_HEART),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(like_color),
-                        ));
-                        like_row.spawn((
-                            Text::new(format!("{}", post.total_likes)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
+    let like_color = if post.liked {
+        AppColors::ERROR
+    } else {
+        AppColors::TEXT_SECONDARY
+    };
+    let likes_label = format!("{}", post.total_likes);
+    let comments_label = format!("{}", post.total_comments);
 
-                // 评论
-                footer
-                    .spawn(Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(4.0),
-                        ..default()
-                    })
-                    .with_children(|comment_row| {
-                        comment_row.spawn((
-                            Text::new(ICON_FORUM),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                        comment_row.spawn((
-                            Text::new(format!("{}", post.total_comments)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
-            });
-        });
+    bsn! {
+        FriedPostCard { post_id: {post_id} }
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(14.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+        }
+        BackgroundColor(AppColors::SURFACE_SUNKEN)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                // 用户信息行
+                Node {
+                    width: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        // 用户头像占位
+                        Node {
+                            width: Val::Px(36.0),
+                            height: Val::Px(36.0),
+                            min_width: Val::Px(36.0),
+                            min_height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Percent(50.0)),
+                        }
+                        BackgroundColor(Color::srgb(0.18, 0.18, 0.22))
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text(ICON_USER)
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            )
+                        ]
+                    ),
+                    (
+                        // 用户名 + 等级
+                        Node {
+                            flex_direction: FlexDirection::Column,
+                            flex_grow: 1.0,
+                            row_gap: Val::Px(2.0),
+                        }
+                        Children [
+                            {user_row},
+                            // 时间
+                            {time_row},
+                        ]
+                    ),
+                ]
+            ),
+            // 帖子内容
+            {content_row},
+            // 媒体附件提示
+            {media_hint},
+            (
+                // 底部操作栏（点赞数、评论数）
+                Node {
+                    width: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(20.0),
+                    margin: UiRect::top(Val::Px(4.0)),
+                }
+                Children [
+                    (
+                        // 点赞
+                        Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text(ICON_HEART)
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(like_color)
+                            ),
+                            (
+                                Text({likes_label})
+                                TextFont { font_size: FontSize::Px(12.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            ),
+                        ]
+                    ),
+                    (
+                        // 评论
+                        Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text(ICON_FORUM)
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            ),
+                            (
+                                Text({comments_label})
+                                TextFont { font_size: FontSize::Px(12.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
 /// 格式化时间字符串（简单截取日期部分）
@@ -601,101 +536,6 @@ fn format_time(time_str: &str) -> String {
     } else {
         time_str.to_string()
     }
-}
-
-/// 创建分页控件
-fn spawn_fried_pagination(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_page: i32,
-    total_pages: i32,
-) {
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(15.0),
-            padding: UiRect::vertical(Val::Px(15.0)),
-            ..default()
-        })
-        .with_children(|row| {
-            // 上一页
-            let prev_enabled = current_page > 1;
-            let prev_color = if prev_enabled {
-                AppColors::PRIMARY
-            } else {
-                Color::srgb(0.3, 0.3, 0.3)
-            };
-            row.spawn((
-                FriedPrevPageButton,
-                Button,
-                Interaction::default(),
-                Node {
-                    padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(prev_color),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("上一页"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 13.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-
-            // 页码
-            row.spawn((
-                FriedPageText,
-                Text::new(format!("{} / {}", current_page, total_pages)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 下一页
-            let next_enabled = current_page < total_pages;
-            let next_color = if next_enabled {
-                AppColors::PRIMARY
-            } else {
-                Color::srgb(0.3, 0.3, 0.3)
-            };
-            row.spawn((
-                FriedNextPageButton,
-                Button,
-                Interaction::default(),
-                Node {
-                    padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(next_color),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("下一页"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 13.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
 }
 
 /// 清理锅贴社区界面（用 Display::None 隐藏，保留 UI 结构）
@@ -736,57 +576,9 @@ pub fn refresh_fried_ui(
     }
 
     // 重建滚动容器内容
-    let font: Handle<Font> = get_font();
-    commands.entity(scroll_entity).with_children(|content| {
-        if is_loading {
-            content.spawn((
-                LoadingIndicator,
-                Text::new("加载中..."),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        } else if let Some(ref error) = fried_state.error {
-            content.spawn((
-                ErrorMessage,
-                Text::new(format!("加载失败: {}", error)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(1.0, 0.4, 0.4)),
-            ));
-        } else if fried_state.posts.is_empty() {
-            content.spawn((
-                Text::new("暂无帖子"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        } else {
-            for post in &fried_state.posts {
-                spawn_fried_post_card(content, &font, post);
-            }
-            let total_pages = calculate_total_pages(&fried_state);
-            if total_pages > 1 {
-                spawn_fried_pagination(content, &font, fried_state.page + 1, total_pages);
-            }
-        }
-
-        // 底部间距
-        content.spawn(Node {
-            height: Val::Px(30.0),
-            min_height: Val::Px(30.0),
-            ..default()
-        });
-    });
+    for scene in fried_content(&fried_state) {
+        commands.spawn_scene(scene).insert(ChildOf(scroll_entity));
+    }
 }
 
 /// 刷新按钮交互
@@ -812,88 +604,29 @@ pub fn fried_refresh_interaction(
     }
 }
 
-/// 分页按钮交互
-pub fn fried_pagination_interaction(
-    prev_query: Query<&Interaction, (Changed<Interaction>, With<FriedPrevPageButton>)>,
-    next_query: Query<&Interaction, (Changed<Interaction>, With<FriedNextPageButton>)>,
+/// 消费分页控件状态变化（翻页边界与按钮行为已内联在控件观察者里）
+pub fn fried_pagination_changed(
+    pagination_query: Query<&Pagination, (With<PaginationControl<FriedPage>>, Changed<Pagination>)>,
     mut fried_state: ResMut<FriedState>,
     mut load_messages: MessageWriter<LoadFriedPostsRequest>,
 ) {
-    let total_pages = calculate_total_pages(&fried_state);
-    let current_display_page = fried_state.page + 1; // 显示从 1 开始
-
-    // 上一页
-    for interaction in &prev_query {
-        if *interaction == Interaction::Pressed && current_display_page > 1 {
-            fried_state.page -= 1;
-            fried_state.posts.clear();
-            fried_state.is_loading = true;
-            fried_state.error = None;
-            load_messages.write(LoadFriedPostsRequest {
-                page: fried_state.page,
-            });
-        }
+    let Ok(pagination) = pagination_query.single() else {
+        return;
+    };
+    // 控件页码从 1 起，state.page 是 0 起的偏移量
+    let new_page = pagination.current_page.max(1) as i32 - 1;
+    // 只响应真实翻页（控件重建后的同值回填在此被过滤）
+    if new_page == fried_state.page {
+        return;
     }
 
-    // 下一页
-    for interaction in &next_query {
-        if *interaction == Interaction::Pressed && current_display_page < total_pages {
-            fried_state.page += 1;
-            fried_state.posts.clear();
-            fried_state.is_loading = true;
-            fried_state.error = None;
-            load_messages.write(LoadFriedPostsRequest {
-                page: fried_state.page,
-            });
-        }
-    }
-}
+    fried_state.page = new_page;
+    fried_state.posts.clear();
+    fried_state.is_loading = true;
+    fried_state.error = None;
+    load_messages.write(LoadFriedPostsRequest { page: new_page });
 
-/// 处理锅贴滚动
-pub fn handle_fried_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<FriedScrollContainer>,
-    >,
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新锅贴内容尺寸
-pub fn update_fried_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<FriedScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        // 加上间距
-        let child_count = children.len();
-        if child_count > 1 {
-            content_height += (child_count - 1) as f32 * fried_layout::CARD_GAP;
-        }
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
+    tracing::debug!("切换到锅贴第 {} 页", new_page + 1);
 }
 
 /// 处理小程序列表加载完成

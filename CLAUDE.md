@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2026-03-27
+> 最后更新: 2026-08-11
 
 ## 其他
  - git commit 带emoji
@@ -54,14 +54,17 @@ picacg-rust/
     │   └── src/
     │       ├── lib.rs
     │       └── settings.rs       # AppSettings, ProxySettings, ChannelSettings, FilterSettings
-    └── bevy_ui_toolkit/          # 通用 UI 组件库（本地 crate）
-        └── src/
-            ├── lib.rs
-            ├── theme.rs          # 主题系统
-            ├── scrollbar/        # 滚动条组件
-            ├── pagination/       # 分页组件
-            └── waterfall/        # 瀑布流布局
+    └── picacg_app/src/systems/   # 共享 UI 层（原 bevy_ui_toolkit 已合并回，2026-08）
+        ├── theme.rs              # 设计令牌：Theme（控件运行时面）+ Scale（尺度档位）
+        ├── widgets.rs            # ButtonStyle 组件 + 全局交互配色系统
+        ├── scrollbar/            # 上游 ScrollArea/Scrollbar 的外观包装 + 滑块配色
+        ├── pagination/           # 分页控件（值组件 + 内联观察者）
+        ├── waterfall.rs          # 瀑布流状态机（有界列表页使用）
+        └── ui_common.rs          # 徽章/时间信息/右键菜单/格式化工具
 ```
+
+> 颜色常量面 `AppColors` 定义在 `systems/login.rs`（1000+ 处存量引用），
+> 与 `theme.rs` 的 `Theme` 数值必须一致；焦点/文本输入共享层在 `utils/text_input.rs`。
 
 ### Crate 依赖关系
 
@@ -74,8 +77,6 @@ picacg_api           ← 依赖 picacg_core, picacg_config
     ↑
 picacg_db            ← 依赖 picacg_core, picacg_api
 
-bevy_ui_toolkit      ← 依赖 bevy（独立 UI 库）
-
 picacg_app (主应用)  ← 依赖以上所有 crate
 ```
 
@@ -86,8 +87,8 @@ picacg_app (主应用)  ← 依赖以上所有 crate
 ```toml
 # 根 Cargo.toml
 [workspace.dependencies]
-bevy = { version = "0.18", default-features = true }
-reqwest = { version = "0.12", features = ["json", "cookies", "stream", "rustls-tls", "socks"] }
+bevy = { version = "0.19", default-features = true, features = ["bevy_debug_stepping"] }
+reqwest = { version = "0.13", features = ["json", "cookies", "stream", "rustls", "socks", "gzip", "brotli"] }
 serde = { version = "1.0", features = ["derive"] }
 # ... 更多依赖
 ```
@@ -105,9 +106,9 @@ serde.workspace = true
 
 ## 框架概述
 
-**当前框架**: **Bevy 0.18.0** (ECS 架构)
+**当前框架**: **Bevy 0.19.0** (ECS 架构 + BSN 场景系统)
 
-### Bevy 0.18 API 速查
+### Bevy 0.19 API 速查
 
 | API | 说明 |
 |-----|------|
@@ -118,8 +119,49 @@ serde.workspace = true
 | `BorderColor::all(color)` | 设置边框颜色 |
 | `despawn()` | 删除实体（自动递归删除子实体） |
 | `KeyboardInput` + `logical_key` | 键盘输入处理 |
+| `TextFont.font: FontSource` | 0.19 起 `Handle<Font>` 需 `.into()`；BSN 中省略该字段 = 默认 CJK 字体 |
+| `TextFont.font_size: FontSize` | 0.19 起用 `FontSize::Px(14.0)`（有 `From<f32>`） |
+| `Font::from_bytes(Vec<u8>)` | 0.19 起替代 `try_from_bytes`，不再返回 Result（Parley 后端延迟解析） |
 
-### 键盘输入新 API (Bevy 0.18)
+### BSN（Bevy Scene Notation）—— UI 构建标准写法
+
+UI 构建代码已全部迁移到 `bsn!` 场景函数（`bevy::prelude` 直接可用；默认 feature 经 `ui → scene` 链启用 bevy_scene）。
+样板参考：`systems/login.rs`（页面场景化）、`systems/scrollbar/scenes.rs`（`#Name` 实体引用）、
+`systems/pagination/scenes.rs`（泛型标记 + 内联观察者）。
+
+```rust
+fn my_page(state: &SomeState) -> impl Scene + use<> {   // 引用参数 → 必须精确捕获 use<>（泛型则 use<T>）
+    let title = state.title.clone();                    // 动态值先取成 owned 局部变量
+    bsn! {
+        PageRoot                                        // marker 组件裸写
+        Node { width: Val::Percent(100.0) }             // 补丁语义：只写非默认字段，无 ..default()
+        TextFont { font_size: FontSize::Px(14.0) }      // font 字段省略 = 默认 CJK 字体
+        Interaction                                     // 按钮必备的 Interaction 直接裸写
+        Children [
+            ( Text({title}) TextColor(AppColors::TEXT) ),   // {} 包局部变量/复杂表达式
+            my_fragment("参数", value),                     // 场景函数组合；实参不加 {}
+            {dynamic_list},                                  // Vec<impl Scene>/Box<dyn SceneList> 裸插入
+        ]
+    }
+}
+// spawn：commands.spawn_scene(my_page(&state)) → EntityCommands（可 .id()/.insert()）
+// 增量追加子实体：commands.spawn_scene(card(..)).insert(ChildOf(container))
+```
+
+**关键规则（全部编译验证过）：**
+
+| 规则 | 说明 |
+|------|------|
+| derive 门槛 | 进 bsn 的组件 `#[derive(Component, Default, Clone)]`；字段枚举需 `Default` + 首变体 `#[default]` |
+| Entity 字段组件 | `#[derive(Component, FromTemplate)]`（与 Default 互斥），字段可接 `#Name` 引用或具体 Entity |
+| 泛型标记组件 | `PhantomData<fn() -> T>` + 手写 Default/Clone（derive 会给 T 加多余 bound；`PhantomData<T>` 触发 Unpin 错误） |
+| template_value 三场景 | 外部枚举变体（`FocusPolicy::Block`）、关联函数构造器（`BorderColor::all(..)`）、builder 值（`TextInput::new(..)`） |
+| 实体引用 | 同一 bsn! 内 `#ScrollArea` 命名 + 任意位置引用；`scrollbar(target)` 接 `impl Into<EntityTemplate>` |
+| ⚠️ 列表括号陷阱 | `Children [ {list} ]` 展开多实体；`({list})` 只出一个实体，**不报错**——动态列表一律裸 `{list}` |
+| ⚠️ 构造器实参陷阱 | 实参含运算/局部变量时整个值包 `{}`：`width: {Val::Percent(ratio * 100.0)}` |
+| 保留命令式 | 瀑布流分帧建卡状态机（单卡已场景化）、refresh 系统的原地修改、非 UI 单组件 spawn（Camera2d） |
+
+### 键盘输入 API (Bevy 0.19)
 
 ```rust
 use bevy::input::keyboard::{Key, KeyboardInput};
@@ -146,58 +188,20 @@ fn keyboard_input(
 }
 ```
 
-### IME 输入法支持 (Bevy 0.18)
+### 文本输入与焦点（2026-08 重构后）
 
-**重要：** `KeyboardInput` 只能处理英文直接输入，中文输入法需要使用 `Ime` 事件。
+全部输入框走共享层 `utils/text_input.rs`，页面零焦点代码：
 
-```rust
-use bevy::window::Ime;
-
-fn handle_ime_input(
-    mut ime_events: MessageReader<Ime>,
-) {
-    for event in ime_events.read() {
-        match event {
-            Ime::Commit { value, .. } => {
-                // IME 提交的文本（用户确认输入后）
-                // value 是完整的输入字符串，如 "你好"
-                keyword.push_str(value);
-            }
-            Ime::Preedit { value, cursor, .. } => {
-                // IME 预览文本（输入过程中的候选）
-                // 可用于显示输入法预览
-            }
-            Ime::Enabled { .. } => { /* IME 启用 */ }
-            Ime::Disabled { .. } => { /* IME 禁用 */ }
-        }
-    }
-}
-```
-
-**注意事项：**
-- 英文输入：使用 `KeyboardInput` + `Key::Character`
-- 中文输入：使用 `Ime::Commit` 事件
-- 两个系统需要同时注册才能支持双语输入
- 经验总结
-
-
-
-Bevy 0.18 IME（输入法）支持要点
-
-1. 启用 IME 的必要条件：
-- 在输入框获取焦点时设置 window.ime_enabled = true
-- 设置 window.ime_position 指定 IME 候选框位置
-- 失去焦点时设置 window.ime_enabled = false
-2. Query 需要 GlobalTransform 时的注意事项（参考 CLAUDE.md 10.3）：
-- Bevy UI 节点默认不包含 Transform/GlobalTransform
-- 需要显式添加 Transform::default() 组件，Bevy 才会自动添加 GlobalTransform
-- 否则 Query 会返回空结果
-3. rfd 文件对话框：
-- rfd::FileDialog::new().pick_folder() 是同步阻塞调用
-- 适合简单场景，复杂场景可考虑异步版本
-
-
----
+- **焦点单一真相源**：上游 `bevy::input_focus::InputFocus`（此前 8 套页面级
+  Focus 资源/sync 系统/影子布尔全部废除）。页面读焦点一律
+  `input_focus.get() == Some(entity)`。
+- 点击聚焦+光标定位（CJK 全角步进精确计算）、点击空白失焦、聚焦边框、
+  IME 开关与候选框位置：通用系统统一处理，页面无需注册任何输入交互系统
+- 键盘/IME 编辑按焦点实体**定向分发**（Backspace/Delete/方向键/Home/End/
+  Ctrl+C/V/X/IME Commit）
+- Tab 导航：`TabIndex(n)` 组件 + 上游 `TabNavigationPlugin`（ui_plugin 注册），
+  取代手写 Tab 链
+- 页面只保留「动作键」系统（Enter 提交等），用 InputFocus 判定目标
 
 ### 字体加载方案
 
@@ -263,581 +267,168 @@ btn.spawn((
 
 ---
 
-### Bevy 0.18 DPI 缩放处理
+### Bevy 0.19 DPI 缩放处理
 
-**核心原则：** Bevy UI 使用逻辑像素，但 `ComputedNode::size()` 返回物理像素。
+**核心原则：** Bevy UI 使用逻辑像素，但 `ComputedNode::size()`/`content_size()` 返回物理像素。
 
 | API | 返回值类型 | 说明 |
 |-----|-----------|------|
-| `ComputedNode::size()` | **物理像素** | 需要除以 `scale_factor` 转换 |
+| `ComputedNode::size()` / `content_size()` | **物理像素** | 乘 `computed.inverse_scale_factor` 转逻辑像素（优先；免查 Window） |
 | `Window::cursor_position()` | **逻辑像素** | 屏幕坐标系（原点左上，Y 向下） |
-| `GlobalTransform::translation()` | **逻辑像素** | Bevy UI 坐标系（原点中心，Y 向上） |
 | `Node` 的 `Val::Px(x)` | 逻辑像素 | Bevy 自动处理 DPI 缩放 |
-| `ScrollPosition` | 逻辑像素 | 自定义组件，存储逻辑像素 |
-| `ContentSizeInfo` | 逻辑像素 | 自定义组件，存储逻辑像素 |
+| `ScrollPosition` | 逻辑像素 | Bevy 内置组件 |
 
-**获取 scale_factor：**
+**惯用写法（新代码统一用逐节点因子，不再查询 Window）：**
 ```rust
-fn get_scale_factor(window_query: &Query<&Window, With<PrimaryWindow>>) -> f32 {
-    window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor() as f32)
-        .unwrap_or(1.0)
-}
-```
-
-**典型场景：**
-```rust
-// ❌ 错误：直接使用 ComputedNode::size()
-let viewport_height = scroll_computed.size().y;
-
-// ✅ 正确：转换为逻辑像素
-let scale_factor = get_scale_factor(&window_query);
-let viewport_height = scroll_computed.size().y / scale_factor;
+let viewport_h = computed.size().y * computed.inverse_scale_factor;
+let content_h = computed.content_size().y * computed.inverse_scale_factor;
 ```
 
 ---
 
-### 坐标系统转换（重要）
+### 坐标系统与滚动条（0.19 起由上游接管）
 
-Bevy 中存在两套坐标系统，进行鼠标位置计算时必须正确转换：
+> 历史上本项目自研滚动条，坐标系翻转/DPI 换算/内容尺寸手工喂养曾是主要事故源
+> （轨道点击跳错、高分屏滑块错位、GlobalTransform 缺失查询空转等）。
+> **自研实现已整体退役**，相关陷阱文档随之删除——这正是换上游的目的。
 
-**1. 屏幕坐标系（Window::cursor_position()）**
-- 原点：窗口**左上角**
-- Y 轴：**向下**为正
-- 单位：逻辑像素
+现行方案（`bevy_ui_widgets`，随 DefaultPlugins 加载，零插件成本）：
 
-**2. Bevy UI 坐标系（GlobalTransform::translation()）**
-- 原点：窗口**中心**
-- Y 轴：**向上**为正
-- 单位：逻辑像素
+| 能力 | 提供方 | 说明 |
+|------|--------|------|
+| 滚轮/触控板滚动 | `ScrollArea` 标记 | `Pointer<Scroll>` 悬停派发 + 事件冒泡，嵌套滚动语义自动正确 |
+| 滑块尺寸/位置 | `Scrollbar { target, orientation, min_thumb_length }` | 可视/内容比例自动算，布局后阶段定位，DPI 内部处理 |
+| 轨道点击/拖拽 | 上游内置 | 每滑块独立 `ScrollbarDragState`（require 注入） |
+| 内容尺寸 | `ComputedNode::content_size()` | 引擎布局原生输出；`× inverse_scale_factor` 得逻辑像素 |
 
-**坐标转换公式：**
+**页面接线（BSN）**：
+
 ```rust
-// 屏幕坐标 → Bevy UI 坐标
-let window_height = window.height();
-let cursor_y_bevy = window_height - cursor_pos.y;  // 翻转 Y 轴
-```
-
-**滚动条轨道点击计算示例：**
-```rust
-// 获取轨道中心位置（Bevy UI 坐标系）
-let track_center = track_transform.translation();
-let track_height = track_computed.size().y / scale_factor;
-
-// 轨道顶部 Y 坐标（Bevy 坐标系中，Y 增大 = 向上）
-let track_top_y = track_center.y + track_height / 2.0;
-
-// 点击位置相对于轨道顶部的距离
-let click_offset_from_top = track_top_y - cursor_y_bevy;
-
-// 点击比例（0.0 = 顶部，1.0 = 底部）
-let click_ratio = (click_offset_from_top / track_height).clamp(0.0, 1.0);
-```
-
-**常见错误：**
-```rust
-// ❌ 错误：使用 RelativeCursorPosition.normalized
-//    该组件在高 DPI 环境下可能出现 1/scale_factor 的偏差
-let click_ratio = relative_cursor.normalized.y;
-
-// ✅ 正确：手动计算相对位置
-let click_ratio = (track_top_y - cursor_y_bevy) / track_height;
-```
-
-**滚动条系统 DPI 修复要点：**
-1. `update_all_scrollbar_thumbs`: track_height 需要除以 scale_factor
-2. `scrollbar_thumb_drag`: track_height、thumb_height 需要除以 scale_factor
-
-
-**影响文件：**
-- `src/systems/categories.rs` - viewport 计算
-- `src/systems/comics.rs` - viewport 计算
-- `src/systems/scrollbar.rs` - 滚动条所有系统
-
----
-
-## 自定义滚动条系统
-
-实现 VSCode 风格的滚动条，支持：
-- 轨道点击快速跳转
-- 滑块拖拽滚动
-- 自动计算滑块大小和位置
-- DPI 缩放适配
-
-### 关键组件
-
-| 组件 | 用途 |
-|------|------|
-| `ScrollContainer` | 可滚动容器标记 |
-| `ScrollPosition` | Bevy 内置滚动位置，使用 `.y` 字段 |
-| `ContentSizeInfo` | 内容/视口尺寸信息（需手动更新） |
-| `ScrollbarTrack` | 滚动条轨道，存储关联的滚动容器 Entity |
-| `ScrollbarThumb` | 滚动条滑块，存储关联的滚动容器 Entity |
-| `ScrollbarDragState` | 拖拽状态资源（全局） |
-| `ScrollbarContainer` | 滚动条容器（可选） |
-
-### 系统函数（需在 ui_plugin.rs 注册）
-
-- `update_all_scrollbar_thumbs` - 更新滑块位置和大小
-- `scrollbar_thumb_interaction` - 滑块悬停/按下状态
-- `scrollbar_track_click` - 轨道点击跳转
-- `scrollbar_thumb_drag` - 滑块拖拽
-- `reset_drag_state_on_release` - 鼠标释放时重置状态
-
-### 使用步骤
-
-**1. 在 ui_plugin.rs 注册系统（在对应页面的 Update 中）：**
-```rust
-.add_systems(
-    Update,
-    (
-        // ... 其他系统
-        update_all_scrollbar_thumbs,
-        scrollbar_thumb_interaction,
-        scrollbar_track_click,
-        scrollbar_thumb_drag,
-        reset_drag_state_on_release,
-    )
-        .run_if(in_state(AppRoute::YourPage)),
-)
-```
-
-**2. 创建可滚动容器（保存 Entity ID）：**
-```rust
-let scroll_container = parent
-    .spawn((
-        YourScrollContainerMarker,  // 自定义标记组件
-        ScrollContainer,
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            overflow: Overflow::scroll_y(),  // 启用垂直滚动
-            flex_direction: FlexDirection::Column,
-            ..default()
-        },
-        ScrollPosition::default(),
-        ContentSizeInfo::default(),
-    ))
-    .with_children(|content| {
-        // 滚动内容...
-    })
-    .id();  // 保存 Entity ID
-```
-
-**3. 创建滚动条（使用保存的 scroll_container Entity）：**
-```rust
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                bottom: Val::Px(0.0),
-                width: Val::Px(12.0),  // 滚动条宽度
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-        ))
-        .with_children(|scrollbar| {
-            // 轨道
-            scrollbar
-                .spawn((
-                    ScrollbarTrack { scroll_container },
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        justify_content: JustifyContent::FlexStart,
-                        align_items: AlignItems::Center,
-                        padding: UiRect::horizontal(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
-                    Transform::default(),  // 必须！否则 GlobalTransform 不可用
-                ))
-                .with_children(|track| {
-                    // 滑块
-                    track.spawn((
-                        ScrollbarThumb { scroll_container },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(8.0),
-                            height: Val::Px(50.0),  // 初始高度，会被系统自动更新
-                            position_type: PositionType::Absolute,
-                            top: Val::Px(0.0),
-                            left: Val::Px(2.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-                        Transform::default(),  // 必须！
-                    ));
-                });
-        });
+bsn! {
+    Node { .. }
+    Children [
+        (
+            #ContentScroll
+            ScrollArea                              // 滚轮滚动
+            Node { overflow: Overflow::scroll_y(), .. }
+        ),
+        scrollbar(#ContentScroll),                  // systems/scrollbar 包装：VSCode 外观 + 上游机制
+    ]
 }
 ```
 
-**4. 实现滚动处理系统：**
-```rust
-pub fn handle_your_scroll(
-    mut scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<YourScrollContainerMarker>,
-    >,
-    mut mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
-) {
-    for event in mouse_wheel_events.read() {
-        let scroll_delta = match event.unit {
-            bevy::input::mouse::MouseScrollUnit::Line => event.y * 40.0,
-            bevy::input::mouse::MouseScrollUnit::Pixel => event.y,
-        };
+**保留的自定义**：滑块悬停/拖拽配色（`update_scrollbar_thumb_colors`，全局注册一次）；
+阅读器滚轮模态逻辑（单页=翻页/条漫=滚动，条漫容器**不加** ScrollArea）。
 
-        for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-            let max_scroll = content_info
-                .map(|info| (info.content_height - info.viewport_height).max(0.0))
-                .unwrap_or(0.0);
-            scroll_pos.y = (scroll_pos.y - scroll_delta).clamp(0.0, max_scroll);
-        }
-    }
-}
-```
-
-**5. 实现内容尺寸更新系统：**
-```rust
-pub fn update_your_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<YourScrollContainerMarker>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor() as f32)
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        // 计算内容高度
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(*child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-```
-
-### 注意事项
-
-1. **Transform 组件必须添加**：轨道和滑块需要 `Transform::default()`，否则 `GlobalTransform` 不可用，导致点击/拖拽不响应
-2. **ScrollPosition 使用 `.y` 字段**：Bevy 0.18 的 `ScrollPosition` 有 `x` 和 `y` 字段
-3. **ContentSizeInfo 需手动更新**：在每帧的 Update 系统中更新 `content_height` 和 `viewport_height`
-4. **滚动容器需要 `overflow: Overflow::scroll_y()`**：启用 Bevy 内置的滚动裁剪
-
----
+**仍然有效的 DPI 常识**：`ComputedNode::size()`/`content_size()` 返回物理像素，
+换逻辑像素乘 `computed.inverse_scale_factor`；`Window::cursor_position()` 是逻辑像素。
 
 ## 常见陷阱
 
-### Query 组件缺失导致查询返回空
+### B0001：同系统 Query 读写冲突（运行时 panic，编译期查不出）
 
-**问题场景：** Query 需要某个组件，但实体没有该组件，导致查询返回 0 个实体。
+同一系统内两个 Query 对同一组件「一写一读/两写」且不可证不相交 → 系统**首次初始化时 panic**
+（页面级系统 = 首次进入该页才炸；check/clippy 全绿拦不住）。判定语义：
 
-**典型案例：GlobalTransform 缺失**
+- 读 = `&X`/`Ref<X>`/`Option<&X>`/过滤器 `Changed<X>`/`Added<X>`；`With`/`Without`/`Has`/`Entity` 不算访问
+- 可证不相交的**唯一**方式：一方 `With<M>` 出现在另一方 `Without<M>`。
+  ⚠️ `With<A>` vs `With<B>` **不算**不相交
+- 修复优先级：交叉 `Without` 隔离 → 合并查询 + match 分流 → 探针改 `Mut::is_changed()`
+  （`Changed<X>` 探针 + `&mut X` 场景，见 reader.rs `update_webtoon_window`）→ `ParamSet`
 
-```rust
-// ❌ 错误：查询需要 GlobalTransform，但 UI 实体可能没有
-pub fn scrollbar_track_click(
-    track_query: Query<(&ScrollbarTrack, &GlobalTransform, &ComputedNode)>,
-) {
-    for (track, transform, computed) in &track_query {
-        // 如果实体没有 GlobalTransform，这里永远不会执行！
-    }
-}
-```
+**静态防线**：`python3 scripts/check_query_conflicts.py`（CI clippy 之后自动跑；
+括号配对解析全部系统签名，命中即失败）。写含多个 Query 的系统前先过一遍脑内判定，提交前跑脚本。
 
-**症状：**
-- 系统函数不报错，但完全没有响应
-- 调试时发现 `track_query.iter().count() == 0`
-- 其他不需要该组件的 Query 可以正常匹配到实体
+### Query 组件缺失导致查询返回空（通识）
 
-**根本原因：**
-- Bevy UI 节点默认**不包含** `Transform`/`GlobalTransform`
-- 只有显式添加 `Transform` 组件后，Bevy 才会自动添加 `GlobalTransform`
+Query 里出现实体没有的组件 → 匹配 0 个实体，**不报错、只是静默不执行**。
+两类易中招的组件：
 
-**修复方法：** 在创建实体时添加 `Transform::default()`
+- `GlobalTransform`：UI 节点默认没有 Transform/GlobalTransform，需显式加
+  `Transform::default()` 才会自动补全（历史上自研滚动条因此坑过；现行代码
+  已无手动 Transform 需求——上游滚动条不依赖它）
+- 恒空过滤器：`Without<Interaction>` 配 `Button` 实体恒为空
+  （0.19 起 `Button` require(Interaction)）——写这种旁路 Query 前先想清楚
 
-```rust
-// ✅ 正确：显式添加 Transform，Bevy 会自动添加 GlobalTransform
-scrollbar.spawn((
-    ScrollbarTrack { scroll_container },
-    Button,
-    Interaction::default(),
-    Node { /* ... */ },
-    BackgroundColor(TRACK_COLOR),
-    // 添加 Transform 以获得 GlobalTransform
-    Transform::default(),
-));
-```
-
-**诊断技巧：**
-1. 添加调试日志检查 Query 匹配数量：`info!("实体数量={}", query.iter().count())`
-2. 对比工作正常的 Query 和有问题的 Query，找出组件差异
-3. 检查实体创建代码，确认是否缺少必要组件
-
-**相关组件依赖：**
-| 组件 | 自动添加条件 |
-|------|-------------|
-| `GlobalTransform` | 需要显式添加 `Transform` |
-| `ComputedNode` | UI 节点自动获得 |
-| `Interaction` | 需要显式添加，配合 `Button` 或 `FocusPolicy` |
+**诊断技巧**：`info!("匹配数={}", query.iter().count())`；对比能匹配的相邻 Query 找组件差异。
 
 ---
 
-### 瀑布式系统与 refresh 函数冲突
+### 漫画列表虚拟滚动（comics.rs）
 
-**问题场景：** 页面第一次进入时不显示卡片，切换页面后返回才显示。
+无限滚动页面的实体数不再随翻页累积：`comics_virtual_scroll` 只为可见窗口 ±2 行
+维持卡片实体，容器首尾各一个 spacer（`ComicsTopSpacer`/`ComicsBottomSpacer`，
+width:100% 独占整行）撑起总高度——引擎 `content_size()` 与上游滚动条因此天然正确，
+`auto_load_more_comics` 的触底判定不受影响。
 
-**典型案例：refresh_xxx_ui 重建整个 UI**
+- 状态：`ComicsVirtualState`（过滤索引缓存 / 实测行高 / 列数 / 窗口区间 / 在场实体表）
+- 滚动跨行：行级增量 spawn/despawn（`insert_children` 定位到 spacer 之间）
+- 数据/列数变化：全量重建窗口；屏蔽词过滤只在数据变化的低频路径执行
+- 卡片场景 `comic_card` 复用；徽章为单实体（Text 自带 padding/圆角/底色）
+- 其余分页页面数据量有界，仍用瀑布流分帧显示（`WaterfallState`）
 
-```rust
-// ❌ 错误：refresh 函数在数据变化时重建整个 UI
-pub fn refresh_comics_list_ui(
-    comics_state: Res<ComicsListState>,
-    ...
-) {
-    if !comics_state.is_changed() { return; }
+### 条漫滚动锚定（reader.rs）
 
-    // 删除旧 UI（包括瀑布式系统刚创建的卡片！）
-    for entity in root_query.iter() {
-        commands.entity(entity).despawn();
-    }
+条漫槽位以占位高度（1000px）起步，真实图高陆续就位——同一滚动偏移映射到的页码
+会**级联漂移**（曾表现为：打开显示中间页码、图片加载后跌回第 1 页，恢复上次
+阅读页功能一并失效）。治法：
 
-    // 重建 UI，但没有卡片（卡片由瀑布式系统创建）
-    // ...
-}
-```
+- `ReaderState.webtoon_anchor: Option<(页, 页内偏移)>`——创建视图时锚到目标页；
+  非用户滚动帧若上方内容高度变化，按锚点补偿 `ScrollPosition` 保持视觉位置不动
+  （补偿写入用 `Local<bool>` 标志与用户滚动区分）
+- 用户滚动 → 重锚到当前页；当前页判定用**视口顶边**规则（开屏恒为第 1 页；
+  原「视口中心」规则在占位高度下会指到中间值）
+- 阅读中途上方图片补载的跳动同样被锚定消除
 
-**时序问题：**
-1. `setup_xxx_ui` 创建基本 UI 结构（含"加载中..."指示器）
-2. API 请求发出
-3. 瀑布式系统检测到没有数据，不启动预创建
-4. API 数据返回，`xxx_state` 变化
-5. `refresh_xxx_ui` 检测到 `is_changed()`，**删除整个 UI 并重建**
-6. 重建的 UI 只有基本结构，没有卡片
-7. 瀑布式系统检测到数据存在，启动预创建
-8. 但 `refresh_xxx_ui` 可能再次检测到变化，**又删除刚创建的卡片**
+### 图片加载管线（重试机制）
 
-**正确架构：**
+`resources/image_cache.rs` 状态机：Pending → Loading → Loaded / Failed。
 
-```rust
-// ✅ 正确：refresh 函数只处理错误状态，不重建整个 UI
-pub fn refresh_comics_list_ui(
-    comics_state: Res<ComicsListState>,
-    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
-    card_query: Query<&ComicCard>,
-    ...
-) {
-    if !comics_state.is_changed() { return; }
+- **有界重试 + 指数退避**：失败后 2s、4s 自动重排队，累计 3 次尝试耗尽才**终局失败**
+  （`api_plugin::process_image_queue` 每帧调 `requeue_ready_retries()`，无待重试项 O(1) 直返）
+- `is_failed()` 只对终局失败返回真——重试期间消费系统保持占位符存活，成功后图片正常落位；
+  终局失败才摘除占位标记（实体退出每帧扫描集）
+- `enqueue()` 对任何已有状态的 URL 不重复入队（防重复请求）；手动强制重来用 `retry()`（计数归零）
+- 下载并发上限 15；解码走 `spawn_blocking`（不占 tokio worker）；显存单份（RENDER_WORLD）
 
-    // 如果有错误，显示错误信息
-    if let Some(ref error) = comics_state.error {
-        // 添加错误信息 UI...
-        return;
-    }
+### 瀑布式系统与 refresh 函数的职责分离
 
-    // 如果数据存在或已有卡片，让瀑布式系统处理，不干涉！
-    if !comics_state.comics.is_empty() {
-        return;
-    }
+**适用范围**：数据量有界的列表页（categories/rankings/favorites/search/home 等）。
+漫画列表（无限滚动）已改虚拟滚动，见上一节。
 
-    // 检查是否已有卡片
-    if let Ok((_, children)) = scroll_container_query.single() {
-        let has_cards = children
-            .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
-            .unwrap_or(false);
-        if has_cards {
-            return;
-        }
-    }
-}
-```
+**问题本质**：refresh 系统若在数据变化时重建整个 UI，会删掉瀑布式系统刚建的卡片，
+两者互相打架（首进不显示、切页才出现）。
 
-**瀑布式系统自动启动预创建：**
+**职责分离原则**：
 
-```rust
-// ✅ 正确：瀑布式系统自动检测并启动预创建
-pub fn waterfall_create_comic_cards(
-    mut creation_state: ResMut<ComicsCardCreationState>,
-    comics_state: Res<ComicsListState>,
-    scroll_container_query: Query<(Entity, Option<&Children>), With<ComicsScrollContainer>>,
-    card_query: Query<&ComicCard>,
-    ...
-) {
-    // 自动检测：数据存在但没有卡片，启动预创建
-    if !creation_state.is_creating
-        && !comics_state.comics.is_empty()
-        && comics_state.error.is_none()
-    {
-        if let Ok((_, children)) = scroll_container_query.single() {
-            let has_cards = children
-                .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
-                .unwrap_or(false);
-
-            if !has_cards {
-                // 删除加载指示器，启动预创建
-                creation_state.start_precreate(comics_state.comics.len(), font);
-            }
-        }
-    }
-    // ...
-}
-```
-
-**职责分离原则：**
 | 函数 | 职责 |
 |------|------|
 | `setup_xxx_ui` | 创建基本 UI 结构（标题栏、滚动容器、加载指示器） |
-| `refresh_xxx_ui` | 只处理错误状态，不重建整个 UI |
-| `waterfall_create_xxx_cards` | 自动检测数据并创建卡片，瀑布式显示 |
+| `refresh_xxx_ui` | 只处理错误状态与文本原地更新，**不重建整个 UI** |
+| `waterfall_create_xxx_cards` | 检测「数据有而卡片无」时启动预创建，分帧显示 |
 
-**排行榜标签切换特殊处理：**
+**标签切换特殊处理**（rankings）：卡片存在但类型不匹配 → 清除全部子元素 +
+`creation_state.clear()`，下一帧自动重启预创建。
 
-```rust
-// 检查类型是否匹配（处理标签切换）
-let type_matches = creation_state.context.current_type
-    .map(|t| t == rankings_state.current_type)
-    .unwrap_or(false);
-
-// 如果有卡片但类型不匹配，清除旧卡片
-if has_cards && !type_matches {
-    // 清除所有子元素
-    for child in children.iter() {
-        commands.get_entity(child).map(|e| e.despawn());
-    }
-    creation_state.clear();
-    return;  // 下一帧会检测到没有卡片，启动预创建
-}
-```
-
-**影响文件：**
-- `src/systems/categories.rs` - `refresh_categories_ui`, `waterfall_create_category_cards`
-- `src/systems/comics.rs` - `refresh_comics_list_ui`, `waterfall_create_comic_cards`
-- `src/systems/rankings.rs` - `refresh_rankings_ui`, `waterfall_create_cards`
+**性能纪律**：屏蔽词过滤（`CompiledFilter`）只允许出现在启动检测/预创建分支**内部**
+（惰性计算），严禁放在每帧必经的函数顶部——这是 2026-08 评审抓出的最大每帧开销源。
 
 ---
 
-### UI 重建导致输入框焦点丢失
+### UI 重建与输入框焦点（重构后）
 
-**问题场景：** 输入框输入一个字符后焦点丢失，需要重新点击才能继续输入。
+历史陷阱：焦点存在组件字段里，重建 UI 即丢失，需手工保存/恢复。
+现行架构下焦点在 `InputFocus` 资源中、以实体为键——重建输入框会产生新实体，
+**重建方仍需在 spawn 后把新实体 set 回 `InputFocus`**（参考 search.rs 的
+needs_rebuild 流程）；除此之外无需任何手工状态搬运。
 
-**典型案例：SearchState 变化触发 UI 重建**
+### 按钮 Interaction（0.19 已过时的陷阱）
 
-```rust
-// ❌ 错误：每次 keyword 变化都重建整个 UI，焦点状态丢失
-pub fn refresh_search_ui(search_state: Res<SearchState>, ...) {
-    if !search_state.is_changed() { return; }
-
-    // 重建 UI 时，focused 被重置为 false
-    header.spawn((
-        SearchInputField { focused: false },  // ← 焦点丢失！
-        ...
-    ));
-}
-```
-
-**症状：**
-- 输入第一个字符后焦点立即丢失
-- 日志显示 `has_focus=true`（第一个字符），然后 `has_focus=false`（后续字符）
-- 必须用鼠标重新点击输入框
-
-**根本原因：**
-- `ResMut<SearchState>` 被修改时，`is_changed()` 返回 `true`
-- `refresh_search_ui` 系统重建整个 UI
-- 新创建的 `SearchInputField` 组件 `focused` 字段被重置
-
-**修复方法：** 在重建 UI 前保存焦点状态，重建后恢复
-
-```rust
-// ✅ 正确：保存并恢复焦点状态
-pub fn refresh_search_ui(
-    input_query: Query<&SearchInputField>,
-    ...
-) {
-    // 1. 保存焦点状态
-    let was_focused = input_query.iter().any(|input| input.focused);
-
-    // 2. 销毁旧 UI
-    for entity in search_root_query.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    // 3. 重建时恢复焦点
-    let border_color = if was_focused { PRIMARY } else { BORDER };
-    header.spawn((
-        SearchInputField { focused: was_focused },  // ← 恢复焦点
-        BorderColor::all(border_color),             // ← 恢复边框颜色
-        ...
-    ));
-}
-```
-
-**相关 Commit：**
-- `fix: 修复搜索输入框焦点丢失和中文输入法问题`
-
----
-
-### 按钮缺少 Interaction 组件导致无法点击
-
-**问题场景：** 按钮添加了 `Button` 组件，但点击没有任何响应。
-
-**典型案例：日志等级按钮无响应**
-
-```rust
-// ❌ 错误：缺少 Interaction 组件
-row.spawn((
-    MyButton,
-    Button,
-    Node { ... },
-    BackgroundColor(AppColors::PRIMARY),
-));
-```
-
-**症状：**
-- 按钮显示正常，但点击无响应
-- 交互系统的 `Changed<Interaction>` 查询永远不会匹配到该实体
-
-**根本原因：**
-- Bevy 的 `Button` 组件只是一个标记，不会自动添加 `Interaction` 组件
-- 必须显式添加 `Interaction::default()` 才能启用交互检测
-
-**修复方法：** 在按钮创建时添加 `Interaction::default()`
-
-```rust
-// ✅ 正确：显式添加 Interaction 组件
-row.spawn((
-    MyButton,
-    Button,
-    Interaction::default(),  // 必须添加！
-    Node { ... },
-    BackgroundColor(AppColors::PRIMARY),
-));
-```
-
----
+历史版本的陷阱：`Button` 不自动带 `Interaction`，漏加导致按钮点不动。
+**Bevy 0.19 起 `Button` 已 `#[require(Node, FocusPolicy::Block, Interaction)]`**，
+bsn 里写 `Button` 即可，无需（也不要）再裸写 `Interaction`。
+按钮三态配色统一走 `systems/widgets.rs` 的 `ButtonStyle` 组件 +
+全局 `apply_button_interaction` 系统，页面不再手写 hover/pressed 分支。
 
 ### Query 遍历顺序不确定导致位置计算错误
 
@@ -1126,28 +717,20 @@ pub fn refresh_search_ui(
 
 | 组件 | 用途 |
 |------|------|
-| `NewKeywordInput` | 输入框标记（焦点状态由 `FilterSettingsState.input_focused` 管理） |
-| `NewKeywordInputText` | 输入框内文本节点标记（用于原地更新文本） |
+| `NewKeywordInput` | 输入框标记（焦点由全局 `InputFocus` 仲裁，组件不存状态） |
 | `BlockedKeywordsListContainer` | 屏蔽词列表容器标记（用于局部刷新） |
-| `KeywordSuggestionPanel` | 分类建议下拉面板容器 |
-| `KeywordSuggestionItem` | 建议项按钮（存储分类名） |
-| `KeywordSuggestionToggle` | 展开/折叠建议面板按钮 |
+| `KeywordSuggestionPanel` / `KeywordSuggestionItem` / `KeywordSuggestionToggle` | 分类建议面板 |
 
-**系统函数：**
+**系统函数**（点击聚焦/IME/编辑/失焦/边框全部由通用 TextInput 系统接管，页面只剩）：
 
 | 系统 | 职责 |
 |------|------|
-| `new_keyword_input_interaction` | 输入框点击交互，启用 IME |
-| `new_keyword_keyboard_input` | 键盘输入（含 Ctrl+V 粘贴） |
-| `new_keyword_ime_input` | IME 中文输入提交 |
-| `unfocus_keyword_input` | 点击外部失焦，关闭 IME |
+| `new_keyword_keyboard_input` | 动作键：Enter 添加屏蔽词、Escape 失焦 |
 | `refresh_blocked_keywords_ui` | 监听 `FilterSettingsState` 变化，局部刷新屏蔽词列表 |
-| `keyword_suggestion_toggle_interaction` | 展开/折叠分类建议面板 |
+| `keyword_suggestion_toggle_interaction` | 展开/折叠分类建议面板（写 `ButtonStyle.selected`） |
 | `keyword_suggestion_item_interaction` | 点击建议项添加屏蔽词 |
 
 **关键设计：**
-- 焦点状态统一由 `FilterSettingsState.input_focused` 管理，不在组件上存储
-- 文本更新使用 `update_keyword_input_text()` 辅助函数，处理占位符/实际文本颜色切换
 - 建议面板数据来源：`CategoriesState.categories` 中的分类标题
 - 已存在于屏蔽词列表中的分类显示为灰色禁用状态
 
@@ -1213,11 +796,15 @@ pub struct ChannelSettings {
 
 **文件：** `crates/picacg_app/src/utils/content_filter.rs`
 
-- 所有文本先经过**繁体转简体** + **小写标准化**（`zhconv` crate）
-- `should_block_comic()` 检查单个漫画
-- `filter_comic_indices()` 批量返回未屏蔽的索引列表
+- 入口：`CompiledFilter::from_settings()` —— 构造时一次读锁 + 一次性标准化全部关键词
+  （**繁体转简体** + **小写**，`zhconv` crate）
+- 匹配时每个字段只标准化一次、与全部关键词比较（循环反转；分配量从
+  `漫画数×词数×字段数` 降到 `漫画数×字段数 + 词数`）
+- 方法：`should_block_comic()` / `filter_comic_indices()` / `filter_comics_cloned()`
+  （后者只克隆保留项，api_plugin 响应过滤用）
+- **调用纪律**：只允许出现在低频路径（数据变化/预创建分支内），严禁每帧构造
 
-**接入页面：** 搜索、分类、排行、收藏、漫画列表（共 5 个页面）
+**接入页面：** 搜索、分类、排行、收藏、漫画列表（共 5 个页面）+ api_plugin 入库过滤
 
 ---
 
@@ -1233,83 +820,30 @@ static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 ---
 
-## 通用分页组件
+## 通用分页组件（自含观察者版）
 
-实现了泛型分页组件模块 `src/systems/pagination.rs`，支持多个页面复用。
+`systems/pagination/`：`Pagination { current_page, total_pages }` 值组件是**单一事实源**，
+翻页行为内联在控件的 `on(Pointer<Click>)` 观察者里（全项目首个观察者范例），
+显示刷新由全局唯一的 `refresh_pagination_widgets` 系统统一处理。
 
-### 使用方法
+**页面接入三件事**（样板：favorites.rs）：
 
-**1. 定义页面标记类型：**
 ```rust
-pub struct FavoritesPage;
-pub struct ComicsPage;
+// 1. 场景里挂控件（T 为页面标记类型，如 pub struct FavoritesPage;）
+pagination_controls::<FavoritesPage>(current_page, total_pages),
+
+// 2. 消费翻页：Changed<Pagination> + 与页面状态比较过滤非翻页变化
+pub fn favorites_pagination_changed(
+    pagination_query: Query<&Pagination, (With<PaginationControl<FavoritesPage>>, Changed<Pagination>)>,
+    ...
+) { /* 清列表、发加载请求、重置滚动 */ }
+
+// 3. 数据加载后回写（比较后写避免 Changed 循环）
+if *pagination != target { *pagination = target; }
 ```
 
-**2. 创建分页 UI：**
-```rust
-use crate::systems::pagination::spawn_pagination_controls;
-
-spawn_pagination_controls::<FavoritesPage>(
-    parent,
-    &font,
-    current_page,  // u32
-    total_pages,   // u32
-);
-```
-
-**3. 处理分页交互：**
-```rust
-use crate::systems::pagination::{
-    check_pagination_interaction, PaginationPrevButton, PaginationNextButton,
-};
-
-pub fn pagination_interaction(
-    prev_query: Query<&Interaction, (Changed<Interaction>, With<PaginationPrevButton<FavoritesPage>>)>,
-    next_query: Query<&Interaction, (Changed<Interaction>, With<PaginationNextButton<FavoritesPage>>)>,
-    // ...
-) {
-    // 返回 Some(true) = 下一页, Some(false) = 上一页, None = 无操作
-    if let Some(is_next) = check_pagination_interaction::<FavoritesPage>(
-        &prev_query, &next_query, current_page, total_pages
-    ) {
-        // 处理翻页...
-    }
-}
-```
-
-**4. 更新分页显示：**
-```rust
-use crate::systems::pagination::{update_pagination_display, PaginationPageText};
-
-pub fn refresh_pagination_ui(
-    mut page_text_query: Query<&mut Text, With<PaginationPageText<FavoritesPage>>>,
-    mut prev_btn_query: Query<&mut BackgroundColor, (With<PaginationPrevButton<FavoritesPage>>, Without<PaginationNextButton<FavoritesPage>>)>,
-    mut next_btn_query: Query<&mut BackgroundColor, (With<PaginationNextButton<FavoritesPage>>, Without<PaginationPrevButton<FavoritesPage>>)>,
-) {
-    update_pagination_display::<FavoritesPage>(
-        &mut page_text_query,
-        &mut prev_btn_query,
-        &mut next_btn_query,
-        current_page,
-        total_pages,
-    );
-}
-```
-
-### 组件列表
-
-| 组件 | 用途 |
-|------|------|
-| `PaginationControl<T>` | 分页容器标记 |
-| `PaginationPrevButton<T>` | 上一页按钮标记 |
-| `PaginationNextButton<T>` | 下一页按钮标记 |
-| `PaginationPageText<T>` | 页码文本标记 |
-
-### 已使用的页面
-- `FavoritesPage` - 收藏页面 (`favorites.rs`)
-- `ComicsPage` - 漫画列表页面 (`comics.rs`)
-
----
+无需注册任何按钮交互系统；边界判断（首页/末页）在控件观察者内完成。
+已接入：favorites / comics / games / fried / search / comments。
 
 ## 设置页面自动保存模式
 
@@ -1369,6 +903,19 @@ if save_status.timer.just_finished() {
 - `src/plugins/ui_plugin.rs` — 系统注册
 
 ---
+
+## 窗口生命周期与合盖保活
+
+**契约：窗口 ≠ 应用生命周期**（`ExitCondition::DontExit` + `close_when_requested: false`）。
+
+- 合盖（无外接显示器且未休眠）→ macOS 移除内置显示器 → winit 销毁该显示器上的窗口。
+  旧行为 `OnAllClosed` 直接退出进程、下载全断；现在应用继续运行，
+  `ensure_primary_window` 检测到主窗口消失且非用户主动关闭 → 按保存的几何信息**自动重建**
+  （暂无显示器时约 2 秒重试）
+- 用户主动关闭（CloseBehavior::Close/Ask）→ `ExplicitWindowClose` 置位 → 窗口销毁后
+  `ensure_primary_window` 显式发 `AppExit` 退出——常规退出路径不变
+- CloseBehavior::Minimize 照旧：拦截关闭改最小化
+- 日志时间戳为系统本地时区（`fmt::time::ChronoLocal`，此前 UTC 对不上表）
 
 ## 登录状态与异步操作
 
@@ -1506,9 +1053,27 @@ fn auto_resume_downloads_on_startup(
 ## 待办事项
 
 ### 当前功能开发
-- [ ] 清理编译警告（未使用的导入和变量）
+
+- [ ] 控件库二期（rv-widgets 蓝图）：page_scaffold 页面骨架（22 页三段式收编）、input_row 输入行控件（16 份实现收编）、comic_card 卡片控件（12 份收编，前置：统一图片加载策略为一种）
+- [ ] Scale 尺度令牌全库替换（469 处字号 17→6 档、157 处圆角 9→3 档——全局视觉变更需专项+目测）
+- [ ] EditableText 迁移：等上游补 placeholder 与密码掩码（bevy_text editing.rs 的 planned 清单）后替换自研 TextInput
+- [ ] 错误页补分页/返回控件（games/fried/comments 加载失败后无法翻页返回——存量 UX 缺口）
+- [ ] i18n 接线（返回按钮等文案未走 i18n.rs）
+- [ ] 虚拟滚动推广评估：rankings/favorites 等分页页面数据量有界暂用瀑布流；若后续也转无限滚动则复用 comics 的虚拟滚动模式
+
 - [ ] 下载动画效果：右键下载漫画后，封面图从卡片位置飞向侧边栏下载按钮，边移动边缩小变为圆形，最终融入下载计数徽章
-- [ ] 漫画列表虚拟滚动优化：大量卡片滚动卡顿，需实现只渲染可见区域卡片（despawn 不可见的 + 滚入时重建）
+
+### 已完成（2026-08 全面重构）
+
+- [x] 依赖全量升级（bevy 0.19 / sqlx 0.9 / hmac 0.13 / sha2 0.11 / toml 1.1 / tungstenite 0.30）+ 删除 6 个零使用依赖 + once_cell→std + bevy feature 按需集（3D/音频不再编译）
+- [x] UI 全面迁移 BSN（bsn! 场景函数化，31 文件；净删 4000+ 行）
+- [x] bevy_ui_toolkit 解散合并回主项目（theme/scrollbar/pagination/waterfall → systems/）
+- [x] 分页控件重设计：Pagination 值组件单一事实源 + 内联 on(Pointer<Click>) 观察者；5 个手搓分页页面收编
+- [x] 自研滚动条退役 → 上游 ScrollArea/Scrollbar + 引擎 content_size()（删 ~1500 行几何/DPI/内容尺寸手工代码，含 20 个 update_*_content_size 与 23 个空滚轮系统）
+- [x] 调度与热路径修复：ImageCache 状态机化（修无限重试风暴）、CompiledFilter 统一三套过滤实现（循环反转+惰性化）、下载/侧边栏/阅读器每帧深拷贝与无条件写入门控化、图片解码 spawn_blocking、显存单份（RENDER_WORLD）
+- [x] ButtonStyle 控件层：305 处手写 hover/pressed 分支收编为一个组件+一个全局系统；设计令牌统一（Theme 运行时面 + AppColors 常量面），481 处硬编码色收编映射
+- [x] 焦点统一：8 套并行实现 → 上游 InputFocus；TabIndex 取代手写 Tab 链；修 NAS 输入不显示、聊天室无焦点守卫、CJK 点击定位、字节掩码等 8 个实质 bug
+- [x] 漫画列表虚拟滚动（窗口 ±2 行 + spacer；实体数 4200 → ~300）
 
 ### 已完成
 
@@ -1571,7 +1136,8 @@ fn auto_resume_downloads_on_startup(
 
 ## 参考资料
 
-- [Bevy 0.18 发布说明](https://bevy.org/news/bevy-0-17/)
+- [Bevy 0.19 发布说明](https://bevy.org/news/bevy-0-19/)（BSN / ui_widgets / input_focus）
+- [Bevy 0.18→0.19 迁移指南](https://bevy.org/learn/migration-guides/0-18-to-0-19/)
 - [Bevy 官方文档](https://docs.rs/bevy/latest/bevy/)
 - [Tokio 官方文档](https://tokio.rs/)
 - [PicACG API 文档](../docs/)

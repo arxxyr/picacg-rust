@@ -2,7 +2,7 @@
 //!
 //! 实现我的收藏页面
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
 use super::font_loader::get_font;
 use crate::{
@@ -11,18 +11,12 @@ use crate::{
     resources::*,
     systems::{
         login::AppColors,
-        pagination::{
-            PaginationNextButton, PaginationPageText, PaginationPrevButton,
-            check_pagination_interaction, spawn_pagination_controls, update_pagination_display,
-        },
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{
-            Scrollable, TagColor, spawn_comic_time_info, spawn_scrollbar, spawn_tag_badge,
-        },
+        pagination::{Pagination, PaginationControl, pagination_controls},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        ui_common::{TagColor, comic_time_info, tag_badge},
+        widgets::ButtonStyle,
     },
-    utils::content_filter::{
-        FilterConfig, load_filter_flags, load_filter_keywords, should_block_comic,
-    },
+    utils::content_filter::CompiledFilter,
 };
 
 /// 收藏页面标记类型（用于分页组件的泛型参数）
@@ -30,10 +24,6 @@ pub struct FavoritesPage;
 
 /// 收藏卡片布局常量
 mod favorites_layout {
-    /// 卡片宽度
-    pub const CARD_WIDTH: f32 = 180.0;
-    /// 卡片高度
-    pub const CARD_HEIGHT: f32 = 300.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -49,29 +39,28 @@ mod favorites_layout {
 }
 
 /// 收藏页根标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FavoritesRoot;
 
 /// 收藏滚动容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FavoritesScrollContainer;
 
 /// 收藏卡片标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FavoriteCard {
     pub comic_id: String,
 }
 
-/// 收藏卡片缩略图标记
-#[derive(Component)]
+/// 收藏卡片缩略图标记（占位符与实际图片共用，`url` 供替换系统直接取用）
+#[derive(Component, Default, Clone)]
 pub struct FavoriteThumbnail {
-    /// 图片 URL（用于图片加载）
-    #[allow(dead_code)]
+    /// 图片 URL
     pub url: String,
 }
 
 /// 收藏空状态提示标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FavoritesEmptyHint;
 
 /// 收藏卡片瀑布式创建状态
@@ -130,6 +119,7 @@ pub fn setup_favorites_ui(
         return;
     }
 
+    // 字体句柄只作为瀑布式预创建的启动门闸，BSN 场景统一走默认字体句柄
     let font: Handle<Font> = get_font();
 
     // 清空之前的创建状态
@@ -138,121 +128,7 @@ pub fn setup_favorites_ui(
     // 尝试找到 ContentArea
     let content_area = content_area_query.single().ok();
 
-    let favorites_root = commands
-        .spawn((
-            FavoritesRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                header.spawn((
-                    Text::new("我的收藏"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-
-            // 滚动区域包装器
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 收藏网格（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            FavoritesScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                justify_content: JustifyContent::FlexStart,
-                                align_content: AlignContent::FlexStart,
-                                padding: UiRect {
-                                    left: Val::Px(favorites_layout::PADDING_LEFT),
-                                    right: Val::Px(favorites_layout::PADDING_RIGHT),
-                                    top: Val::Px(favorites_layout::PADDING_TOP),
-                                    bottom: Val::Px(favorites_layout::PADDING_BOTTOM),
-                                },
-                                column_gap: Val::Px(favorites_layout::COLUMN_GAP),
-                                row_gap: Val::Px(favorites_layout::ROW_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|grid| {
-                            if favorites_state.is_loading {
-                                grid.spawn((
-                                    LoadingIndicator,
-                                    Text::new("加载中..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            } else if favorites_state.comics.is_empty()
-                                && favorites_state.error.is_none()
-                            {
-                                // 空状态提示（初始状态，数据加载后会被移除）
-                                grid.spawn((
-                                    FavoritesEmptyHint,
-                                    Text::new("暂无收藏，去添加一些喜欢的漫画吧~"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT_SECONDARY),
-                                ));
-                            }
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
-
-            // 分页控件（使用通用分页组件）
-            spawn_pagination_controls::<FavoritesPage>(
-                root,
-                &font,
-                favorites_state.page.max(0) as u32,
-                favorites_state.total_pages.max(0) as u32,
-            );
-        })
-        .id();
+    let favorites_root = commands.spawn_scene(favorites_page(&favorites_state)).id();
 
     // 如果有 ContentArea，将收藏列表作为其子实体
     if let Some(content_entity) = content_area {
@@ -273,130 +149,231 @@ pub fn setup_favorites_ui(
     tracing::info!("收藏页面 UI 已创建");
 }
 
-/// 创建收藏卡片
-fn spawn_favorite_card(
-    parent: &mut ChildSpawnerCommands,
+/// 收藏页面场景
+fn favorites_page(state: &FavoritesState) -> impl Scene + use<> {
+    let current_page = state.page.max(0) as u32;
+    let total_pages = state.total_pages.max(0) as u32;
+    // 网格内边距（右侧额外让出滚动条宽度）
+    let grid_padding = UiRect {
+        left: Val::Px(favorites_layout::PADDING_LEFT),
+        right: Val::Px(favorites_layout::PADDING_RIGHT),
+        top: Val::Px(favorites_layout::PADDING_TOP),
+        bottom: Val::Px(favorites_layout::PADDING_BOTTOM),
+    };
+
+    // 网格初始占位内容：加载指示器 / 空状态提示 / 两者皆无
+    let grid_placeholder: Box<dyn SceneList> = if state.is_loading {
+        Box::new(bsn_list![(
+            LoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT)
+        )])
+    } else if state.comics.is_empty() && state.error.is_none() {
+        // 空状态提示（初始状态，数据加载后会被移除）
+        Box::new(bsn_list![(
+            FavoritesEmptyHint
+            Text("暂无收藏，去添加一些喜欢的漫画吧~")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    bsn! {
+        FavoritesRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        Text("我的收藏")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    )
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 收藏网格（可滚动）
+                        #FavoritesScroll
+                        FavoritesScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::FlexStart,
+                            align_content: AlignContent::FlexStart,
+                            padding: {grid_padding},
+                            column_gap: Val::Px(favorites_layout::COLUMN_GAP),
+                            row_gap: Val::Px(favorites_layout::ROW_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {grid_placeholder} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#FavoritesScroll),
+                ]
+            ),
+            // 分页控件（使用通用分页组件）
+            pagination_controls::<FavoritesPage>(current_page, total_pages),
+        ]
+    }
+}
+
+/// 收藏封面缩略图场景（图片已缓存时使用）
+fn favorite_thumbnail(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+    bsn! {
+        FavoriteThumbnail { url: {url} }
+        ImageNode { image: {handle} }
+        Node {
+            width: Val::Px(164.0),
+            height: Val::Px(220.0),
+        }
+    }
+}
+
+/// 收藏卡片场景（`hidden` 用于瀑布式预创建，先隐藏后分批显示）
+fn favorite_card(
     comic: &picacg_api::models::Comic,
-    font: &Handle<Font>,
     image_cache: &ImageCache,
     hidden: bool,
-) -> Entity {
-    parent
-        .spawn((
-            FavoriteCard {
-                comic_id: comic.id.clone(),
-            },
-            ContextMenuTarget {
-                comic_id: comic.id.clone(),
-                comic_title: comic.title.clone(),
-            },
-            Button,
-            Interaction::default(),
-            Node {
-                width: Val::Px(180.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(AppColors::SURFACE),
-            if hidden {
-                Visibility::Hidden
-            } else {
-                Visibility::Inherited
-            },
-        ))
-        .with_children(|card| {
-            // 封面图片
-            let thumb_url = comic.thumb.url();
-            if let Some(handle) = image_cache.get(&thumb_url) {
-                card.spawn((
-                    FavoriteThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                ));
-            } else {
-                card.spawn((
-                    PlaceholderImage,
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ));
-            }
+) -> impl Scene + use<> {
+    let card_comic_id = comic.id.clone();
+    let menu_comic_id = comic.id.clone();
+    let menu_comic_title = comic.title.clone();
+    let title = comic.title.clone();
+    let author = comic.author.clone();
 
-            // 标题
-            card.spawn((
-                Text::new(&comic.title),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
+    let visibility = if hidden {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+
+    // 封面图片（已缓存直接显示，否则先放占位符）
+    let thumb_url = comic.thumb.url();
+    let cover: Box<dyn SceneList> = match image_cache.get(&thumb_url) {
+        Some(handle) => Box::new(bsn_list![favorite_thumbnail(
+            thumb_url.clone(),
+            handle.clone()
+        )]),
+        None => {
+            // 占位符自带 URL：图片就绪时无需回查 FavoritesState
+            let placeholder_url = thumb_url.clone();
+            Box::new(bsn_list![(
+                PlaceholderImage
+                FavoriteThumbnail { url: {placeholder_url} }
                 Node {
-                    margin: UiRect::top(Val::Px(8.0)),
-                    max_width: Val::Px(164.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ));
+                    width: Val::Px(164.0),
+                    height: Val::Px(220.0),
+                }
+                BackgroundColor(AppColors::SURFACE_HOVER)
+            )])
+        }
+    };
 
-            // 作者
-            card.spawn((
-                Text::new(&comic.author),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
+    // 分类和标签容器（两者皆空时不创建）
+    let tags_container: Box<dyn SceneList> =
+        if !comic.categories.is_empty() || !comic.tags.is_empty() {
+            // 分类（蓝色）
+            let categories = comic
+                .categories
+                .iter()
+                .take(2)
+                .map(|category| tag_badge(category, TagColor::Category));
+            // 标签（绿色）
+            let tags = comic
+                .tags
+                .iter()
+                .take(2)
+                .map(|tag| tag_badge(tag, TagColor::Tag));
+            let badges: Vec<_> = categories.chain(tags).collect();
+
+            Box::new(bsn_list![(
                 Node {
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                },
-            ));
-
-            // 分类和标签容器
-            if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                card.spawn((Node {
                     flex_wrap: FlexWrap::Wrap,
                     column_gap: Val::Px(4.0),
                     row_gap: Val::Px(2.0),
                     max_width: Val::Px(164.0),
                     overflow: Overflow::clip(),
-                    ..default()
-                },))
-                    .with_children(|tags_container| {
-                        // 分类（蓝色）
-                        for category in comic.categories.iter().take(2) {
-                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
-                        }
-                        // 标签（绿色）
-                        for tag in comic.tags.iter().take(2) {
-                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
-                        }
-                    });
-            }
+                }
+                Children [ {badges} ]
+            )])
+        } else {
+            Box::new(bsn_list![])
+        };
 
+    // 创建/更新时间
+    let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
+
+    bsn! {
+        FavoriteCard { comic_id: {card_comic_id} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Px(180.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        BackgroundColor(AppColors::SURFACE)
+        template_value(visibility)
+        Children [
+            // 封面图片
+            {cover},
+            (
+                // 标题
+                Text({title})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+                Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                }
+            ),
+            (
+                // 作者
+                Text({author})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+                Node { margin: UiRect::bottom(Val::Px(4.0)) }
+            ),
+            // 分类和标签容器
+            {tags_container},
             // 创建/更新时间
-            spawn_comic_time_info(
-                card,
-                font,
-                comic.created_at.as_deref(),
-                comic.updated_at.as_deref(),
-            );
-        })
-        .id()
+            {time_info},
+        ]
+    }
 }
 
 /// 清理收藏页面
@@ -411,49 +388,27 @@ pub fn cleanup_favorites_ui(
     }
 }
 
-/// 收藏卡片交互系统
+/// 收藏卡片交互系统（配色由 `apply_button_interaction` 统一接管）
 pub fn favorite_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &FavoriteCard),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &FavoriteCard), Changed<Interaction>>,
     mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
-    for (interaction, mut bg_color, card) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                // 通过导航消息跳转到详情页（保留导航历史）
-                detail_messages.write(NavigateToComicDetailEvent {
-                    comic_id: card.comic_id.clone(),
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SURFACE);
-            }
+    for (interaction, card) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            // 通过导航消息跳转到详情页（保留导航历史）
+            detail_messages.write(NavigateToComicDetailEvent {
+                comic_id: card.comic_id.clone(),
+            });
         }
     }
 }
 
-/// 收藏分页按钮交互
-pub fn favorites_pagination_interaction(
+/// 消费分页控件状态变化（翻页行为已内联在控件观察者里）
+pub fn favorites_pagination_changed(
     mut commands: Commands,
-    prev_query: Query<
-        &Interaction,
-        (
-            Changed<Interaction>,
-            With<PaginationPrevButton<FavoritesPage>>,
-        ),
-    >,
-    next_query: Query<
-        &Interaction,
-        (
-            Changed<Interaction>,
-            With<PaginationNextButton<FavoritesPage>>,
-        ),
+    pagination_query: Query<
+        &Pagination,
+        (With<PaginationControl<FavoritesPage>>, Changed<Pagination>),
     >,
     card_query: Query<Entity, With<FavoriteCard>>,
     mut favorites_state: ResMut<FavoritesState>,
@@ -461,22 +416,14 @@ pub fn favorites_pagination_interaction(
     mut creation_state: ResMut<FavoritesCardCreationState>,
     mut scroll_query: Query<&mut ScrollPosition, With<FavoritesScrollContainer>>,
 ) {
-    // 使用通用分页交互检查函数
-    let Some(is_next) = check_pagination_interaction::<FavoritesPage>(
-        &prev_query,
-        &next_query,
-        favorites_state.page.max(0) as u32,
-        favorites_state.total_pages.max(0) as u32,
-    ) else {
+    let Ok(pagination) = pagination_query.single() else {
         return;
     };
-
-    // 更新页码
-    if is_next {
-        favorites_state.page += 1;
-    } else {
-        favorites_state.page -= 1;
+    // 只响应真实翻页（total_pages 回写等非翻页变化在此被过滤）
+    if pagination.current_page as i32 == favorites_state.page {
+        return;
     }
+    favorites_state.page = pagination.current_page as i32;
 
     // 删除所有旧卡片
     for entity in card_query.iter() {
@@ -502,17 +449,6 @@ pub fn favorites_pagination_interaction(
     tracing::debug!("切换到收藏第 {} 页", favorites_state.page);
 }
 
-/// 收藏页面滚动处理
-pub fn handle_favorites_scroll(
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<FavoritesScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
 /// 瀑布式创建收藏卡片
 pub fn waterfall_create_favorite_cards(
     mut commands: Commands,
@@ -530,23 +466,6 @@ pub fn waterfall_create_favorite_cards(
         return;
     };
 
-    // 构建屏蔽过滤配置
-    let blocked_keywords = load_filter_keywords();
-    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
-    let filter_config = FilterConfig {
-        blocked_keywords: &blocked_keywords,
-        filter_by_category,
-        filter_by_tag,
-        filter_by_title,
-    };
-
-    // 计算过滤后的漫画数量
-    let filtered_count = favorites_state
-        .comics
-        .iter()
-        .filter(|c| !should_block_comic(c, &filter_config))
-        .count();
-
     // 自动检测：数据存在但没有卡片，启动预创建
     if !creation_state.is_creating
         && !favorites_state.comics.is_empty()
@@ -556,17 +475,27 @@ pub fn waterfall_create_favorite_cards(
             .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
             .unwrap_or(false);
 
-        if !has_cards && filtered_count > 0 {
-            // 删除加载指示器和空状态提示
-            for entity in loading_query.iter() {
-                commands.entity(entity).despawn();
-            }
-            for entity in empty_hint_query.iter() {
-                commands.entity(entity).despawn();
-            }
+        if !has_cards {
+            // 惰性过滤：仅启动预创建时才用得上，避免每帧全量扫描
+            let filter = CompiledFilter::from_settings();
+            let filtered_count = favorites_state
+                .comics
+                .iter()
+                .filter(|c| !filter.should_block_comic(c))
+                .count();
 
-            let font: Handle<Font> = get_font();
-            creation_state.start_precreate(filtered_count, font);
+            if filtered_count > 0 {
+                // 删除加载指示器和空状态提示
+                for entity in loading_query.iter() {
+                    commands.entity(entity).despawn();
+                }
+                for entity in empty_hint_query.iter() {
+                    commands.entity(entity).despawn();
+                }
+
+                let font: Handle<Font> = get_font();
+                creation_state.start_precreate(filtered_count, font);
+            }
         }
     }
 
@@ -575,9 +504,10 @@ pub fn waterfall_create_favorite_cards(
         return;
     }
 
-    let Some(font) = creation_state.font.clone() else {
+    // 字体句柄只作为"预创建已启动"的门闸，BSN 场景统一走默认字体句柄
+    if creation_state.font.is_none() {
         return;
-    };
+    }
 
     // 阶段1：预创建所有卡片（隐藏状态）
     let has_cards = children
@@ -585,14 +515,16 @@ pub fn waterfall_create_favorite_cards(
         .unwrap_or(false);
 
     if !has_cards && creation_state.visible_count == 0 {
+        // 惰性过滤：只有真正建卡这一帧才构建过滤器，与上面的启动检测各算各的
+        let filter = CompiledFilter::from_settings();
         // 一次性创建所有卡片（隐藏），跳过被屏蔽的漫画
-        commands.entity(scroll_entity).with_children(|parent| {
-            for comic in favorites_state.comics.iter() {
-                if !should_block_comic(comic, &filter_config) {
-                    spawn_favorite_card(parent, comic, &font, &image_cache, true);
-                }
+        for comic in favorites_state.comics.iter() {
+            if !filter.should_block_comic(comic) {
+                commands
+                    .spawn_scene(favorite_card(comic, &image_cache, true))
+                    .insert(ChildOf(scroll_entity));
             }
-        });
+        }
         return;
     }
 
@@ -624,85 +556,25 @@ pub fn waterfall_create_favorite_cards(
     }
 }
 
-/// 更新收藏内容尺寸信息
-pub fn update_favorites_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<FavoritesScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        // 计算内容高度（基于网格布局）
-        let mut max_y: f32 = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                let child_height = child_computed.size().y / scale_factor;
-                max_y = max_y.max(child_height);
-            }
-        }
-
-        // 估算行数和内容高度
-        let card_count = children.len();
-        let cards_per_row = ((scroll_computed.size().x / scale_factor
-            - favorites_layout::PADDING_LEFT
-            - favorites_layout::PADDING_RIGHT
-            + favorites_layout::COLUMN_GAP)
-            / (favorites_layout::CARD_WIDTH + favorites_layout::COLUMN_GAP))
-            .floor()
-            .max(1.0) as usize;
-
-        let row_count = (card_count + cards_per_row - 1) / cards_per_row.max(1);
-        let content_height = favorites_layout::PADDING_TOP
-            + favorites_layout::PADDING_BOTTOM
-            + (row_count as f32 * favorites_layout::CARD_HEIGHT)
-            + ((row_count.saturating_sub(1)) as f32 * favorites_layout::ROW_GAP);
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
-/// 刷新收藏页面 UI（响应数据变化）
+/// 刷新收藏页面 UI（响应数据变化）：把页码/总页数回写进分页控件
 pub fn refresh_favorites_ui(
     favorites_state: Res<FavoritesState>,
-    mut page_text_query: Query<&mut Text, With<PaginationPageText<FavoritesPage>>>,
-    mut prev_btn_query: Query<
-        &mut BackgroundColor,
-        (
-            With<PaginationPrevButton<FavoritesPage>>,
-            Without<PaginationNextButton<FavoritesPage>>,
-        ),
-    >,
-    mut next_btn_query: Query<
-        &mut BackgroundColor,
-        (
-            With<PaginationNextButton<FavoritesPage>>,
-            Without<PaginationPrevButton<FavoritesPage>>,
-        ),
-    >,
+    mut pagination_query: Query<&mut Pagination, With<PaginationControl<FavoritesPage>>>,
 ) {
     if !favorites_state.is_changed() {
         return;
     }
 
-    // 使用通用分页显示更新函数
-    update_pagination_display::<FavoritesPage>(
-        &mut page_text_query,
-        &mut prev_btn_query,
-        &mut next_btn_query,
-        favorites_state.page.max(0) as u32,
-        favorites_state.total_pages.max(0) as u32,
-    );
+    let target = Pagination {
+        current_page: favorites_state.page.max(0) as u32,
+        total_pages: favorites_state.total_pages.max(0) as u32,
+    };
+    for mut pagination in pagination_query.iter_mut() {
+        // 比较后写入，避免 Changed 循环触发
+        if *pagination != target {
+            *pagination = target.clone();
+        }
+    }
 }
 
 /// 处理收藏数据加载完成
@@ -736,63 +608,44 @@ pub fn handle_favorites_load_failed(
 }
 
 /// 更新收藏封面图片（当图片加载完成时替换占位符）
+///
+/// 扫描集只含"仍是占位符"的实体：已替换的带 `ImageNode`，加载失败的会被摘掉
+/// `PlaceholderImage` 标记，两者都不再进入每帧遍历。
 pub fn update_favorites_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    favorites_state: Res<FavoritesState>,
-    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
-    card_query: Query<&FavoriteCard>,
+    placeholder_query: Query<
+        (Entity, &ChildOf, &FavoriteThumbnail),
+        (With<PlaceholderImage>, Without<ImageNode>),
+    >,
 ) {
-    // 每帧都检查占位符（不仅仅是 image_cache 变化时）
-    let placeholder_count = placeholder_query.iter().count();
-    if placeholder_count == 0 {
-        return;
-    }
-
     let mut replaced_count = 0;
-    for (placeholder_entity, child_of) in placeholder_query.iter() {
-        // 找到父卡片
-        let parent_entity: Entity = child_of.parent();
-        let Ok(card) = card_query.get(parent_entity) else {
+    for (placeholder_entity, child_of, thumbnail) in placeholder_query.iter() {
+        // 加载失败：摘掉占位标记（灰底保留），让它退出扫描集
+        if image_cache.is_failed(&thumbnail.url) {
+            commands
+                .entity(placeholder_entity)
+                .remove::<PlaceholderImage>();
             continue;
-        };
-
-        // 找到对应的漫画
-        let Some(comic) = favorites_state
-            .comics
-            .iter()
-            .find(|c| c.id == card.comic_id)
-        else {
-            continue;
-        };
-
-        let thumb_url = comic.thumb.url();
+        }
 
         // 检查图片是否已加载
-        if let Some(handle) = image_cache.get(&thumb_url) {
-            // 删除占位符，添加实际图片
-            commands.entity(placeholder_entity).despawn();
-            // 创建新的图片实体并插入到父卡片的第一个位置
-            let image_entity = commands
-                .spawn((
-                    FavoriteThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                ))
-                .id();
+        let Some(handle) = image_cache.get(&thumbnail.url) else {
+            continue;
+        };
 
-            // 插入到第一个位置（在标题之前）
-            commands
-                .entity(parent_entity)
-                .insert_children(0, &[image_entity]);
-            replaced_count += 1;
-        }
+        // 删除占位符，添加实际图片
+        let parent_entity: Entity = child_of.parent();
+        commands.entity(placeholder_entity).despawn();
+        let image_entity = commands
+            .spawn_scene(favorite_thumbnail(thumbnail.url.clone(), handle.clone()))
+            .id();
+
+        // 插入到第一个位置（在标题之前）
+        commands
+            .entity(parent_entity)
+            .insert_children(0, &[image_entity]);
+        replaced_count += 1;
     }
 
     if replaced_count > 0 {

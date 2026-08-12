@@ -38,7 +38,14 @@ fn main() {
     // 初始化日志（使用可重载的过滤器）
     tracing_subscriber::registry()
         .with(filter_layer)
-        .with(fmt::layer().with_target(false))
+        .with(
+            fmt::layer()
+                .with_target(false)
+                // 日志时间戳用系统本地时区（默认是 UTC，排查问题时对不上表）
+                .with_timer(fmt::time::ChronoLocal::new(
+                    "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+                )),
+        )
         .init();
 
     // 保存 reload handle 供后续动态更新使用
@@ -120,7 +127,10 @@ fn main() {
                     }),
                     // 禁用默认关闭行为，由 handle_window_close 系统自行处理
                     close_when_requested: false,
-                    exit_condition: ExitCondition::OnAllClosed,
+                    // 窗口 ≠ 应用生命周期：合盖等系统事件销毁窗口时应用继续运行
+                    // （下载不中断），由 ensure_primary_window 自动重建窗口；
+                    // 用户主动关闭走 handle_window_close 显式发 AppExit
+                    exit_condition: ExitCondition::DontExit,
                     ..default()
                 })
                 // 已在上方用 tracing_subscriber 初始化日志，禁用 Bevy 内置的 LogPlugin 避免冲突

@@ -4,13 +4,66 @@
 
 use bevy::{
     prelude::*,
-    window::{ClosingWindow, PrimaryWindow, WindowCloseRequested},
+    window::{ClosingWindow, PrimaryWindow, WindowCloseRequested, WindowPosition},
 };
 use picacg_config::{AppSettings, CloseBehavior};
 
 /// 设置 2D 相机
 pub fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+/// 用户显式关闭标记
+///
+/// 区分「用户点关闭」与「系统销毁窗口」（合盖导致显示器移除时，winit 会关掉
+/// 该显示器上的窗口）。前者应退出应用；后者应用继续运行（下载不中断），
+/// 由 `ensure_primary_window` 自动重建窗口。
+#[derive(Resource, Default)]
+pub struct ExplicitWindowClose(pub bool);
+
+/// 主窗口保活：意外销毁自动重建；显式关闭则退出应用
+///
+/// 配合 `ExitCondition::DontExit`（main.rs）：窗口不再绑定应用生命周期。
+/// 合盖（无外接显示器且未休眠）时 macOS 移除内置显示器 → winit 销毁窗口 →
+/// 此前 `OnAllClosed` 直接退出进程、下载全断。现在应用存活并按保存的几何
+/// 信息重建窗口；创建失败（如暂时无任何显示器）约 2 秒后重试。
+pub fn ensure_primary_window(
+    mut commands: Commands,
+    windows: Query<(), With<PrimaryWindow>>,
+    explicit_close: Res<ExplicitWindowClose>,
+    mut exit_messages: MessageWriter<AppExit>,
+    mut retry_countdown: Local<u32>,
+) {
+    if !windows.is_empty() {
+        *retry_countdown = 0;
+        return;
+    }
+
+    // 用户主动关闭：窗口销毁完成后显式退出
+    if explicit_close.0 {
+        exit_messages.write(AppExit::Success);
+        return;
+    }
+
+    if *retry_countdown > 0 {
+        *retry_countdown -= 1;
+        return;
+    }
+    *retry_countdown = 120;
+
+    tracing::warn!("主窗口被系统销毁（如合盖导致显示器移除），自动重建以保住下载任务");
+    let settings = AppSettings::global().read();
+    let mut window = Window {
+        title: "PicACG - Rust Bevy 版".to_string(),
+        ..default()
+    };
+    if let (Some(width), Some(height)) = (settings.window_width, settings.window_height) {
+        window.resolution = (width as u32, height as u32).into();
+    }
+    if let (Some(x), Some(y)) = (settings.window_x, settings.window_y) {
+        window.position = WindowPosition::At(IVec2::new(x as i32, y as i32));
+    }
+    commands.spawn((window, PrimaryWindow));
 }
 
 /// 窗口位置保存计时器资源
@@ -37,22 +90,24 @@ pub fn handle_window_close(
     mut close_events: MessageReader<WindowCloseRequested>,
     closing: Query<Entity, With<ClosingWindow>>,
     mut window_query: Query<&mut Window, With<PrimaryWindow>>,
+    mut explicit_close: ResMut<ExplicitWindowClose>,
 ) {
     // 先处理上一帧标记为 ClosingWindow 的窗口（与默认行为一致）
     for window in closing.iter() {
         commands.entity(window).despawn();
     }
 
-    // 读取关闭行为设置
-    let close_behavior = AppSettings::global().read().close_behavior;
-
     for event in close_events.read() {
+        // 读取关闭行为设置（挪进循环：关闭事件一生最多一次，不必每帧取锁）
+        let close_behavior = AppSettings::global().read().close_behavior;
         match close_behavior {
             CloseBehavior::Close | CloseBehavior::Ask => {
                 // 关闭前保存窗口位置和大小
                 if let Ok(window) = window_query.get(event.window) {
                     save_window_geometry_to_config(window);
                 }
+                // 用户显式关闭：窗口销毁后由 ensure_primary_window 发 AppExit
+                explicit_close.0 = true;
                 // 标记窗口为正在关闭，下一帧执行 despawn
                 commands.entity(event.window).try_insert(ClosingWindow);
             }

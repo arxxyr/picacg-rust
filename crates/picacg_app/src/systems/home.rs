@@ -2,31 +2,22 @@
 //!
 //! 实现首页推荐漫画展示
 
-use bevy::{
-    input::mouse::MouseWheel,
-    prelude::*,
-    ui::{FocusPolicy, RelativeCursorPosition},
-    window::PrimaryWindow,
-};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::*,
-        ui_common::{Scrollable, spawn_comic_time_info},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        ui_common::{TagColor, comic_time_info, tag_badge},
+        widgets::ButtonStyle,
     },
 };
 
 /// 首页卡片布局常量
 mod home_layout {
-    /// 卡片宽度
-    pub const CARD_WIDTH: f32 = 180.0;
-    /// 卡片高度
-    pub const CARD_HEIGHT: f32 = 300.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -42,33 +33,32 @@ mod home_layout {
 }
 
 /// 首页根标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HomeRoot;
 
 /// 首页滚动容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HomeScrollContainer;
 
 /// 首页漫画卡片标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HomeComicCard {
     pub comic_id: String,
 }
 
-/// 首页卡片缩略图标记
-#[derive(Component)]
+/// 首页卡片缩略图标记（占位符与实际图片共用，`url` 供替换系统直接取用）
+#[derive(Component, Default, Clone)]
 pub struct HomeThumbnail {
-    /// 图片 URL（用于图片加载）
-    #[allow(dead_code)]
+    /// 图片 URL
     pub url: String,
 }
 
 /// 刷新按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HomeRefreshButton;
 
 /// 首页加载指示器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HomeLoadingIndicator;
 
 /// 首页卡片瀑布式创建状态
@@ -82,18 +72,15 @@ pub struct HomeCardCreationState {
     pub visible_count: usize,
     /// 每帧显示的卡片数
     pub cards_per_frame: usize,
-    /// 字体句柄
-    pub font: Option<Handle<Font>>,
 }
 
 impl HomeCardCreationState {
     /// 开始预创建模式
-    pub fn start_precreate(&mut self, total: usize, font: Handle<Font>) {
+    pub fn start_precreate(&mut self, total: usize) {
         self.is_creating = true;
         self.total_cards = total;
         self.visible_count = 0;
         self.cards_per_frame = 3;
-        self.font = Some(font);
     }
 
     /// 清空状态
@@ -101,7 +88,6 @@ impl HomeCardCreationState {
         self.is_creating = false;
         self.total_cards = 0;
         self.visible_count = 0;
-        self.font = None;
     }
 }
 
@@ -125,138 +111,13 @@ pub fn setup_home_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
-
     // 清空之前的创建状态
     creation_state.clear();
 
     // 尝试找到 ContentArea
     let content_area = content_area_query.single().ok();
 
-    let home_root = commands
-        .spawn((
-            HomeRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 标题
-                header.spawn((
-                    Text::new("推荐漫画"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 刷新按钮
-                header
-                    .spawn((
-                        HomeRefreshButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(12.0),
-                                Val::Px(12.0),
-                                Val::Px(6.0),
-                                Val::Px(6.0),
-                            ),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("换一批"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 内容网格（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            HomeScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                justify_content: JustifyContent::FlexStart,
-                                align_content: AlignContent::FlexStart,
-                                padding: UiRect {
-                                    left: Val::Px(home_layout::PADDING_LEFT),
-                                    right: Val::Px(home_layout::PADDING_RIGHT),
-                                    top: Val::Px(home_layout::PADDING_TOP),
-                                    bottom: Val::Px(home_layout::PADDING_BOTTOM),
-                                },
-                                column_gap: Val::Px(home_layout::COLUMN_GAP),
-                                row_gap: Val::Px(home_layout::ROW_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|grid| {
-                            if home_state.is_loading {
-                                grid.spawn((
-                                    HomeLoadingIndicator,
-                                    Text::new("加载中..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            }
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar_inline(wrapper, scroll_container_id);
-                });
-        })
-        .id();
+    let home_root = commands.spawn_scene(home_page(&home_state)).id();
 
     // 如果有 ContentArea，将首页作为其子实体
     if let Some(content_entity) = content_area {
@@ -268,234 +129,251 @@ pub fn setup_home_ui(
         load_recommendations.write(LoadRecommendationsRequest);
     } else if !home_state.recommendations.is_empty() && !home_state.is_loading {
         // 启动预创建模式
-        creation_state.start_precreate(home_state.recommendations.len(), font);
+        creation_state.start_precreate(home_state.recommendations.len());
     }
 
     tracing::info!("首页 UI 已创建");
 }
 
-/// 内联创建滚动条
-fn spawn_scrollbar_inline(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                RelativeCursorPosition::default(),
-            ));
+/// 首页页面场景
+fn home_page(home_state: &HomeState) -> impl Scene + use<> {
+    // 内容网格内边距（右侧额外让出滚动条宽度）
+    let grid_padding = UiRect {
+        left: Val::Px(home_layout::PADDING_LEFT),
+        right: Val::Px(home_layout::PADDING_RIGHT),
+        top: Val::Px(home_layout::PADDING_TOP),
+        bottom: Val::Px(home_layout::PADDING_BOTTOM),
+    };
 
-            // 滚动条滑块
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
+    // 网格初始占位内容：加载中指示器（仅加载态）
+    let loading_indicator: Box<dyn SceneList> = if home_state.is_loading {
+        Box::new(bsn_list![(
+            HomeLoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT)
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    bsn! {
+        HomeRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 标题
+                        Text("推荐漫画")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 刷新按钮
+                        HomeRefreshButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(12.0),
+                                Val::Px(12.0),
+                                Val::Px(6.0),
+                                Val::Px(6.0),
+                            ),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        Children [
+                            (
+                                Text("换一批")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 内容网格（可滚动）
+                        #HomeScroll
+                        HomeScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::FlexStart,
+                            align_content: AlignContent::FlexStart,
+                            padding: {grid_padding},
+                            column_gap: Val::Px(home_layout::COLUMN_GAP),
+                            row_gap: Val::Px(home_layout::ROW_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {loading_indicator} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#HomeScroll),
+                ]
+            ),
+        ]
+    }
 }
 
-/// 创建漫画卡片
-fn spawn_home_card(
-    parent: &mut ChildSpawnerCommands,
+/// 封面缩略图场景（图片已缓存时使用）
+fn thumbnail_image(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+    bsn! {
+        HomeThumbnail { url: {url} }
+        ImageNode { image: {handle} }
+        Node {
+            width: Val::Px(164.0),
+            height: Val::Px(220.0),
+        }
+    }
+}
+
+/// 漫画卡片场景（`hidden` 用于瀑布式预创建，先隐藏后分批显示）
+fn home_comic_card(
     comic: &picacg_api::models::Comic,
-    font: &Handle<Font>,
     image_cache: &ImageCache,
     hidden: bool,
-) -> Entity {
-    parent
-        .spawn((
-            HomeComicCard {
-                comic_id: comic.id.clone(),
-            },
-            ContextMenuTarget {
-                comic_id: comic.id.clone(),
-                comic_title: comic.title.clone(),
-            },
-            Button,
-            Interaction::default(),
+) -> impl Scene + use<> {
+    let card_comic_id = comic.id.clone();
+    let menu_comic_id = comic.id.clone();
+    let menu_comic_title = comic.title.clone();
+    let title = comic.title.clone();
+    let author = comic.author.clone();
+
+    let visibility = if hidden {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+
+    // 封面图片（缓存命中用图片，否则占位符）
+    let thumb_url = comic.thumb.url();
+    let cover: Box<dyn SceneList> = if let Some(handle) = image_cache.get(&thumb_url) {
+        Box::new(bsn_list![thumbnail_image(
+            thumb_url.clone(),
+            handle.clone()
+        )])
+    } else {
+        // 占位符自带 URL：图片就绪时无需回查 HomeState
+        let placeholder_url = thumb_url.clone();
+        Box::new(bsn_list![(
+            PlaceholderImage
+            HomeThumbnail { url: {placeholder_url} }
             Node {
-                width: Val::Px(180.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(AppColors::SURFACE),
-            if hidden {
-                Visibility::Hidden
-            } else {
-                Visibility::Inherited
-            },
-        ))
-        .with_children(|card| {
-            // 封面图片
-            let thumb_url = comic.thumb.url();
-            if let Some(handle) = image_cache.get(&thumb_url) {
-                card.spawn((
-                    HomeThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                ));
-            } else {
-                card.spawn((
-                    PlaceholderImage,
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ));
+                width: Val::Px(164.0),
+                height: Val::Px(220.0),
             }
+            BackgroundColor(AppColors::SURFACE_HOVER)
+        )])
+    };
 
-            // 标题
-            card.spawn((
-                Text::new(&comic.title),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
+    // 分类和标签容器（两者都为空时不创建）
+    let tags_container: Box<dyn SceneList> =
+        if !comic.categories.is_empty() || !comic.tags.is_empty() {
+            // 分类（蓝色）+ 标签（绿色）
+            let badges: Vec<_> = comic
+                .categories
+                .iter()
+                .take(2)
+                .map(|category| tag_badge(category, TagColor::Category))
+                .chain(
+                    comic
+                        .tags
+                        .iter()
+                        .take(2)
+                        .map(|tag| tag_badge(tag, TagColor::Tag)),
+                )
+                .collect();
+
+            Box::new(bsn_list![(
                 Node {
-                    margin: UiRect::top(Val::Px(8.0)),
-                    max_width: Val::Px(164.0),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-            ));
-
-            // 作者
-            card.spawn((
-                Text::new(&comic.author),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-                Node {
-                    margin: UiRect::bottom(Val::Px(4.0)),
-                    ..default()
-                },
-            ));
-
-            // 分类和标签容器
-            if !comic.categories.is_empty() || !comic.tags.is_empty() {
-                card.spawn((Node {
                     flex_wrap: FlexWrap::Wrap,
                     column_gap: Val::Px(4.0),
                     row_gap: Val::Px(2.0),
                     max_width: Val::Px(164.0),
                     overflow: Overflow::clip(),
-                    ..default()
-                },))
-                    .with_children(|tags_container| {
-                        // 分类（蓝色）
-                        for category in comic.categories.iter().take(2) {
-                            spawn_tag_badge(tags_container, category, font, TagColor::Category);
-                        }
-                        // 标签（绿色）
-                        for tag in comic.tags.iter().take(2) {
-                            spawn_tag_badge(tags_container, tag, font, TagColor::Tag);
-                        }
-                    });
-            }
+                }
+                Children [ {badges} ]
+            )])
+        } else {
+            Box::new(bsn_list![])
+        };
 
+    // 创建/更新时间
+    let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
+
+    bsn! {
+        HomeComicCard { comic_id: {card_comic_id} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Px(180.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        BackgroundColor(AppColors::SURFACE)
+        template_value(visibility)
+        Children [
+            // 封面图片
+            {cover},
+            (
+                // 标题
+                Text({title})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+                Node {
+                    margin: UiRect::top(Val::Px(8.0)),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                }
+            ),
+            (
+                // 作者
+                Text({author})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+                Node {
+                    margin: UiRect::bottom(Val::Px(4.0)),
+                }
+            ),
+            // 分类和标签容器
+            {tags_container},
             // 创建/更新时间
-            spawn_comic_time_info(
-                card,
-                font,
-                comic.created_at.as_deref(),
-                comic.updated_at.as_deref(),
-            );
-        })
-        .id()
-}
-
-/// 标签颜色类型
-enum TagColor {
-    /// 分类（蓝色）
-    Category,
-    /// 标签（绿色）
-    Tag,
-}
-
-/// 创建标签徽章
-fn spawn_tag_badge(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    font: &Handle<Font>,
-    color_type: TagColor,
-) {
-    let (bg_color, text_color) = match color_type {
-        TagColor::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
-        TagColor::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
-    };
-
-    parent
-        .spawn((
-            Node {
-                padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(1.0), Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(2.0)),
-                ..default()
-            },
-            BackgroundColor(bg_color),
-        ))
-        .with_children(|badge| {
-            badge.spawn((
-                Text::new(text),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 10.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
+            {time_info},
+        ]
+    }
 }
 
 /// 清理首页
@@ -510,90 +388,56 @@ pub fn cleanup_home_ui(
     }
 }
 
-/// 首页卡片交互系统
+/// 首页卡片交互系统（配色由 `apply_button_interaction` 统一接管）
 pub fn home_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &HomeComicCard),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &HomeComicCard), Changed<Interaction>>,
     mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
-    for (interaction, mut bg_color, card) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                // 通过导航消息跳转到详情页（保留导航历史）
-                detail_messages.write(NavigateToComicDetailEvent {
-                    comic_id: card.comic_id.clone(),
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SURFACE);
-            }
+    for (interaction, card) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            // 通过导航消息跳转到详情页（保留导航历史）
+            detail_messages.write(NavigateToComicDetailEvent {
+                comic_id: card.comic_id.clone(),
+            });
         }
     }
 }
 
-/// 刷新按钮交互
+/// 刷新按钮交互（配色由 `apply_button_interaction` 统一接管）
 pub fn home_refresh_button_interaction(
     mut commands: Commands,
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<HomeRefreshButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<HomeRefreshButton>)>,
     mut home_state: ResMut<HomeState>,
     mut load_recommendations: MessageWriter<LoadRecommendationsRequest>,
     mut creation_state: ResMut<HomeCardCreationState>,
     card_query: Query<Entity, With<HomeComicCard>>,
     mut scroll_query: Query<&mut ScrollPosition, With<HomeScrollContainer>>,
 ) {
-    for (interaction, mut bg_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.3, 0.5, 0.9));
-
-                // 清除旧卡片
-                for entity in card_query.iter() {
-                    commands.entity(entity).despawn();
-                }
-
-                // 清除状态
-                home_state.recommendations.clear();
-                home_state.is_loading = true;
-                creation_state.clear();
-
-                // 重置滚动位置
-                for mut scroll_pos in scroll_query.iter_mut() {
-                    scroll_pos.y = 0.0;
-                }
-
-                // 发送加载请求
-                load_recommendations.write(LoadRecommendationsRequest);
-
-                tracing::info!("刷新推荐漫画");
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.4, 0.6, 1.0));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-            }
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
-    }
-}
 
-/// 首页滚动处理
-pub fn handle_home_scroll(
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<HomeScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
+        // 清除旧卡片
+        for entity in card_query.iter() {
+            commands.entity(entity).despawn();
+        }
+
+        // 清除状态
+        home_state.recommendations.clear();
+        home_state.is_loading = true;
+        creation_state.clear();
+
+        // 重置滚动位置
+        for mut scroll_pos in scroll_query.iter_mut() {
+            scroll_pos.y = 0.0;
+        }
+
+        // 发送加载请求
+        load_recommendations.write(LoadRecommendationsRequest);
+
+        tracing::info!("刷新推荐漫画");
+    }
 }
 
 /// 瀑布式创建首页卡片
@@ -627,8 +471,7 @@ pub fn waterfall_create_home_cards(
                 commands.entity(entity).despawn();
             }
 
-            let font: Handle<Font> = get_font();
-            creation_state.start_precreate(home_state.recommendations.len(), font);
+            creation_state.start_precreate(home_state.recommendations.len());
         }
     }
 
@@ -637,10 +480,6 @@ pub fn waterfall_create_home_cards(
         return;
     }
 
-    let Some(font) = creation_state.font.clone() else {
-        return;
-    };
-
     // 阶段1：预创建所有卡片（隐藏状态）
     let has_cards = children
         .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
@@ -648,11 +487,11 @@ pub fn waterfall_create_home_cards(
 
     if !has_cards && creation_state.visible_count == 0 {
         // 一次性创建所有卡片（隐藏）
-        commands.entity(scroll_entity).with_children(|parent| {
-            for comic in home_state.recommendations.iter() {
-                spawn_home_card(parent, comic, &font, &image_cache, true);
-            }
-        });
+        for comic in home_state.recommendations.iter() {
+            commands
+                .spawn_scene(home_comic_card(comic, &image_cache, true))
+                .insert(ChildOf(scroll_entity));
+        }
         return;
     }
 
@@ -684,105 +523,42 @@ pub fn waterfall_create_home_cards(
     }
 }
 
-/// 更新首页内容尺寸信息
-pub fn update_home_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<HomeScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        // 计算内容高度（基于网格布局）
-        let mut max_y: f32 = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                let child_height = child_computed.size().y / scale_factor;
-                max_y = max_y.max(child_height);
-            }
-        }
-
-        // 估算行数和内容高度
-        let card_count = children.len();
-        let cards_per_row = ((scroll_computed.size().x / scale_factor
-            - home_layout::PADDING_LEFT
-            - home_layout::PADDING_RIGHT
-            + home_layout::COLUMN_GAP)
-            / (home_layout::CARD_WIDTH + home_layout::COLUMN_GAP))
-            .floor()
-            .max(1.0) as usize;
-
-        let row_count = (card_count + cards_per_row - 1) / cards_per_row.max(1);
-        let content_height = home_layout::PADDING_TOP
-            + home_layout::PADDING_BOTTOM
-            + (row_count as f32 * home_layout::CARD_HEIGHT)
-            + ((row_count.saturating_sub(1)) as f32 * home_layout::ROW_GAP);
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
 /// 更新首页封面图片
+///
+/// 扫描集只含"仍是占位符"的实体：已替换的带 `ImageNode`，加载失败的会被摘掉
+/// `PlaceholderImage` 标记，两者都不再进入每帧遍历。
 pub fn update_home_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    home_state: Res<HomeState>,
-    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
-    card_query: Query<&HomeComicCard>,
+    placeholder_query: Query<
+        (Entity, &ChildOf, &HomeThumbnail),
+        (With<PlaceholderImage>, Without<ImageNode>),
+    >,
 ) {
-    let placeholder_count = placeholder_query.iter().count();
-    if placeholder_count == 0 {
-        return;
-    }
-
     let mut replaced_count = 0;
-    for (placeholder_entity, child_of) in placeholder_query.iter() {
-        let parent_entity: Entity = child_of.parent();
-        let Ok(card) = card_query.get(parent_entity) else {
-            continue;
-        };
-
-        let Some(comic) = home_state
-            .recommendations
-            .iter()
-            .find(|c| c.id == card.comic_id)
-        else {
-            continue;
-        };
-
-        let thumb_url = comic.thumb.url();
-
-        if let Some(handle) = image_cache.get(&thumb_url) {
-            commands.entity(placeholder_entity).despawn();
-            let image_entity = commands
-                .spawn((
-                    HomeThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(164.0),
-                        height: Val::Px(220.0),
-                        ..default()
-                    },
-                ))
-                .id();
-
+    for (placeholder_entity, child_of, thumbnail) in placeholder_query.iter() {
+        // 加载失败：摘掉占位标记（灰底保留），让它退出扫描集
+        if image_cache.is_failed(&thumbnail.url) {
             commands
-                .entity(parent_entity)
-                .insert_children(0, &[image_entity]);
-            replaced_count += 1;
+                .entity(placeholder_entity)
+                .remove::<PlaceholderImage>();
+            continue;
         }
+
+        let Some(handle) = image_cache.get(&thumbnail.url) else {
+            continue;
+        };
+
+        let parent_entity: Entity = child_of.parent();
+        commands.entity(placeholder_entity).despawn();
+        let image_entity = commands
+            .spawn_scene(thumbnail_image(thumbnail.url.clone(), handle.clone()))
+            .id();
+
+        commands
+            .entity(parent_entity)
+            .insert_children(0, &[image_entity]);
+        replaced_count += 1;
     }
 
     if replaced_count > 0 {
@@ -818,7 +594,7 @@ pub fn handle_recommendations_load_failed(
 // ==================== 签到 Toast 通知 ====================
 
 /// 签到 Toast 通知标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct PunchInToast;
 
 /// 签到 Toast 计时器
@@ -858,7 +634,6 @@ pub fn display_punch_in_toast(
         return;
     };
 
-    let font = get_font();
     let bg_color = if punch_in_state.is_success {
         PUNCH_IN_SUCCESS_COLOR
     } else {
@@ -867,30 +642,7 @@ pub fn display_punch_in_toast(
 
     // 创建 Toast 通知条
     let toast = commands
-        .spawn((
-            PunchInToast,
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(bg_color),
-            ZIndex(100),
-        ))
-        .with_children(|toast| {
-            toast.spawn((
-                Text::new(message.as_str()),
-                TextFont {
-                    font,
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        })
+        .spawn_scene(punch_in_toast(message.as_str(), bg_color))
         .id();
 
     // 将 Toast 插入到 HomeRoot 的第一个子节点位置
@@ -900,6 +652,31 @@ pub fn display_punch_in_toast(
     commands.insert_resource(PunchInToastTimer(Timer::from_seconds(3.0, TimerMode::Once)));
 
     tracing::debug!("显示签到 Toast: {}", message);
+}
+
+/// 签到 Toast 通知条场景
+fn punch_in_toast(message: &str, bg_color: Color) -> impl Scene + use<> {
+    let message = message.to_string();
+
+    bsn! {
+        PunchInToast
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+        }
+        BackgroundColor(bg_color)
+        ZIndex(100)
+        Children [
+            (
+                Text({message})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(Color::WHITE)
+            )
+        ]
+    }
 }
 
 /// 自动隐藏签到 Toast 通知

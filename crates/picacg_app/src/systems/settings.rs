@@ -2,25 +2,19 @@
 //!
 //! 实现应用设置页面
 
-use bevy::{
-    prelude::*,
-    time::Timer,
-    ui::{FocusPolicy, RelativeCursorPosition},
-    window::PrimaryWindow,
-};
+use bevy::{input_focus::InputFocus, prelude::*, time::Timer, ui::RelativeCursorPosition};
 use picacg_config::{
     AppSettings, ChannelType, CloseBehavior, FilterSettings, Language, LogLevel, ProxyType,
     ThemeMode, update_log_level,
 };
 
-use super::font_loader::get_font;
 use crate::{
-    components::{
-        ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
-    },
+    components::ContentArea,
     systems::{
-        downloads::MoveAllDownloadsButton, login::AppColors, scrollbar::scrollbar_config::*,
-        ui_common::Scrollable,
+        downloads::MoveAllDownloadsButton,
+        login::AppColors,
+        scrollbar::{ScrollArea, scrollbar},
+        widgets::{ButtonStyle, ButtonVariant},
     },
     utils::{
         icons::*,
@@ -28,24 +22,20 @@ use crate::{
     },
 };
 
-/// 设置滚动容器组件（本地定义）
-#[derive(Component)]
-pub struct ScrollContainer;
-
 /// 设置页面根标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SettingsRoot;
 
 /// 设置滚动容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SettingsScrollContainer;
 
 /// 下载路径输入框标记（配合 TextInput 使用）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadPathInput;
 
 /// 下载路径目录选择按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadPathPickerButton;
 
 /// 目录选择器结果（后台线程 → 主线程，使用 Mutex 包裹 Receiver 以满足 Sync）
@@ -54,11 +44,10 @@ pub struct DownloadPathPickerResult {
     pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Option<String>>>>,
 }
 
-/// 下载路径输入状态
+/// 下载路径输入状态（焦点归 `InputFocus` 管，此处只存值）
 #[derive(Resource)]
 pub struct DownloadPathInputState {
     pub value: String,
-    pub is_focused: bool,
 }
 
 impl Default for DownloadPathInputState {
@@ -66,13 +55,12 @@ impl Default for DownloadPathInputState {
         let settings = AppSettings::global().read();
         Self {
             value: settings.download_path.clone(),
-            is_focused: false,
         }
     }
 }
 
 /// 清除缓存按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ClearCacheButton;
 
 /// 设置保存状态提示
@@ -96,31 +84,31 @@ impl Default for SettingsSaveStatus {
 }
 
 /// 底部状态栏文本标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SettingsStatusText;
 
 /// 底部状态栏容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SettingsStatusBar;
 
 // ==================== 代理设置组件 ====================
 
 /// 代理启用复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProxyEnabledCheckbox;
 
 /// 代理类型按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProxyTypeButton {
     pub proxy_type: ProxyType,
 }
 
 /// 代理主机输入框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProxyHostInput;
 
 /// 代理端口输入框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProxyPortInput;
 
 /// 代理设置状态
@@ -147,7 +135,7 @@ impl Default for ProxySettingsInputState {
 // ==================== 日志等级组件 ====================
 
 /// 日志等级按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LogLevelButton {
     pub level: LogLevel,
 }
@@ -170,7 +158,7 @@ impl Default for LogLevelInputState {
 // ==================== 自动恢复下载设置组件 ====================
 
 /// 自动恢复下载勾选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct AutoResumeDownloadsCheckbox;
 
 /// 自动恢复下载设置状态
@@ -182,15 +170,15 @@ pub struct AutoResumeDownloadsState {
 // ==================== 最大并发下载数设置组件 ====================
 
 /// 最大并发下载数减少按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct MaxConcurrentDownloadsDecreaseButton;
 
 /// 最大并发下载数增加按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct MaxConcurrentDownloadsIncreaseButton;
 
 /// 最大并发下载数显示文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct MaxConcurrentDownloadsText;
 
 /// 最大并发下载数设置状态
@@ -202,11 +190,11 @@ pub struct MaxConcurrentDownloadsState {
 // ==================== CBZ 打包设置组件 ====================
 
 /// 自动打包 CBZ 勾选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct AutoPackCbzCheckbox;
 
 /// 打包后删除原图勾选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DeleteImagesAfterCbzCheckbox;
 
 /// CBZ 打包设置状态
@@ -221,81 +209,83 @@ pub struct CbzPackageSettingsState {
 // ==================== 内容过滤设置组件 ====================
 
 /// 按分类屏蔽复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FilterByCategoryCheckbox;
 
 /// 按标签屏蔽复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FilterByTagCheckbox;
 
 /// 按标题屏蔽复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FilterByTitleCheckbox;
 
 /// 屏蔽词列表项标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct BlockedKeywordItem;
 
 /// 删除屏蔽词按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct RemoveKeywordButton {
     pub keyword: String,
 }
 
 /// 新增屏蔽词输入框标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct NewKeywordInput;
 
 /// 添加屏蔽词按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct AddKeywordButton;
 
 /// 下拉建议面板容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct KeywordSuggestionPanel;
 
 /// 建议项按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct KeywordSuggestionItem {
     pub keyword: String,
+    /// 未屏蔽时的静息底色（分类与标签两套配色，恢复时需按项还原）
+    pub base_color: Color,
 }
 
 /// 展开/折叠下拉按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct KeywordSuggestionToggle;
 
 /// 屏蔽词列表容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct BlockedKeywordsListContainer;
 
 // ==================== 分流设置组件 ====================
 
 /// API 分流按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ApiChannelButton {
     pub channel_type: ChannelType,
 }
 
 /// 图片分流按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ImageChannelButton {
     pub channel_type: ChannelType,
 }
 
 /// 自定义 CDN API IP 输入框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomCdnApiIpInput;
 
 /// 自定义 CDN 图片 IP 输入框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomCdnImgIpInput;
 
 /// 自定义 API IP 输入行容器（条件显示）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomCdnApiIpRow;
 
 /// 自定义图片 IP 输入行容器（条件显示）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomCdnImgIpRow;
 
 /// 分流设置状态
@@ -322,7 +312,7 @@ impl Default for ChannelSettingsState {
 // ==================== 主题设置组件 ====================
 
 /// 主题模式按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ThemeModeButton {
     pub mode: ThemeMode,
 }
@@ -347,7 +337,7 @@ impl Default for ThemeModeState {
 // ==================== 语言设置组件 ====================
 
 /// 语言选择按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LanguageButton {
     pub language: Language,
 }
@@ -370,7 +360,7 @@ impl Default for LanguageState {
 // ==================== 关闭行为设置组件 ====================
 
 /// 关闭行为按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CloseBehaviorButton {
     pub behavior: CloseBehavior,
 }
@@ -404,7 +394,7 @@ impl Default for FilterSettingsState {
 // ==================== 高级设置组件 ====================
 
 /// 界面缩放按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct UiScaleButton {
     /// 缩放值（0.0 = 自动, 1.0-2.0 = 手动）
     pub scale: f32,
@@ -417,11 +407,11 @@ pub struct UiScaleState {
 }
 
 /// 自定义字体路径输入框标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomFontPathInput;
 
 /// 自定义字体文件选择按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CustomFontPathPickerButton;
 
 /// 自定义字体文件选择器结果
@@ -430,11 +420,10 @@ pub struct CustomFontPathPickerResult {
     pub receiver: Option<std::sync::Mutex<std::sync::mpsc::Receiver<Option<String>>>>,
 }
 
-/// 自定义字体路径输入状态
+/// 自定义字体路径输入状态（焦点归 `InputFocus` 管，此处只存值）
 #[derive(Resource)]
 pub struct CustomFontPathInputState {
     pub value: String,
-    pub is_focused: bool,
 }
 
 impl Default for CustomFontPathInputState {
@@ -442,13 +431,12 @@ impl Default for CustomFontPathInputState {
         let settings = AppSettings::global().read();
         Self {
             value: settings.custom_font_path.clone(),
-            is_focused: false,
         }
     }
 }
 
 /// SNI 伪装复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SniPretendCheckbox;
 
 /// 网络高级设置状态（合并 SNI 伪装与 IPv6 优先以减少系统参数数量）
@@ -461,31 +449,31 @@ pub struct NetworkAdvancedState {
 }
 
 /// IPv6 优先复选框
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct PreferIpv6Checkbox;
 
 // ==================== 版本更新检查组件 ====================
 
 /// 检查更新按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CheckUpdateButton;
 
 /// 更新状态文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct UpdateStatusText;
 
 // ==================== 网络诊断组件 ====================
 
 /// 测速按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SpeedTestButton;
 
 /// Ping 测试按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct PingTestButton;
 
 /// 网络诊断结果文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct NetworkDiagResultText;
 
 /// 创建设置页面 UI
@@ -503,7 +491,6 @@ pub fn setup_settings_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let settings = AppSettings::global().read();
 
     // 查找内容区域
@@ -518,7 +505,6 @@ pub fn setup_settings_ui(
     // 初始化下载路径输入状态（insert_resource 首次创建，re-enter 时不会执行到此处）
     commands.insert_resource(DownloadPathInputState {
         value: settings.download_path.clone(),
-        is_focused: false,
     });
     commands.insert_resource(DownloadPathPickerResult::default());
 
@@ -586,7 +572,6 @@ pub fn setup_settings_ui(
     });
     commands.insert_resource(CustomFontPathInputState {
         value: settings.custom_font_path.clone(),
-        is_focused: false,
     });
     commands.insert_resource(CustomFontPathPickerResult::default());
     commands.insert_resource(NetworkAdvancedState {
@@ -597,1054 +582,883 @@ pub fn setup_settings_ui(
     // 初始化保存状态提示
     commands.insert_resource(SettingsSaveStatus::default());
 
-    // 在内容区域下创建设置页面
-    commands.entity(content_area).with_children(|parent| {
-        parent
-            .spawn((
-                SettingsRoot,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-                BackgroundColor(AppColors::BACKGROUND),
-            ))
-            .with_children(|root| {
-                // 标题栏
-                spawn_settings_header(root, &font);
+    // 内容过滤分组的建议数据（分类标题 + 缓存标签）
+    let category_titles: Vec<String> = categories_state
+        .categories
+        .iter()
+        .map(|c| c.title.clone())
+        .collect();
+    let tag_titles: Vec<String> = cached_tags.tags.clone();
 
+    // 在内容区域下创建设置页面
+    let settings_root = commands
+        .spawn_scene(settings_page(&settings, &category_titles, &tag_titles))
+        .id();
+    commands.entity(content_area).add_child(settings_root);
+
+    tracing::info!("设置页面 UI 已创建");
+}
+
+/// 设置页面场景
+fn settings_page(
+    settings: &AppSettings,
+    category_titles: &[String],
+    tag_titles: &[String],
+) -> impl Scene + use<> {
+    // 各分组内容（SceneList 需在 bsn! 宏外构建后传入 settings_section）
+    let theme_content = bsn_list![theme_setting(settings.theme)];
+    let language_content = bsn_list![language_setting(settings.language)];
+    let close_behavior_content = bsn_list![close_behavior_setting(settings.close_behavior)];
+    let proxy_content = bsn_list![proxy_setting(settings)];
+    let channel_content = bsn_list![channel_setting(settings)];
+    let log_level_content = bsn_list![log_level_setting(settings.log_level)];
+    let download_content = bsn_list![
+        download_path_setting(&settings.download_path),
+        max_concurrent_downloads_setting(settings.max_concurrent_downloads),
+        auto_resume_downloads_setting(settings.auto_resume_downloads),
+        auto_pack_cbz_setting(settings.auto_pack_cbz),
+        delete_images_after_cbz_setting(settings.delete_images_after_cbz),
+    ];
+    let filter_content = filter_settings(&settings.filter, category_titles, tag_titles);
+    let advanced_content = bsn_list![
+        ui_scale_setting(settings.ui_scale),
+        custom_font_path_setting(&settings.custom_font_path),
+        sni_pretend_setting(settings.use_sni_pretend),
+        prefer_ipv6_setting(settings.prefer_ipv6),
+    ];
+    let cache_content = bsn_list![cache_setting()];
+    let network_diag_content = bsn_list![network_diag_section()];
+    let about_content = bsn_list![about_section()];
+
+    bsn! {
+        SettingsRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            // 标题栏
+            settings_header(),
+            (
                 // 设置内容（可滚动）- 包装器需要 Relative 定位以支持 Absolute 子元素
-                root.spawn((Node {
+                Node {
                     width: Val::Percent(100.0),
                     flex_grow: 1.0,
                     flex_shrink: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
                     position_type: PositionType::Relative,
-                    overflow: Overflow::clip(), // 裁剪溢出内容，防止延伸到底部按钮栏
-                    ..default()
-                },))
-                    .with_children(|content_wrapper| {
+                    // 裁剪溢出内容，防止延伸到底部按钮栏
+                    overflow: Overflow::clip(),
+                }
+                Children [
+                    (
                         // 滚动容器
-                        let scroll_container = content_wrapper
-                            .spawn((
-                                SettingsScrollContainer,
-                                ScrollContainer,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    height: Val::Percent(100.0),
-                                    flex_direction: FlexDirection::Column,
-                                    padding: UiRect::all(Val::Px(20.0)),
-                                    overflow: Overflow::scroll_y(),
-                                    ..default()
-                                },
-                                Scrollable,
-                                ScrollPosition::default(),
-                                ContentSizeInfo::default(),
-                            ))
-                            .with_children(|scroll| {
-                                // 主题设置分组
-                                spawn_settings_section(scroll, &font, "主题设置", |section| {
-                                    spawn_theme_setting(section, &font, settings.theme);
-                                });
-
-                                // 语言设置分组
-                                spawn_settings_section(scroll, &font, "语言设置", |section| {
-                                    spawn_language_setting(section, &font, settings.language);
-                                });
-
-                                // 关闭行为分组
-                                spawn_settings_section(scroll, &font, "关闭行为", |section| {
-                                    spawn_close_behavior_setting(
-                                        section,
-                                        &font,
-                                        settings.close_behavior,
-                                    );
-                                });
-
-                                // 代理设置分组
-                                spawn_settings_section(scroll, &font, "代理设置", |section| {
-                                    spawn_proxy_setting(section, &font, &settings);
-                                });
-
-                                // 分流设置分组
-                                spawn_settings_section(scroll, &font, "分流设置", |section| {
-                                    spawn_channel_setting(section, &font, &settings);
-                                });
-
-                                // 日志设置分组
-                                spawn_settings_section(scroll, &font, "日志设置", |section| {
-                                    spawn_log_level_setting(section, &font, settings.log_level);
-                                });
-
-                                // 下载设置分组
-                                spawn_settings_section(scroll, &font, "下载设置", |section| {
-                                    spawn_download_path_setting(
-                                        section,
-                                        &font,
-                                        &settings.download_path,
-                                    );
-                                    spawn_max_concurrent_downloads_setting(
-                                        section,
-                                        &font,
-                                        settings.max_concurrent_downloads,
-                                    );
-                                    spawn_auto_resume_downloads_setting(
-                                        section,
-                                        &font,
-                                        settings.auto_resume_downloads,
-                                    );
-                                    spawn_auto_pack_cbz_setting(
-                                        section,
-                                        &font,
-                                        settings.auto_pack_cbz,
-                                    );
-                                    spawn_delete_images_after_cbz_setting(
-                                        section,
-                                        &font,
-                                        settings.delete_images_after_cbz,
-                                    );
-                                });
-
-                                // 内容过滤分组
-                                let category_titles: Vec<String> = categories_state
-                                    .categories
-                                    .iter()
-                                    .map(|c| c.title.clone())
-                                    .collect();
-                                let tag_titles: Vec<String> = cached_tags.tags.clone();
-                                spawn_settings_section(scroll, &font, "内容过滤", |section| {
-                                    spawn_filter_settings(
-                                        section,
-                                        &font,
-                                        &settings.filter,
-                                        &category_titles,
-                                        &tag_titles,
-                                    );
-                                });
-
-                                // 高级设置分组
-                                spawn_settings_section(scroll, &font, "高级设置", |section| {
-                                    spawn_ui_scale_setting(section, &font, settings.ui_scale);
-                                    spawn_custom_font_path_setting(
-                                        section,
-                                        &font,
-                                        &settings.custom_font_path,
-                                    );
-                                    spawn_sni_pretend_setting(
-                                        section,
-                                        &font,
-                                        settings.use_sni_pretend,
-                                    );
-                                    spawn_prefer_ipv6_setting(section, &font, settings.prefer_ipv6);
-                                });
-
-                                // 缓存设置分组
-                                spawn_settings_section(scroll, &font, "缓存设置", |section| {
-                                    spawn_cache_setting(section, &font);
-                                });
-
-                                // 网络诊断分组
-                                spawn_settings_section(scroll, &font, "网络诊断", |section| {
-                                    spawn_network_diag_section(section, &font);
-                                });
-
-                                // 关于分组
-                                spawn_settings_section(scroll, &font, "关于", |section| {
-                                    spawn_about_section(section, &font);
-                                });
-                            })
-                            .id();
-
-                        // 滚动条
-                        spawn_settings_scrollbar(content_wrapper, scroll_container);
-                    });
-
-                // 底部状态栏（固定在页面底部，显示保存状态提示）
-                spawn_status_bar(root, &font);
-            });
-    });
-
-    tracing::info!("设置页面 UI 已创建");
+                        #SettingsScroll
+                        SettingsScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(20.0)),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [
+                            // 主题设置分组
+                            settings_section("主题设置", theme_content),
+                            // 语言设置分组
+                            settings_section("语言设置", language_content),
+                            // 关闭行为分组
+                            settings_section("关闭行为", close_behavior_content),
+                            // 代理设置分组
+                            settings_section("代理设置", proxy_content),
+                            // 分流设置分组
+                            settings_section("分流设置", channel_content),
+                            // 日志设置分组
+                            settings_section("日志设置", log_level_content),
+                            // 下载设置分组
+                            settings_section("下载设置", download_content),
+                            // 内容过滤分组
+                            settings_section("内容过滤", filter_content),
+                            // 高级设置分组
+                            settings_section("高级设置", advanced_content),
+                            // 缓存设置分组
+                            settings_section("缓存设置", cache_content),
+                            // 网络诊断分组
+                            settings_section("网络诊断", network_diag_content),
+                            // 关于分组
+                            settings_section("关于", about_content),
+                        ]
+                    ),
+                    // 滚动条
+                    scrollbar(#SettingsScroll),
+                ]
+            ),
+            // 底部状态栏（固定在页面底部，显示保存状态提示）
+            status_bar(),
+        ]
+    }
 }
 
 /// 创建设置标题栏
-fn spawn_settings_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(50.0),
-                padding: UiRect::horizontal(Val::Px(20.0)),
-                align_items: AlignItems::Center,
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|header| {
-            header.spawn((
-                Text::new(format!("{ICON_COG} 设置")),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
+fn settings_header() -> impl Scene {
+    let title = format!("{ICON_COG} 设置");
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(50.0),
+            padding: UiRect::horizontal(Val::Px(20.0)),
+            align_items: AlignItems::Center,
+            border: UiRect::bottom(Val::Px(1.0)),
+        }
+        BackgroundColor(AppColors::HEADER_BG)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                Text({title})
+                TextFont { font_size: FontSize::Px(20.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
 }
 
-/// 创建设置分组
-fn spawn_settings_section<F>(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    title: &str,
-    content_builder: F,
-) where
-    F: FnOnce(&mut ChildSpawnerCommands),
-{
-    parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                margin: UiRect::bottom(Val::Px(20.0)),
-                padding: UiRect::all(Val::Px(15.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|section| {
-            // 分组标题
-            section.spawn((
-                Text::new(title),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-                Node {
-                    margin: UiRect::bottom(Val::Px(15.0)),
-                    ..default()
-                },
-            ));
+/// 创建设置分组（标题 + 任意内容）
+fn settings_section<L: SceneList>(title: &str, content: L) -> impl Scene + use<L> {
+    let title = title.to_string();
 
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            margin: UiRect::bottom(Val::Px(20.0)),
+            padding: UiRect::all(Val::Px(15.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+        }
+        BackgroundColor(Color::srgb(0.1, 0.1, 0.14))
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                // 分组标题
+                Text({title})
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::bottom(Val::Px(15.0)) }
+            ),
             // 分组内容
-            content_builder(section);
-        });
+            {content},
+        ]
+    }
 }
 
-/// 创建下载路径设置
-fn spawn_download_path_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_path: &str,
-) {
-    // 标签行
-    parent
-        .spawn((Node {
+// ==================== 通用布局片段 ====================
+
+/// 「标签 + 说明 + 按钮组」布局
+///
+/// 主题 / 语言 / 关闭行为 / 日志等级 / 界面缩放五组设置共用同一套外层结构，
+/// 差异只在按钮本身，故按钮列表由调用方构建后传入。
+fn option_group<L: SceneList>(label: &str, desc: &str, buttons: L) -> impl Scene + use<L> {
+    let label = label.to_string();
+    let desc = desc.to_string();
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 标签
-            row.spawn((
-                Text::new("下载保存路径"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+        }
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text({desc})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 按钮组
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(8.0),
+                    row_gap: Val::Px(8.0),
+                }
+                Children [ {buttons} ]
+            ),
+        ]
+    }
+}
 
-            // 说明
-            row.spawn((
-                Text::new("留空则使用默认路径（程序目录/Downloads）"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
+/// 单选 / 开关类按钮的静息底色（与 `ButtonStyle::segment` 的解析结果一致，
+/// 避免首帧闪烁）
+fn selectable_bg(selected: bool) -> Color {
+    if selected {
+        AppColors::PRIMARY
+    } else {
+        AppColors::SURFACE_SUNKEN
+    }
+}
 
-            // 输入框 + 选择目录按钮 行
-            row.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|input_row| {
-                    // 输入框（TextInput 通用组件）
-                    let display_text = if current_path.is_empty() {
-                        "（使用默认路径）".to_string()
-                    } else {
-                        current_path.to_string()
-                    };
-                    input_row
-                        .spawn((
-                            DownloadPathInput,
-                            TextInput::new("（使用默认路径）").with_value(current_path),
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                flex_grow: 1.0,
-                                height: Val::Px(36.0),
-                                padding: UiRect::horizontal(Val::Px(12.0)),
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                            BorderColor::all(AppColors::BORDER),
-                            RelativeCursorPosition::default(),
-                        ))
-                        .with_children(|input| {
-                            input.spawn((
-                                TextInputDisplay,
-                                Text::new(display_text),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(if current_path.is_empty() {
-                                    AppColors::TEXT_SECONDARY
-                                } else {
-                                    AppColors::TEXT
-                                }),
-                            ));
-                        });
+/// 单选 / 开关类按钮的边框（选中描主色边）
+fn selectable_border(selected: bool) -> BorderColor {
+    BorderColor::all(if selected {
+        AppColors::PRIMARY
+    } else {
+        AppColors::BORDER
+    })
+}
 
-                    // 选择目录按钮
-                    input_row
-                        .spawn((
-                            DownloadPathPickerButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Px(36.0),
-                                height: Val::Px(36.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(AppColors::SECONDARY),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(ICON_FOLDER_OPEN),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                });
+/// 同步单选 / 开关按钮的选中态：底色交给全局系统，此处只写 `selected` 与边框
+fn apply_selected(style: &mut ButtonStyle, border: &mut BorderColor, selected: bool) {
+    if style.selected != selected {
+        style.selected = selected;
+    }
+    *border = selectable_border(selected);
+}
 
-            // "全部移动已下载漫画"按钮
-            row.spawn((
-                MoveAllDownloadsButton,
-                Button,
-                Interaction::default(),
+/// 忙碌态按钮：进行中降为次要色（原先的"置灰"），完成后回到主色
+fn set_busy(style: &mut ButtonStyle, busy: bool) {
+    let target = if busy {
+        ButtonVariant::Secondary
+    } else {
+        ButtonVariant::Primary
+    };
+    if style.variant != target {
+        style.variant = target;
+    }
+}
+
+/// 写入勾选框内的对勾字符（勾选框的唯一子节点是 Text）
+fn set_check_icon(children: &Children, text_query: &mut Query<&mut Text>, checked: bool) {
+    for child in children.iter() {
+        if let Ok(mut text) = text_query.get_mut(child) {
+            **text = if checked {
+                ICON_CHECK.to_string()
+            } else {
+                String::new()
+            };
+        }
+    }
+}
+
+/// 「图标 + 文字」选项按钮（主题 / 语言 / 关闭行为共用）
+fn icon_option_button<M: Component + Default + Clone + Unpin>(
+    marker: M,
+    icon: &str,
+    label: &str,
+    is_selected: bool,
+) -> impl Scene + use<M> {
+    let icon = icon.to_string();
+    let label = label.to_string();
+    let style = ButtonStyle::segment(is_selected);
+    let bg = selectable_bg(is_selected);
+    let border = selectable_border(is_selected);
+
+    bsn! {
+        template_value(marker)
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            column_gap: Val::Px(6.0),
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                // 图标
+                Text({icon})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            ),
+        ]
+    }
+}
+
+/// 「左侧标签 + 说明 / 右侧勾选框」行
+///
+/// 自动恢复下载 / CBZ 打包 / 删除原图 / SNI 伪装 / IPv6 优先五项开关共用。
+fn toggle_row<M: Component + Default + Clone + Unpin>(
+    marker: M,
+    label: &str,
+    desc: &str,
+    is_enabled: bool,
+) -> impl Scene + use<M> {
+    let label = label.to_string();
+    let desc = desc.to_string();
+    let icon = if is_enabled { ICON_CHECK } else { "" };
+    let style = ButtonStyle::segment(is_enabled);
+    let bg = selectable_bg(is_enabled);
+    let border = selectable_border(is_enabled);
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(16.0)),
+        }
+        Children [
+            (
+                // 左侧标签和说明
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                }
+                Children [
+                    (
+                        Text({label})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        Text({desc})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 右侧勾选框
+                template_value(marker)
+                Button
+                template_value(style)
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                BackgroundColor(bg)
+                template_value(border)
+                Children [
+                    (
+                        // 勾选标记（使用 Nerd Font 图标）
+                        Text({icon})
+                        TextFont { font_size: FontSize::Px(16.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+        ]
+    }
+}
+
+// ==================== 下载设置 ====================
+
+/// 创建下载路径设置
+fn download_path_setting(current_path: &str) -> impl Scene + use<> {
+    // 输入框（TextInput 通用组件）
+    let text_input = TextInput::new("（使用默认路径）").with_value(current_path);
+    let display_text = if current_path.is_empty() {
+        "（使用默认路径）".to_string()
+    } else {
+        current_path.to_string()
+    };
+    let display_color = if current_path.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+    let move_all_label = format!("{ICON_FILE_MOVE} 迁移全部");
+
+    bsn! {
+        // 标签行
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+        }
+        Children [
+            (
+                // 标签
+                Text("下载保存路径")
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                // 说明
+                Text("留空则使用默认路径（程序目录/Downloads）")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 输入框 + 选择目录按钮 行
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        DownloadPathInput
+                        template_value(text_input)
+                        Button
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Px(36.0),
+                            padding: UiRect::horizontal(Val::Px(12.0)),
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SURFACE_SUNKEN)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        RelativeCursorPosition
+                        Children [
+                            (
+                                TextInputDisplay
+                                Text({display_text})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(display_color)
+                            )
+                        ]
+                    ),
+                    (
+                        // 选择目录按钮
+                        DownloadPathPickerButton
+                        Button
+                        template_value(ButtonStyle::secondary())
+                        Node {
+                            width: Val::Px(36.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SECONDARY)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text(ICON_FOLDER_OPEN)
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // "全部移动已下载漫画"按钮
+                MoveAllDownloadsButton
+                Button
+                template_value(ButtonStyle::card())
                 Node {
                     padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(8.0), Val::Px(8.0)),
                     margin: UiRect::top(Val::Px(8.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(format!("{ICON_FILE_MOVE} 迁移全部")),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 13.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-        });
+                }
+                BackgroundColor(AppColors::SURFACE)
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        Text({move_all_label})
+                        TextFont { font_size: FontSize::Px(13.0) }
+                        TextColor(AppColors::TEXT)
+                    )
+                ]
+            ),
+        ]
+    }
 }
 
 /// 创建最大并发下载数设置
-fn spawn_max_concurrent_downloads_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_value: usize,
-) {
-    parent
-        .spawn((Node {
+fn max_concurrent_downloads_setting(current_value: usize) -> impl Scene + use<> {
+    let value_text = format!("{}", current_value);
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("最大同时下载数"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("同时下载的漫画数量上限"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧数值调整器
-            row.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|controls| {
-                    // 减少按钮
-                    controls
-                        .spawn((
-                            MaxConcurrentDownloadsDecreaseButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Px(28.0),
-                                height: Val::Px(28.0),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BorderColor::all(AppColors::BORDER),
-                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(ICON_MINUS),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-
-                    // 数值显示
-                    controls.spawn((
-                        MaxConcurrentDownloadsText,
-                        Text::new(format!("{}", current_value)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
+        }
+        Children [
+            (
+                // 左侧标签和说明
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                }
+                Children [
+                    (
+                        Text("最大同时下载数")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        Text("同时下载的漫画数量上限")
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 右侧数值调整器
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        // 减少按钮
+                        MaxConcurrentDownloadsDecreaseButton
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            width: Val::Px(28.0),
+                            height: Val::Px(28.0),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(AppColors::SURFACE)
+                        Children [
+                            (
+                                Text(ICON_MINUS)
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        // 数值显示
+                        MaxConcurrentDownloadsText
+                        Text({value_text})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
                         Node {
                             width: Val::Px(30.0),
                             justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                    ));
-
-                    // 增加按钮
-                    controls
-                        .spawn((
-                            MaxConcurrentDownloadsIncreaseButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Px(28.0),
-                                height: Val::Px(28.0),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                ..default()
-                            },
-                            BorderColor::all(AppColors::BORDER),
-                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(ICON_PLUS),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                });
-        });
+                        }
+                    ),
+                    (
+                        // 增加按钮
+                        MaxConcurrentDownloadsIncreaseButton
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            width: Val::Px(28.0),
+                            height: Val::Px(28.0),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(AppColors::SURFACE)
+                        Children [
+                            (
+                                Text(ICON_PLUS)
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
 /// 创建自动恢复下载设置
-fn spawn_auto_resume_downloads_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    is_enabled: bool,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("启动后自动开始下载"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("程序启动时自动恢复未完成的下载任务"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧勾选框
-            row.spawn((
-                AutoResumeDownloadsCheckbox,
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(24.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    Color::srgb(0.12, 0.12, 0.16)
-                }),
-                BorderColor::all(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                }),
-            ))
-            .with_children(|checkbox| {
-                // 勾选标记（使用 Nerd Font 图标）
-                checkbox.spawn((
-                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+fn auto_resume_downloads_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        AutoResumeDownloadsCheckbox,
+        "启动后自动开始下载",
+        "程序启动时自动恢复未完成的下载任务",
+        is_enabled,
+    )
 }
 
 /// 创建自动打包 CBZ 设置
-fn spawn_auto_pack_cbz_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    is_enabled: bool,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("下载完成后自动打包 CBZ"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("将漫画打包为 CBZ 格式，方便导入阅读器"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧勾选框
-            row.spawn((
-                AutoPackCbzCheckbox,
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(24.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    Color::srgb(0.12, 0.12, 0.16)
-                }),
-                BorderColor::all(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                }),
-            ))
-            .with_children(|checkbox| {
-                checkbox.spawn((
-                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+fn auto_pack_cbz_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        AutoPackCbzCheckbox,
+        "下载完成后自动打包 CBZ",
+        "将漫画打包为 CBZ 格式，方便导入阅读器",
+        is_enabled,
+    )
 }
 
 /// 创建打包后删除原图设置
-fn spawn_delete_images_after_cbz_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    is_enabled: bool,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("打包 CBZ 后删除原图"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("打包成功后自动删除 Images 目录中的原图"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧勾选框
-            row.spawn((
-                DeleteImagesAfterCbzCheckbox,
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(24.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    Color::srgb(0.12, 0.12, 0.16)
-                }),
-                BorderColor::all(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                }),
-            ))
-            .with_children(|checkbox| {
-                checkbox.spawn((
-                    Text::new(if is_enabled { ICON_CHECK } else { "" }), // 󰄬 nf-md-check
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+fn delete_images_after_cbz_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        DeleteImagesAfterCbzCheckbox,
+        "打包 CBZ 后删除原图",
+        "打包成功后自动删除 Images 目录中的原图",
+        is_enabled,
+    )
 }
 
-/// 创建内容过滤设置
-fn spawn_filter_settings(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
+// ==================== 内容过滤设置 ====================
+
+/// 创建内容过滤设置（若干平级节点，故返回 SceneList）
+fn filter_settings(
     filter: &FilterSettings,
     category_titles: &[String],
     tag_titles: &[String],
-) {
-    // 屏蔽模式复选框行
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(16.0),
-            flex_wrap: FlexWrap::Wrap,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|row| {
-            spawn_filter_mode_checkbox(
-                row,
-                font,
-                "按分类屏蔽",
-                filter.filter_by_category,
-                FilterCheckboxType::Category,
-            );
-            spawn_filter_mode_checkbox(
-                row,
-                font,
-                "按标签屏蔽",
-                filter.filter_by_tag,
-                FilterCheckboxType::Tag,
-            );
-            spawn_filter_mode_checkbox(
-                row,
-                font,
-                "按标题屏蔽",
-                filter.filter_by_title,
-                FilterCheckboxType::Title,
-            );
-        });
+) -> Vec<Box<dyn SceneList>> {
+    let blocked_tags = blocked_keyword_tags(&filter.blocked_keywords);
+    let has_suggestions = !category_titles.is_empty() || !tag_titles.is_empty();
+    let suggestion_label = format!("选择分类/标签 {ICON_CHEVRON_DOWN}");
 
-    // 屏蔽词列表标签
-    parent.spawn((
-        Text::new("屏蔽词列表:"),
-        TextFont {
-            font: font.clone(),
-            font_size: 13.0,
-            ..default()
-        },
-        TextColor(AppColors::TEXT_SECONDARY),
-        Node {
-            margin: UiRect::top(Val::Px(12.0)),
-            ..default()
-        },
-    ));
+    // "选择分类/标签" 展开/折叠按钮（无候选项时不创建）
+    let suggestion_toggle: Box<dyn SceneList> = if has_suggestions {
+        Box::new(bsn_list![(
+            KeywordSuggestionToggle
+            Button
+            // 展开态由 keyword_suggestion_toggle_interaction 写入 selected
+            template_value(ButtonStyle::segment(false))
+            Node {
+                height: Val::Px(32.0),
+                padding: UiRect::horizontal(Val::Px(12.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+            }
+            BackgroundColor(AppColors::SURFACE_SUNKEN)
+            template_value(BorderColor::all(AppColors::BORDER))
+            Children [
+                (
+                    Text({suggestion_label})
+                    TextFont { font_size: FontSize::Px(12.0) }
+                    TextColor(AppColors::TEXT_SECONDARY)
+                )
+            ]
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
 
-    // 屏蔽词列表容器
-    parent
-        .spawn((
-            BlockedKeywordsListContainer,
+    let mut items: Vec<Box<dyn SceneList>> = vec![
+        // 屏蔽模式复选框行
+        Box::new(bsn_list![(
+            Node {
+                width: Val::Percent(100.0),
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(16.0),
+                flex_wrap: FlexWrap::Wrap,
+                row_gap: Val::Px(8.0),
+            }
+            Children [
+                filter_mode_checkbox(
+                    FilterByCategoryCheckbox,
+                    "按分类屏蔽",
+                    filter.filter_by_category,
+                ),
+                filter_mode_checkbox(FilterByTagCheckbox, "按标签屏蔽", filter.filter_by_tag),
+                filter_mode_checkbox(FilterByTitleCheckbox, "按标题屏蔽", filter.filter_by_title),
+            ]
+        )]),
+        // 屏蔽词列表标签
+        Box::new(bsn_list![(
+            Text("屏蔽词列表:")
+            TextFont { font_size: FontSize::Px(13.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+            Node { margin: UiRect::top(Val::Px(12.0)) }
+        )]),
+        // 屏蔽词列表容器
+        Box::new(bsn_list![(
+            BlockedKeywordsListContainer
             Node {
                 width: Val::Percent(100.0),
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: Val::Px(6.0),
                 row_gap: Val::Px(6.0),
                 margin: UiRect::top(Val::Px(6.0)),
-                ..default()
-            },
-        ))
-        .with_children(|list| {
-            spawn_blocked_keyword_tags(list, font, &filter.blocked_keywords);
-        });
-
-    // 新增屏蔽词输入行
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            margin: UiRect::top(Val::Px(10.0)),
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 输入框（TextInput 通用组件）
-            row.spawn((
-                NewKeywordInput,
-                TextInput::new("输入新屏蔽词..."),
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(250.0),
-                    height: Val::Px(32.0),
-                    padding: UiRect::horizontal(Val::Px(10.0)),
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(3.0)),
-                    ..default()
-                },
-                BackgroundColor(AppColors::CARD_BG),
-                BorderColor::all(AppColors::BORDER),
-                RelativeCursorPosition::default(),
-            ))
-            .with_children(|input| {
-                input.spawn((
-                    TextInputDisplay,
-                    Text::new("输入新屏蔽词..."),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            });
-
-            // 添加按钮
-            row.spawn((
-                AddKeywordButton,
-                Button,
-                Interaction::default(),
-                Node {
-                    height: Val::Px(32.0),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border_radius: BorderRadius::all(Val::Px(3.0)),
-                    ..default()
-                },
-                BackgroundColor(AppColors::PRIMARY),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("添加"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-
-            // "选择分类/标签" 展开/折叠按钮
-            if !category_titles.is_empty() || !tag_titles.is_empty() {
-                row.spawn((
-                    KeywordSuggestionToggle,
-                    Button,
-                    Interaction::default(),
+            }
+            Children [ {blocked_tags} ]
+        )]),
+        // 新增屏蔽词输入行
+        Box::new(bsn_list![(
+            Node {
+                width: Val::Percent(100.0),
+                margin: UiRect::top(Val::Px(10.0)),
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+            }
+            Children [
+                (
+                    // 输入框（TextInput 通用组件）
+                    NewKeywordInput
+                    template_value(TextInput::new("输入新屏蔽词..."))
+                    Button
+                    Node {
+                        width: Val::Px(250.0),
+                        height: Val::Px(32.0),
+                        padding: UiRect::horizontal(Val::Px(10.0)),
+                        align_items: AlignItems::Center,
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                    }
+                    BackgroundColor(AppColors::CARD_BG)
+                    template_value(BorderColor::all(AppColors::BORDER))
+                    RelativeCursorPosition
+                    Children [
+                        (
+                            TextInputDisplay
+                            Text("输入新屏蔽词...")
+                            TextFont { font_size: FontSize::Px(12.0) }
+                            TextColor(AppColors::TEXT_SECONDARY)
+                        )
+                    ]
+                ),
+                (
+                    // 添加按钮
+                    AddKeywordButton
+                    Button
+                    template_value(ButtonStyle::primary())
                     Node {
                         height: Val::Px(32.0),
                         padding: UiRect::horizontal(Val::Px(12.0)),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(3.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                    BorderColor::all(AppColors::BORDER),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new(format!("选择分类/标签 {ICON_CHEVRON_DOWN}")),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-            }
-        });
+                    }
+                    BackgroundColor(AppColors::PRIMARY)
+                    Children [
+                        (
+                            Text("添加")
+                            TextFont { font_size: FontSize::Px(12.0) }
+                            TextColor(AppColors::TEXT)
+                        )
+                    ]
+                ),
+                {suggestion_toggle},
+            ]
+        )]),
+    ];
 
     // 分类/标签建议面板（初始隐藏）
-    if !category_titles.is_empty() || !tag_titles.is_empty() {
-        parent
-            .spawn((
-                KeywordSuggestionPanel,
-                Node {
-                    width: Val::Percent(100.0),
-                    margin: UiRect::top(Val::Px(6.0)),
-                    padding: UiRect::all(Val::Px(8.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    display: Display::None, // 初始隐藏
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.12, 0.12, 0.18, 0.9)),
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|panel| {
-                // 分类区域
-                if !category_titles.is_empty() {
-                    // 分类标题
-                    panel.spawn((
-                        Text::new("分类"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                    // 分类标签列表
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            column_gap: Val::Px(6.0),
-                            row_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            for title in category_titles {
-                                spawn_suggestion_item(
-                                    row,
-                                    font,
-                                    title,
-                                    filter,
-                                    Color::srgba(0.2, 0.2, 0.3, 0.7),
-                                );
-                            }
-                        });
-                }
-
-                // 标签区域
-                if !tag_titles.is_empty() {
-                    // 标签标题
-                    panel.spawn((
-                        Text::new("标签"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                    // 标签列表
-                    panel
-                        .spawn(Node {
-                            width: Val::Percent(100.0),
-                            flex_wrap: FlexWrap::Wrap,
-                            column_gap: Val::Px(6.0),
-                            row_gap: Val::Px(6.0),
-                            ..default()
-                        })
-                        .with_children(|row| {
-                            for title in tag_titles {
-                                spawn_suggestion_item(
-                                    row,
-                                    font,
-                                    title,
-                                    filter,
-                                    Color::srgba(0.15, 0.25, 0.2, 0.7),
-                                );
-                            }
-                        });
-                }
-            });
+    if has_suggestions {
+        items.push(suggestion_panel(filter, category_titles, tag_titles));
     }
+
+    items
 }
 
+/// 创建分类/标签建议面板（初始隐藏）
+fn suggestion_panel(
+    filter: &FilterSettings,
+    category_titles: &[String],
+    tag_titles: &[String],
+) -> Box<dyn SceneList> {
+    let mut sections: Vec<Box<dyn SceneList>> = Vec::new();
+
+    // 分类区域
+    if !category_titles.is_empty() {
+        let items: Vec<_> = category_titles
+            .iter()
+            .map(|title| suggestion_item(title, filter, Color::srgba(0.2, 0.2, 0.3, 0.7)))
+            .collect();
+        sections.push(Box::new(bsn_list![
+            (
+                // 分类标题
+                Text("分类")
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 分类标签列表
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                }
+                Children [ {items} ]
+            ),
+        ]));
+    }
+
+    // 标签区域
+    if !tag_titles.is_empty() {
+        let items: Vec<_> = tag_titles
+            .iter()
+            .map(|title| suggestion_item(title, filter, Color::srgba(0.15, 0.25, 0.2, 0.7)))
+            .collect();
+        sections.push(Box::new(bsn_list![
+            (
+                // 标签标题
+                Text("标签")
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 标签列表
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(6.0),
+                    row_gap: Val::Px(6.0),
+                }
+                Children [ {items} ]
+            ),
+        ]));
+    }
+
+    Box::new(bsn_list![(
+        KeywordSuggestionPanel
+        Node {
+            width: Val::Percent(100.0),
+            margin: UiRect::top(Val::Px(6.0)),
+            padding: UiRect::all(Val::Px(8.0)),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            // 初始隐藏
+            display: Display::None,
+        }
+        BackgroundColor(Color::srgba(0.12, 0.12, 0.18, 0.9))
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [ {sections} ]
+    )])
+}
+
+/// 建议项已被屏蔽时的禁用底色
+const SUGGESTION_BLOCKED_BG: Color = Color::srgba(0.2, 0.2, 0.25, 0.4);
+/// 建议项已被屏蔽时的禁用边框
+const SUGGESTION_BLOCKED_BORDER: Color = Color::srgba(0.3, 0.3, 0.35, 0.3);
+
 /// 创建建议面板中的单个建议项
-fn spawn_suggestion_item(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
+fn suggestion_item(
     keyword: &str,
     filter: &FilterSettings,
     base_color: Color,
-) {
+) -> impl Scene + use<> {
     let already_blocked = filter.blocked_keywords.contains(&keyword.to_string());
     let bg = if already_blocked {
-        Color::srgba(0.2, 0.2, 0.25, 0.4)
+        SUGGESTION_BLOCKED_BG
     } else {
         base_color
     };
@@ -1653,117 +1467,96 @@ fn spawn_suggestion_item(
     } else {
         AppColors::TEXT
     };
+    let border = BorderColor::all(if already_blocked {
+        SUGGESTION_BLOCKED_BORDER
+    } else {
+        AppColors::BORDER
+    });
+    let label = keyword.to_string();
+    let keyword = keyword.to_string();
 
-    parent
-        .spawn((
-            KeywordSuggestionItem {
-                keyword: keyword.to_string(),
-            },
-            Button,
-            Interaction::default(),
-            Node {
-                padding: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(4.0), Val::Px(4.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(3.0)),
-                ..default()
-            },
-            BackgroundColor(bg),
-            BorderColor::all(if already_blocked {
-                Color::srgba(0.3, 0.3, 0.35, 0.3)
-            } else {
-                AppColors::BORDER
-            }),
-        ))
-        .with_children(|item| {
-            item.spawn((
-                Text::new(keyword),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
+    bsn! {
+        KeywordSuggestionItem { keyword: {keyword}, base_color: {base_color} }
+        Button
+        Node {
+            padding: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(4.0), Val::Px(4.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(text_color)
+            )
+        ]
+    }
 }
 
-/// 创建屏蔽词标签列表（可复用）
-fn spawn_blocked_keyword_tags(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    keywords: &[String],
-) {
+/// 创建屏蔽词标签列表（可复用：初次构建 + 动态刷新）
+fn blocked_keyword_tags(keywords: &[String]) -> Box<dyn SceneList> {
     if keywords.is_empty() {
-        parent.spawn((
-            Text::new("暂无屏蔽词"),
-            TextFont {
-                font: font.clone(),
-                font_size: 12.0,
-                ..default()
-            },
-            TextColor(AppColors::TEXT_SECONDARY),
-        ));
+        Box::new(bsn_list![(
+            Text("暂无屏蔽词")
+            TextFont { font_size: FontSize::Px(12.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
     } else {
-        for keyword in keywords {
-            parent
-                .spawn((
-                    BlockedKeywordItem,
-                    Node {
-                        padding: UiRect::new(
-                            Val::Px(8.0),
-                            Val::Px(4.0),
-                            Val::Px(3.0),
-                            Val::Px(3.0),
-                        ),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(6.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5)),
-                    BorderColor::all(AppColors::BORDER),
-                ))
-                .with_children(|tag| {
-                    tag.spawn((
-                        Text::new(keyword),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    // 删除按钮
-                    tag.spawn((
-                        RemoveKeywordButton {
-                            keyword: keyword.clone(),
-                        },
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(16.0),
-                            height: Val::Px(16.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5)),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(ICON_CLOSE),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 10.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.9, 0.5, 0.5)),
-                        ));
-                    });
-                });
+        Box::new(
+            keywords
+                .iter()
+                .map(|keyword| blocked_keyword_tag(keyword.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    }
+}
+
+/// 单个屏蔽词标签（文本 + 删除按钮）
+fn blocked_keyword_tag(keyword: &str) -> impl Scene + use<> {
+    let label = keyword.to_string();
+    let keyword = keyword.to_string();
+
+    bsn! {
+        BlockedKeywordItem
+        Node {
+            padding: UiRect::new(Val::Px(8.0), Val::Px(4.0), Val::Px(3.0), Val::Px(3.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
         }
+        BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.5))
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                // 删除按钮
+                RemoveKeywordButton { keyword: {keyword} }
+                Button
+                template_value(ButtonStyle::danger())
+                Node {
+                    width: Val::Px(16.0),
+                    height: Val::Px(16.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                }
+                BackgroundColor(AppColors::ERROR)
+                Children [
+                    (
+                        Text(ICON_CLOSE)
+                        TextFont { font_size: FontSize::Px(10.0) }
+                        TextColor(Color::srgb(0.9, 0.5, 0.5))
+                    )
+                ]
+            ),
+        ]
     }
 }
 
@@ -1786,8 +1579,6 @@ pub fn refresh_blocked_keywords_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
-
     // 重建屏蔽词列表
     for (entity, children) in list_query.iter() {
         // 清除旧子节点
@@ -1800,19 +1591,22 @@ pub fn refresh_blocked_keywords_ui(
         }
 
         // 重新创建屏蔽词标签
-        commands.entity(entity).with_children(|list| {
-            spawn_blocked_keyword_tags(list, &font, &filter_state.blocked_keywords);
-        });
+        commands
+            .entity(entity)
+            .queue_spawn_related_scenes::<Children>(blocked_keyword_tags(
+                &filter_state.blocked_keywords,
+            ));
     }
 
     // 更新建议面板中已屏蔽项的禁用外观
     for (item, mut bg, mut border, children) in suggestion_query.iter_mut() {
         let already_blocked = filter_state.blocked_keywords.contains(&item.keyword);
         if already_blocked {
-            *bg = BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.4));
-            *border = BorderColor::all(Color::srgba(0.3, 0.3, 0.35, 0.3));
+            *bg = BackgroundColor(SUGGESTION_BLOCKED_BG);
+            *border = BorderColor::all(SUGGESTION_BLOCKED_BORDER);
         } else {
-            *bg = BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7));
+            // 还原本项自己的底色：分类与标签两套配色不能互相顶替
+            *bg = BackgroundColor(item.base_color);
             *border = BorderColor::all(AppColors::BORDER);
         }
         // 更新文本颜色
@@ -1828,43 +1622,29 @@ pub fn refresh_blocked_keywords_ui(
     }
 }
 
-/// 过滤复选框类型（内部使用）
-enum FilterCheckboxType {
-    Category,
-    Tag,
-    Title,
-}
-
 /// 创建过滤模式复选框
-fn spawn_filter_mode_checkbox(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
+fn filter_mode_checkbox<M: Component + Default + Clone + Unpin>(
+    marker: M,
     label: &str,
     checked: bool,
-    checkbox_type: FilterCheckboxType,
-) {
-    let bg = if checked {
-        AppColors::PRIMARY
-    } else {
-        Color::srgb(0.12, 0.12, 0.16)
-    };
-    let border = if checked {
-        AppColors::PRIMARY
-    } else {
-        AppColors::BORDER
-    };
+) -> impl Scene + use<M> {
+    let label = label.to_string();
+    let icon = if checked { ICON_CHECK } else { "" };
+    let style = ButtonStyle::segment(checked);
+    let bg = selectable_bg(checked);
+    let border = selectable_border(checked);
 
-    parent
-        .spawn((Node {
+    bsn! {
+        Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(6.0),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 复选框
-            let mut checkbox_entity = row.spawn((
-                Button,
-                Interaction::default(),
+        }
+        Children [
+            (
+                // 复选框
+                template_value(marker)
+                Button
+                template_value(style)
                 Node {
                     width: Val::Px(20.0),
                     height: Val::Px(20.0),
@@ -1872,229 +1652,221 @@ fn spawn_filter_mode_checkbox(
                     border_radius: BorderRadius::all(Val::Px(3.0)),
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(bg),
-                BorderColor::all(border),
-            ));
-
-            // 添加对应的组件标记
-            match checkbox_type {
-                FilterCheckboxType::Category => {
-                    checkbox_entity.insert(FilterByCategoryCheckbox);
                 }
-                FilterCheckboxType::Tag => {
-                    checkbox_entity.insert(FilterByTagCheckbox);
-                }
-                FilterCheckboxType::Title => {
-                    checkbox_entity.insert(FilterByTitleCheckbox);
-                }
-            }
-
-            checkbox_entity.with_children(|cb| {
-                cb.spawn((
-                    Text::new(if checked { ICON_CHECK } else { "" }),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-
-            // 标签文本
-            row.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
+                BackgroundColor(bg)
+                template_value(border)
+                Children [
+                    (
+                        Text({icon})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+            (
+                // 标签文本
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            ),
+        ]
+    }
 }
 
+// ==================== 缓存 / 关于 ====================
+
 /// 创建缓存设置
-fn spawn_cache_setting(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((Node {
+fn cache_setting() -> impl Scene {
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("图片缓存"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("清除本地缓存的封面图片"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 清除按钮
-            row.spawn((
-                ClearCacheButton,
-                Button,
+        }
+        Children [
+            (
+                // 左侧标签和说明
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(4.0),
+                }
+                Children [
+                    (
+                        Text("图片缓存")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        Text("清除本地缓存的封面图片")
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 清除按钮
+                ClearCacheButton
+                Button
+                template_value(ButtonStyle::danger())
                 Node {
                     padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.6, 0.2, 0.2)),
-                BorderColor::all(Color::srgb(0.8, 0.3, 0.3)),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new("清除缓存"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 13.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-        });
+                }
+                BackgroundColor(AppColors::ERROR)
+                template_value(BorderColor::all(AppColors::ERROR))
+                Children [
+                    (
+                        Text("清除缓存")
+                        TextFont { font_size: FontSize::Px(13.0) }
+                        TextColor(AppColors::TEXT)
+                    )
+                ]
+            ),
+        ]
+    }
 }
 
 /// 创建关于分组
-fn spawn_about_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((Node {
+fn about_section() -> impl Scene {
+    let version_text = format!("当前版本: v{}", env!("CARGO_PKG_VERSION"));
+    let bevy_text = format!("框架: Bevy {}", env!("BEVY_VERSION"));
+    let check_update_label = format!("{ICON_REFRESH} 检查更新");
+
+    bsn! {
+        Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("PicACG Rust 客户端"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-            col.spawn((
-                Text::new(format!("当前版本: v{}", env!("CARGO_PKG_VERSION"))),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            col.spawn((
-                Text::new(format!("框架: Bevy {}", env!("BEVY_VERSION"))),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 检查更新按钮行
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                margin: UiRect::top(Val::Px(8.0)),
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 检查更新按钮
-                    row.spawn((
-                        CheckUpdateButton,
-                        Button,
-                        Interaction::default(),
+        }
+        Children [
+            (
+                Text("PicACG Rust 客户端")
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text({version_text})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                Text({bevy_text})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 检查更新按钮行
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(12.0),
+                    margin: UiRect::top(Val::Px(8.0)),
+                }
+                Children [
+                    (
+                        // 检查更新按钮
+                        CheckUpdateButton
+                        Button
+                        template_value(ButtonStyle::primary())
                         Node {
                             padding: UiRect::axes(Val::Px(16.0), Val::Px(6.0)),
                             justify_content: JustifyContent::Center,
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                        BorderColor::all(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(format!("{ICON_REFRESH} 检查更新")),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-
-                    // 更新状态文本
-                    row.spawn((
-                        UpdateStatusText,
-                        Text::new(" "),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-        });
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({check_update_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                    (
+                        // 更新状态文本
+                        UpdateStatusText
+                        Text(" ")
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
+// ==================== 代理设置 ====================
+
 /// 创建代理设置
-fn spawn_proxy_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    settings: &picacg_config::AppSettings,
-) {
-    parent
-        .spawn((Node {
+fn proxy_setting(settings: &AppSettings) -> impl Scene + use<> {
+    let enabled = settings.proxy.enabled;
+    let check_icon = if enabled { ICON_CHECK } else { "" };
+    let checkbox_style = ButtonStyle::segment(enabled);
+    let checkbox_bg = selectable_bg(enabled);
+    let checkbox_border = selectable_border(enabled);
+
+    // 代理类型按钮组
+    let type_buttons: Vec<_> = [
+        (ProxyType::Http, "HTTP"),
+        (ProxyType::Https, "HTTPS"),
+        (ProxyType::Socks5, "SOCKS5"),
+    ]
+    .into_iter()
+    .map(|(proxy_type, label)| {
+        proxy_type_button(proxy_type, label, settings.proxy.proxy_type == proxy_type)
+    })
+    .collect();
+
+    // 主机地址输入框
+    let host_input = TextInput::new("127.0.0.1").with_value(&settings.proxy.host);
+    let host_text = if settings.proxy.host.is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        settings.proxy.host.clone()
+    };
+    let host_color = if settings.proxy.host.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
+    // 端口输入框
+    let port_str = settings.proxy.port.to_string();
+    let port_input = TextInput::new("7890").with_value(port_str.clone());
+    let port_text = if port_str.is_empty() {
+        "7890".to_string()
+    } else {
+        port_str.clone()
+    };
+    let port_color = if port_str.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            // 启用代理复选框
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },))
-                .with_children(|row| {
-                    row.spawn((
-                        ProxyEnabledCheckbox,
-                        Button,
+        }
+        Children [
+            (
+                // 启用代理复选框
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                }
+                Children [
+                    (
+                        ProxyEnabledCheckbox
+                        Button
+                        template_value(checkbox_style)
                         Node {
                             width: Val::Px(20.0),
                             height: Val::Px(20.0),
@@ -2102,866 +1874,490 @@ fn spawn_proxy_setting(
                             align_items: AlignItems::Center,
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(if settings.proxy.enabled {
-                            AppColors::PRIMARY
-                        } else {
-                            Color::srgb(0.12, 0.12, 0.16)
-                        }),
-                        BorderColor::all(if settings.proxy.enabled {
-                            AppColors::PRIMARY
-                        } else {
-                            AppColors::BORDER
-                        }),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(if settings.proxy.enabled {
-                                ICON_CHECK
-                            } else {
-                                ""
-                            }),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                    row.spawn((
-                        Text::new("启用代理"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                });
-
-            // 代理类型选择
-            col.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|type_col| {
-                    type_col.spawn((
-                        Text::new("代理类型"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-
-                    type_col
-                        .spawn((Node {
+                        }
+                        BackgroundColor(checkbox_bg)
+                        template_value(checkbox_border)
+                        Children [
+                            (
+                                Text({check_icon})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        Text("启用代理")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                ]
+            ),
+            (
+                // 代理类型选择
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        Text("代理类型")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        Node {
                             flex_direction: FlexDirection::Row,
                             column_gap: Val::Px(10.0),
-                            ..default()
-                        },))
-                        .with_children(|btn_row| {
-                            for (proxy_type, label) in [
-                                (ProxyType::Http, "HTTP"),
-                                (ProxyType::Https, "HTTPS"),
-                                (ProxyType::Socks5, "SOCKS5"),
-                            ] {
-                                let is_selected = settings.proxy.proxy_type == proxy_type;
-                                btn_row
-                                    .spawn((
-                                        ProxyTypeButton { proxy_type },
-                                        Button,
-                                        Node {
-                                            padding: UiRect::new(
-                                                Val::Px(12.0),
-                                                Val::Px(12.0),
-                                                Val::Px(6.0),
-                                                Val::Px(6.0),
-                                            ),
-                                            border: UiRect::all(Val::Px(1.0)),
-                                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                                            ..default()
-                                        },
-                                        BackgroundColor(if is_selected {
-                                            AppColors::PRIMARY
-                                        } else {
-                                            Color::srgb(0.12, 0.12, 0.16)
-                                        }),
-                                        BorderColor::all(if is_selected {
-                                            AppColors::PRIMARY
-                                        } else {
-                                            AppColors::BORDER
-                                        }),
-                                    ))
-                                    .with_children(|btn| {
-                                        btn.spawn((
-                                            Text::new(label),
-                                            TextFont {
-                                                font: font.clone(),
-                                                font_size: 13.0,
-                                                ..default()
-                                            },
-                                            TextColor(AppColors::TEXT),
-                                        ));
-                                    });
-                            }
-                        });
-                });
-
-            // 代理地址和端口
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 主机地址
-                    row.spawn((Node {
-                        flex_grow: 1.0,
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
-                        ..default()
-                    },))
-                        .with_children(|host_col| {
-                            host_col.spawn((
-                                Text::new("主机地址"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                            host_col
-                                .spawn((
-                                    ProxyHostInput,
-                                    TextInput::new("127.0.0.1").with_value(&settings.proxy.host),
-                                    Button,
-                                    Interaction::default(),
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        height: Val::Px(32.0),
-                                        padding: UiRect::horizontal(Val::Px(10.0)),
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                                    BorderColor::all(AppColors::BORDER),
-                                    RelativeCursorPosition::default(),
-                                ))
-                                .with_children(|input| {
-                                    input.spawn((
-                                        TextInputDisplay,
-                                        Text::new(if settings.proxy.host.is_empty() {
-                                            "127.0.0.1".to_string()
-                                        } else {
-                                            settings.proxy.host.clone()
-                                        }),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 13.0,
-                                            ..default()
-                                        },
-                                        TextColor(if settings.proxy.host.is_empty() {
-                                            AppColors::TEXT_SECONDARY
-                                        } else {
-                                            AppColors::TEXT
-                                        }),
-                                    ));
-                                });
-                        });
-
-                    // 端口
-                    row.spawn((Node {
-                        width: Val::Px(100.0),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(4.0),
-                        ..default()
-                    },))
-                        .with_children(|port_col| {
-                            port_col.spawn((
-                                Text::new("端口"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                            port_col
-                                .spawn((
-                                    ProxyPortInput,
-                                    TextInput::new("7890")
-                                        .with_value(settings.proxy.port.to_string()),
-                                    Button,
-                                    Interaction::default(),
-                                    Node {
-                                        width: Val::Percent(100.0),
-                                        height: Val::Px(32.0),
-                                        padding: UiRect::horizontal(Val::Px(10.0)),
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                                    BorderColor::all(AppColors::BORDER),
-                                    RelativeCursorPosition::default(),
-                                ))
-                                .with_children(|input| {
-                                    let port_str = settings.proxy.port.to_string();
-                                    input.spawn((
-                                        TextInputDisplay,
-                                        Text::new(if port_str.is_empty() {
-                                            "7890".to_string()
-                                        } else {
-                                            port_str.clone()
-                                        }),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 13.0,
-                                            ..default()
-                                        },
-                                        TextColor(if port_str.is_empty() {
-                                            AppColors::TEXT_SECONDARY
-                                        } else {
-                                            AppColors::TEXT
-                                        }),
-                                    ));
-                                });
-                        });
-                });
-        });
+                        }
+                        Children [ {type_buttons} ]
+                    ),
+                ]
+            ),
+            (
+                // 代理地址和端口
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                }
+                Children [
+                    (
+                        // 主机地址
+                        Node {
+                            flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text("主机地址")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            ),
+                            (
+                                ProxyHostInput
+                                template_value(host_input)
+                                Button
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(32.0),
+                                    padding: UiRect::horizontal(Val::Px(10.0)),
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                                }
+                                BackgroundColor(AppColors::SURFACE_SUNKEN)
+                                template_value(BorderColor::all(AppColors::BORDER))
+                                RelativeCursorPosition
+                                Children [
+                                    (
+                                        TextInputDisplay
+                                        Text({host_text})
+                                        TextFont { font_size: FontSize::Px(13.0) }
+                                        TextColor(host_color)
+                                    )
+                                ]
+                            ),
+                        ]
+                    ),
+                    (
+                        // 端口
+                        Node {
+                            width: Val::Px(100.0),
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text("端口")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            ),
+                            (
+                                ProxyPortInput
+                                template_value(port_input)
+                                Button
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(32.0),
+                                    padding: UiRect::horizontal(Val::Px(10.0)),
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                                }
+                                BackgroundColor(AppColors::SURFACE_SUNKEN)
+                                template_value(BorderColor::all(AppColors::BORDER))
+                                RelativeCursorPosition
+                                Children [
+                                    (
+                                        TextInputDisplay
+                                        Text({port_text})
+                                        TextFont { font_size: FontSize::Px(13.0) }
+                                        TextColor(port_color)
+                                    )
+                                ]
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
+/// 单个代理类型按钮
+fn proxy_type_button(proxy_type: ProxyType, label: &str, is_selected: bool) -> impl Scene + use<> {
+    let label = label.to_string();
+    let style = ButtonStyle::segment(is_selected);
+    let bg = selectable_bg(is_selected);
+    let border = selectable_border(is_selected);
+
+    bsn! {
+        ProxyTypeButton { proxy_type: {proxy_type} }
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
+}
+
+// ==================== 分流设置 ====================
+
 /// 创建分流设置
-fn spawn_channel_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    settings: &picacg_config::AppSettings,
-) {
-    parent
-        .spawn((Node {
+fn channel_setting(settings: &AppSettings) -> impl Scene + use<> {
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
-            ..default()
-        },))
-        .with_children(|col| {
+        }
+        Children [
             // API 分流选择
-            spawn_channel_row(col, font, "API 分流", settings.channel.api_channel, true);
-
+            channel_row("API 分流", settings.channel.api_channel, true),
             // 自定义 API IP 输入行
-            spawn_custom_ip_row(
-                col,
-                font,
+            custom_ip_row(
+                CustomCdnApiIpRow,
+                CustomCdnApiIpInput,
                 "自定义 API IP",
                 &settings.channel.custom_cdn_api_ip,
-                true,
                 settings.channel.api_channel == ChannelType::CustomCdnIp,
-            );
-
+            ),
             // 图片分流选择
-            spawn_channel_row(col, font, "图片分流", settings.channel.image_channel, false);
-
+            channel_row("图片分流", settings.channel.image_channel, false),
             // 自定义图片 IP 输入行
-            spawn_custom_ip_row(
-                col,
-                font,
+            custom_ip_row(
+                CustomCdnImgIpRow,
+                CustomCdnImgIpInput,
                 "自定义图片 IP",
                 &settings.channel.custom_cdn_img_ip,
-                false,
                 settings.channel.image_channel == ChannelType::CustomCdnIp,
-            );
-        });
+            ),
+        ]
+    }
 }
 
 /// 创建分流按钮行
-fn spawn_channel_row(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
-    current: ChannelType,
-    is_api: bool,
-) {
-    parent
-        .spawn((Node {
+fn channel_row(label: &str, current: ChannelType, is_api: bool) -> impl Scene + use<> {
+    let label = label.to_string();
+
+    // API / 图片两套标记组件不同，分别构建按钮列表
+    let buttons: Box<dyn SceneList> = if is_api {
+        Box::new(
+            ChannelType::all()
+                .iter()
+                .map(|channel_type| {
+                    channel_button(
+                        ApiChannelButton {
+                            channel_type: *channel_type,
+                        },
+                        channel_type.display_name(),
+                        current == *channel_type,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    } else {
+        Box::new(
+            ChannelType::all()
+                .iter()
+                .map(|channel_type| {
+                    channel_button(
+                        ImageChannelButton {
+                            channel_type: *channel_type,
+                        },
+                        channel_type.display_name(),
+                        current == *channel_type,
+                    )
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    bsn! {
+        Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|type_col| {
-            type_col.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-
-            type_col
-                .spawn((Node {
+        }
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Node {
                     flex_direction: FlexDirection::Row,
                     column_gap: Val::Px(8.0),
                     flex_wrap: FlexWrap::Wrap,
                     row_gap: Val::Px(8.0),
-                    ..default()
-                },))
-                .with_children(|btn_row| {
-                    for channel_type in ChannelType::all() {
-                        let is_selected = current == *channel_type;
-                        let mut btn = btn_row.spawn((
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(10.0),
-                                    Val::Px(10.0),
-                                    Val::Px(6.0),
-                                    Val::Px(6.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(if is_selected {
-                                AppColors::PRIMARY
-                            } else {
-                                Color::srgb(0.12, 0.12, 0.16)
-                            }),
-                            BorderColor::all(if is_selected {
-                                AppColors::PRIMARY
-                            } else {
-                                AppColors::BORDER
-                            }),
-                        ));
-                        if is_api {
-                            btn.insert(ApiChannelButton {
-                                channel_type: *channel_type,
-                            });
-                        } else {
-                            btn.insert(ImageChannelButton {
-                                channel_type: *channel_type,
-                            });
-                        }
-                        btn.with_children(|btn| {
-                            btn.spawn((
-                                Text::new(channel_type.display_name()),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 12.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                    }
-                });
-        });
+                }
+                Children [ {buttons} ]
+            ),
+        ]
+    }
+}
+
+/// 单个分流按钮
+fn channel_button<M: Component + Default + Clone + Unpin>(
+    marker: M,
+    label: &str,
+    is_selected: bool,
+) -> impl Scene + use<M> {
+    let label = label.to_string();
+    let style = ButtonStyle::segment(is_selected);
+    let bg = selectable_bg(is_selected);
+    let border = selectable_border(is_selected);
+
+    bsn! {
+        template_value(marker)
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(10.0), Val::Px(10.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
 }
 
 /// 创建自定义 IP 输入行
-fn spawn_custom_ip_row(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
+///
+/// 行容器与输入框的标记组件按 API / 图片区分，故由调用方传入。
+fn custom_ip_row<R, I>(
+    row_marker: R,
+    input_marker: I,
     label: &str,
     value: &str,
-    is_api: bool,
     visible: bool,
-) {
-    let mut row = parent.spawn((Node {
-        flex_direction: FlexDirection::Row,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(10.0),
-        display: if visible {
-            Display::Flex
-        } else {
-            Display::None
-        },
-        ..default()
-    },));
-    if is_api {
-        row.insert(CustomCdnApiIpRow);
+) -> impl Scene + use<R, I>
+where
+    R: Component + Default + Clone + Unpin,
+    I: Component + Default + Clone + Unpin,
+{
+    let label = label.to_string();
+    let row_display = if visible {
+        Display::Flex
     } else {
-        row.insert(CustomCdnImgIpRow);
-    }
-    row.with_children(|row| {
-        row.spawn((
-            Text::new(label),
-            TextFont {
-                font: font.clone(),
-                font_size: 14.0,
-                ..default()
-            },
-            TextColor(AppColors::TEXT),
-        ));
+        Display::None
+    };
 
-        let placeholder = "输入 IP 地址，例如 104.21.91.145";
-        let display_text = if value.is_empty() {
-            placeholder.to_string()
-        } else {
-            value.to_string()
-        };
-        let text_color = if value.is_empty() {
-            Color::srgb(0.4, 0.4, 0.5)
-        } else {
-            AppColors::TEXT
-        };
+    let placeholder = "输入 IP 地址，例如 104.21.91.145";
+    let text_input = TextInput::new(placeholder).with_value(value);
+    let display_text = if value.is_empty() {
+        placeholder.to_string()
+    } else {
+        value.to_string()
+    };
+    let text_color = if value.is_empty() {
+        Color::srgb(0.4, 0.4, 0.5)
+    } else {
+        AppColors::TEXT
+    };
 
-        let mut input = row.spawn((
-            TextInput::new(placeholder).with_value(value),
-            Button,
-            Interaction::default(),
-            Node {
-                flex_grow: 1.0,
-                height: Val::Px(32.0),
-                padding: UiRect::horizontal(Val::Px(10.0)),
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-            BorderColor::all(AppColors::BORDER),
-            RelativeCursorPosition::default(),
-        ));
-        if is_api {
-            input.insert(CustomCdnApiIpInput);
-        } else {
-            input.insert(CustomCdnImgIpInput);
+    bsn! {
+        template_value(row_marker)
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            display: {row_display},
         }
-        input.with_children(|input| {
-            input.spawn((
-                TextInputDisplay,
-                Text::new(display_text),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(text_color),
-            ));
-        });
-    });
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                template_value(input_marker)
+                template_value(text_input)
+                Button
+                Node {
+                    flex_grow: 1.0,
+                    height: Val::Px(32.0),
+                    padding: UiRect::horizontal(Val::Px(10.0)),
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                }
+                BackgroundColor(AppColors::SURFACE_SUNKEN)
+                template_value(BorderColor::all(AppColors::BORDER))
+                RelativeCursorPosition
+                Children [
+                    (
+                        TextInputDisplay
+                        Text({display_text})
+                        TextFont { font_size: FontSize::Px(13.0) }
+                        TextColor(text_color)
+                    )
+                ]
+            ),
+        ]
+    }
 }
 
+// ==================== 主题 / 语言 / 关闭行为 / 日志 ====================
+
 /// 创建主题设置
-fn spawn_theme_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_mode: ThemeMode,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("主题模式"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+fn theme_setting(current_mode: ThemeMode) -> impl Scene + use<> {
+    let buttons: Vec<_> = ThemeMode::all()
+        .iter()
+        .map(|mode| {
+            // 图标
+            let icon = match mode {
+                ThemeMode::Dark => "🌙",
+                ThemeMode::Light => "☀",
+                ThemeMode::Auto => "🔄",
+            };
+            icon_option_button(
+                ThemeModeButton { mode: *mode },
+                icon,
+                mode.display_name(),
+                current_mode == *mode,
+            )
+        })
+        .collect();
 
-            col.spawn((
-                Text::new("切换应用的颜色主题，修改后需重启应用生效"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 主题模式按钮组
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|btn_row| {
-                    for mode in ThemeMode::all() {
-                        let is_selected = current_mode == *mode;
-                        btn_row
-                            .spawn((
-                                ThemeModeButton { mode: *mode },
-                                Button,
-                                Interaction::default(),
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(16.0),
-                                        Val::Px(16.0),
-                                        Val::Px(8.0),
-                                        Val::Px(8.0),
-                                    ),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    column_gap: Val::Px(6.0),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    Color::srgb(0.12, 0.12, 0.16)
-                                }),
-                                BorderColor::all(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    AppColors::BORDER
-                                }),
-                            ))
-                            .with_children(|btn| {
-                                // 图标
-                                let icon = match mode {
-                                    ThemeMode::Dark => "🌙",
-                                    ThemeMode::Light => "☀",
-                                    ThemeMode::Auto => "🔄",
-                                };
-                                btn.spawn((
-                                    Text::new(icon),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                                btn.spawn((
-                                    Text::new(mode.display_name()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    }
-                });
-        });
+    option_group(
+        "主题模式",
+        "切换应用的颜色主题，修改后需重启应用生效",
+        buttons,
+    )
 }
 
 /// 创建语言设置
-fn spawn_language_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_language: Language,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("界面语言"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+fn language_setting(current_language: Language) -> impl Scene + use<> {
+    let buttons: Vec<_> = Language::all()
+        .iter()
+        .map(|lang| {
+            // 语言标识图标
+            let icon = match lang {
+                Language::ZhCN => "简",
+                Language::ZhTW => "繁",
+                Language::En => "En",
+            };
+            icon_option_button(
+                LanguageButton { language: *lang },
+                icon,
+                lang.display_name(),
+                current_language == *lang,
+            )
+        })
+        .collect();
 
-            col.spawn((
-                Text::new("切换界面显示语言，修改后需重启应用生效"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 语言按钮组
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|btn_row| {
-                    for lang in Language::all() {
-                        let is_selected = current_language == *lang;
-                        btn_row
-                            .spawn((
-                                LanguageButton { language: *lang },
-                                Button,
-                                Interaction::default(),
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(16.0),
-                                        Val::Px(16.0),
-                                        Val::Px(8.0),
-                                        Val::Px(8.0),
-                                    ),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    column_gap: Val::Px(6.0),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    Color::srgb(0.12, 0.12, 0.16)
-                                }),
-                                BorderColor::all(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    AppColors::BORDER
-                                }),
-                            ))
-                            .with_children(|btn| {
-                                // 语言标识图标
-                                let icon = match lang {
-                                    Language::ZhCN => "简",
-                                    Language::ZhTW => "繁",
-                                    Language::En => "En",
-                                };
-                                btn.spawn((
-                                    Text::new(icon),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                                btn.spawn((
-                                    Text::new(lang.display_name()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    }
-                });
-        });
+    option_group(
+        "界面语言",
+        "切换界面显示语言，修改后需重启应用生效",
+        buttons,
+    )
 }
 
 /// 创建关闭行为设置
-fn spawn_close_behavior_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_behavior: CloseBehavior,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("关闭按钮行为"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
+fn close_behavior_setting(current_behavior: CloseBehavior) -> impl Scene + use<> {
+    let buttons: Vec<_> = CloseBehavior::all()
+        .iter()
+        .map(|behavior| {
+            let icon = match behavior {
+                CloseBehavior::Close => "✕",
+                CloseBehavior::Minimize => "▼",
+                CloseBehavior::Ask => "？",
+            };
+            icon_option_button(
+                CloseBehaviorButton {
+                    behavior: *behavior,
                 },
-                TextColor(AppColors::TEXT),
-            ));
+                icon,
+                behavior.display_name(),
+                current_behavior == *behavior,
+            )
+        })
+        .collect();
 
-            col.spawn((
-                Text::new("点击窗口关闭按钮时的行为"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 关闭行为按钮组
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|btn_row| {
-                    for behavior in CloseBehavior::all() {
-                        let is_selected = current_behavior == *behavior;
-                        btn_row
-                            .spawn((
-                                CloseBehaviorButton {
-                                    behavior: *behavior,
-                                },
-                                Button,
-                                Interaction::default(),
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(16.0),
-                                        Val::Px(16.0),
-                                        Val::Px(8.0),
-                                        Val::Px(8.0),
-                                    ),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    column_gap: Val::Px(6.0),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    Color::srgb(0.12, 0.12, 0.16)
-                                }),
-                                BorderColor::all(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    AppColors::BORDER
-                                }),
-                            ))
-                            .with_children(|btn| {
-                                let icon = match behavior {
-                                    CloseBehavior::Close => "✕",
-                                    CloseBehavior::Minimize => "▼",
-                                    CloseBehavior::Ask => "？",
-                                };
-                                btn.spawn((
-                                    Text::new(icon),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                                btn.spawn((
-                                    Text::new(behavior.display_name()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    }
-                });
-        });
+    option_group("关闭按钮行为", "点击窗口关闭按钮时的行为", buttons)
 }
 
 /// 创建日志等级设置
-fn spawn_log_level_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_level: LogLevel,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("日志等级"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+fn log_level_setting(current_level: LogLevel) -> impl Scene + use<> {
+    let buttons: Vec<_> = [
+        LogLevel::Trace,
+        LogLevel::Debug,
+        LogLevel::Info,
+        LogLevel::Warn,
+        LogLevel::Error,
+    ]
+    .into_iter()
+    .map(|level| log_level_button(level, current_level == level))
+    .collect();
 
-            col.spawn((
-                Text::new("设置日志输出的详细程度，重启后生效"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
+    option_group("日志等级", "设置日志输出的详细程度，重启后生效", buttons)
+}
 
-            // 日志等级按钮组
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|btn_row| {
-                    for level in [
-                        LogLevel::Trace,
-                        LogLevel::Debug,
-                        LogLevel::Info,
-                        LogLevel::Warn,
-                        LogLevel::Error,
-                    ] {
-                        let is_selected = current_level == level;
-                        btn_row
-                            .spawn((
-                                LogLevelButton { level },
-                                Button,
-                                Interaction::default(),
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(12.0),
-                                        Val::Px(12.0),
-                                        Val::Px(6.0),
-                                        Val::Px(6.0),
-                                    ),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    Color::srgb(0.12, 0.12, 0.16)
-                                }),
-                                BorderColor::all(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    AppColors::BORDER
-                                }),
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new(level.display_name()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    }
-                });
-        });
+/// 单个日志等级按钮
+fn log_level_button(level: LogLevel, is_selected: bool) -> impl Scene + use<> {
+    let label = level.display_name().to_string();
+    let style = ButtonStyle::segment(is_selected);
+    let bg = selectable_bg(is_selected);
+    let border = selectable_border(is_selected);
+
+    bsn! {
+        LogLevelButton { level: {level} }
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
 }
 
 // ==================== 高级设置 UI 构建 ====================
@@ -2977,474 +2373,192 @@ const UI_SCALE_OPTIONS: &[(f32, &str)] = &[
 ];
 
 /// 创建界面缩放设置
-fn spawn_ui_scale_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_scale: f32,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(8.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("界面缩放"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+fn ui_scale_setting(current_scale: f32) -> impl Scene + use<> {
+    let buttons: Vec<_> = UI_SCALE_OPTIONS
+        .iter()
+        .map(|&(scale, label)| {
+            // 浮点比较：差值小于 0.01 视为相同
+            ui_scale_button(scale, label, (current_scale - scale).abs() < 0.01)
+        })
+        .collect();
 
-            col.spawn((
-                Text::new("调整界面缩放比例，修改后需重启应用生效"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
+    option_group(
+        "界面缩放",
+        "调整界面缩放比例，修改后需重启应用生效",
+        buttons,
+    )
+}
 
-            // 缩放选项按钮组
-            col.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(8.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            },))
-                .with_children(|btn_row| {
-                    for &(scale, label) in UI_SCALE_OPTIONS {
-                        // 浮点比较：差值小于 0.01 视为相同
-                        let is_selected = (current_scale - scale).abs() < 0.01;
-                        btn_row
-                            .spawn((
-                                UiScaleButton { scale },
-                                Button,
-                                Interaction::default(),
-                                Node {
-                                    padding: UiRect::new(
-                                        Val::Px(16.0),
-                                        Val::Px(16.0),
-                                        Val::Px(8.0),
-                                        Val::Px(8.0),
-                                    ),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    Color::srgb(0.12, 0.12, 0.16)
-                                }),
-                                BorderColor::all(if is_selected {
-                                    AppColors::PRIMARY
-                                } else {
-                                    AppColors::BORDER
-                                }),
-                            ))
-                            .with_children(|btn| {
-                                btn.spawn((
-                                    Text::new(label),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 13.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            });
-                    }
-                });
-        });
+/// 单个界面缩放按钮
+fn ui_scale_button(scale: f32, label: &str, is_selected: bool) -> impl Scene + use<> {
+    let label = label.to_string();
+    let style = ButtonStyle::segment(is_selected);
+    let bg = selectable_bg(is_selected);
+    let border = selectable_border(is_selected);
+
+    bsn! {
+        UiScaleButton { scale: {scale} }
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            align_items: AlignItems::Center,
+        }
+        BackgroundColor(bg)
+        template_value(border)
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
 }
 
 /// 创建自定义字体路径设置
-fn spawn_custom_font_path_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    current_path: &str,
-) {
-    parent
-        .spawn((Node {
+fn custom_font_path_setting(current_path: &str) -> impl Scene + use<> {
+    // 输入框（TextInput 通用组件）
+    let text_input = TextInput::new("（使用内置字体）").with_value(current_path);
+    let display_text = if current_path.is_empty() {
+        "（使用内置字体）".to_string()
+    } else {
+        current_path.to_string()
+    };
+    let display_color = if current_path.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(8.0),
             margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|col| {
-            col.spawn((
-                Text::new("自定义字体"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-
-            col.spawn((
-                Text::new(
-                    "指定自定义字体文件路径（.ttf/.otf），留空使用内置字体，修改后需重启生效",
-                ),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 输入框 + 文件选择按钮 行
-            col.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|input_row| {
-                    // 输入框（TextInput 通用组件）
-                    let display_text = if current_path.is_empty() {
-                        "（使用内置字体）".to_string()
-                    } else {
-                        current_path.to_string()
-                    };
-                    input_row
-                        .spawn((
-                            CustomFontPathInput,
-                            TextInput::new("（使用内置字体）").with_value(current_path),
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                flex_grow: 1.0,
-                                height: Val::Px(36.0),
-                                padding: UiRect::horizontal(Val::Px(12.0)),
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                            BorderColor::all(AppColors::BORDER),
-                            RelativeCursorPosition::default(),
-                        ))
-                        .with_children(|input| {
-                            input.spawn((
-                                TextInputDisplay,
-                                Text::new(display_text),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(if current_path.is_empty() {
-                                    AppColors::TEXT_SECONDARY
-                                } else {
-                                    AppColors::TEXT
-                                }),
-                            ));
-                        });
-
-                    // 文件选择按钮
-                    input_row
-                        .spawn((
-                            CustomFontPathPickerButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                width: Val::Px(36.0),
-                                height: Val::Px(36.0),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(AppColors::SECONDARY),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(ICON_FOLDER_OPEN),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                });
-        });
+        }
+        Children [
+            (
+                Text("自定义字体")
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text("指定自定义字体文件路径（.ttf/.otf），留空使用内置字体，修改后需重启生效")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 输入框 + 文件选择按钮 行
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        CustomFontPathInput
+                        template_value(text_input)
+                        Button
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Px(36.0),
+                            padding: UiRect::horizontal(Val::Px(12.0)),
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SURFACE_SUNKEN)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        RelativeCursorPosition
+                        Children [
+                            (
+                                TextInputDisplay
+                                Text({display_text})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(display_color)
+                            )
+                        ]
+                    ),
+                    (
+                        // 文件选择按钮
+                        CustomFontPathPickerButton
+                        Button
+                        template_value(ButtonStyle::secondary())
+                        Node {
+                            width: Val::Px(36.0),
+                            height: Val::Px(36.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SECONDARY)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text(ICON_FOLDER_OPEN)
+                                TextFont { font_size: FontSize::Px(16.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
 /// 创建 SNI 伪装设置
-fn spawn_sni_pretend_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    is_enabled: bool,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("SNI 伪装"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("禁用 TLS SNI 扩展以绕过 SNI 封锁，可能导致部分服务不可用"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧勾选框
-            row.spawn((
-                SniPretendCheckbox,
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(24.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    Color::srgb(0.12, 0.12, 0.16)
-                }),
-                BorderColor::all(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                }),
-            ))
-            .with_children(|checkbox| {
-                checkbox.spawn((
-                    Text::new(if is_enabled { ICON_CHECK } else { "" }),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+fn sni_pretend_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        SniPretendCheckbox,
+        "SNI 伪装",
+        "禁用 TLS SNI 扩展以绕过 SNI 封锁，可能导致部分服务不可用",
+        is_enabled,
+    )
 }
 
 /// 创建 IPv6 优先设置
-fn spawn_prefer_ipv6_setting(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    is_enabled: bool,
-) {
-    parent
-        .spawn((Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            margin: UiRect::top(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|row| {
-            // 左侧标签和说明
-            row.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|left| {
-                    left.spawn((
-                        Text::new("IPv6 优先"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                    left.spawn((
-                        Text::new("绑定本地 IPv6 地址发起连接，需要网络环境支持 IPv6"),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧勾选框
-            row.spawn((
-                PreferIpv6Checkbox,
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Px(24.0),
-                    height: Val::Px(24.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    Color::srgb(0.12, 0.12, 0.16)
-                }),
-                BorderColor::all(if is_enabled {
-                    AppColors::PRIMARY
-                } else {
-                    AppColors::BORDER
-                }),
-            ))
-            .with_children(|checkbox| {
-                checkbox.spawn((
-                    Text::new(if is_enabled { ICON_CHECK } else { "" }),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+fn prefer_ipv6_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        PreferIpv6Checkbox,
+        "IPv6 优先",
+        "绑定本地 IPv6 地址发起连接，需要网络环境支持 IPv6",
+        is_enabled,
+    )
 }
 
 /// 创建底部状态栏（显示自动保存提示）
-fn spawn_status_bar(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            SettingsStatusBar,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(40.0),
-                padding: UiRect::horizontal(Val::Px(20.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::top(Val::Px(1.0)),
-                display: Display::None, // 初始隐藏
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                SettingsStatusText,
-                Text::new(" "),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.4, 0.8, 0.5)), // 绿色成功提示
-            ));
-        });
-}
-
-/// 创建设置页面滚动条
-///
-/// 布局结构（与 categories.rs 一致）：
-/// ScrollbarContainer (Absolute, right=0)
-///   ├── ScrollbarTrack (Button, fills 100%, ZIndex=0)
-///   └── ScrollbarThumb (Button, Absolute, ZIndex=1)
-///
-/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
-fn spawn_settings_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道（与滑块同级，ZIndex 较低）
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(TRACK_COLOR),
-                ZIndex(0),
-                RelativeCursorPosition::default(),
-            ));
-
-            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
-            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(THUMB_MIN_HEIGHT),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(THUMB_COLOR),
-                ZIndex(1),
-            ));
-        });
+fn status_bar() -> impl Scene {
+    bsn! {
+        SettingsStatusBar
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(40.0),
+            padding: UiRect::horizontal(Val::Px(20.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::top(Val::Px(1.0)),
+            // 初始隐藏
+            display: Display::None,
+        }
+        BackgroundColor(AppColors::HEADER_BG)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                SettingsStatusText
+                Text(" ")
+                TextFont { font_size: FontSize::Px(13.0) }
+                // 绿色成功提示
+                TextColor(Color::srgb(0.4, 0.8, 0.5))
+            )
+        ]
+    }
 }
 
 /// 清理设置页面（隐藏而非销毁，保留所有资源状态）
@@ -3454,53 +2568,16 @@ pub fn cleanup_settings_ui(mut query: Query<&mut Node, With<SettingsRoot>>) {
     }
 }
 
-/// 下载路径输入框交互
-pub fn download_path_input_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-        ),
-        (Changed<Interaction>, With<DownloadPathInput>),
-    >,
-    mut input_state: ResMut<DownloadPathInputState>,
-) {
-    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                input_state.is_focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                if !input.focused {
-                    *border_color = BorderColor::all(Color::srgb(0.4, 0.4, 0.5));
-                }
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                if !input.focused {
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 下载路径动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
+/// 下载路径动作键处理（Escape/Enter 失焦），点击聚焦与编辑由通用 TextInput
+/// 系统处理
 pub fn download_path_keyboard_input(
+    mut input_focus: ResMut<InputFocus>,
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut input_query: Query<&mut TextInput, With<DownloadPathInput>>,
-    mut input_state: ResMut<DownloadPathInputState>,
+    input_query: Query<(), With<DownloadPathInput>>,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    let has_focus = input_query.iter().any(|i| i.focused);
-    if !has_focus {
+    if !input_focus.get().is_some_and(|e| input_query.contains(e)) {
         return;
     }
 
@@ -3510,10 +2587,7 @@ pub fn download_path_keyboard_input(
         }
 
         if matches!(&event.logical_key, Key::Escape | Key::Enter) {
-            for mut input in input_query.iter_mut() {
-                input.focused = false;
-                input_state.is_focused = false;
-            }
+            input_focus.clear();
         }
     }
 }
@@ -3532,34 +2606,23 @@ pub fn sync_download_path_value(
 
 /// 下载路径目录选择按钮交互（异步，不阻塞主线程）
 pub fn download_path_picker_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<DownloadPathPickerButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<DownloadPathPickerButton>)>,
     mut picker: ResMut<DownloadPathPickerResult>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                // 防止重复打开
-                if picker.receiver.is_none() {
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    picker.receiver = Some(std::sync::Mutex::new(rx));
-                    std::thread::spawn(move || {
-                        let path = rfd::FileDialog::new()
-                            .pick_folder()
-                            .map(|p| p.to_string_lossy().to_string());
-                        let _ = tx.send(path);
-                    });
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::SECONDARY_HOVER);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SECONDARY);
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 防止重复打开
+        if picker.receiver.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            picker.receiver = Some(std::sync::Mutex::new(rx));
+            std::thread::spawn(move || {
+                let path = rfd::FileDialog::new()
+                    .pick_folder()
+                    .map(|p| p.to_string_lossy().to_string());
+                let _ = tx.send(path);
+            });
         }
     }
 }
@@ -3585,49 +2648,36 @@ pub fn handle_download_path_picker_result(
     if let Some(path_str) = result {
         for mut input in input_query.iter_mut() {
             input.set_value(path_str.clone());
-            input.focused = false;
         }
         input_state.value = path_str;
-        input_state.is_focused = false;
     }
 }
 
 /// 清除缓存按钮交互
 pub fn clear_cache_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<ClearCacheButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ClearCacheButton>)>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.4, 0.1, 0.1));
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
 
-                // 清除缓存目录
-                let cache_path = std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                    .unwrap_or_else(|| std::path::PathBuf::from("."))
-                    .join("cache")
-                    .join("images");
+        // 清除缓存目录
+        let cache_path = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("cache")
+            .join("images");
 
-                if cache_path.exists() {
-                    if let Err(e) = std::fs::remove_dir_all(&cache_path) {
-                        tracing::error!("清除缓存失败: {}", e);
-                    } else {
-                        tracing::info!("缓存已清除: {:?}", cache_path);
-                    }
-                } else {
-                    tracing::info!("缓存目录不存在");
-                }
+        if cache_path.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&cache_path) {
+                tracing::error!("清除缓存失败: {}", e);
+            } else {
+                tracing::info!("缓存已清除: {:?}", cache_path);
             }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.7, 0.25, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.6, 0.2, 0.2));
-            }
+        } else {
+            tracing::info!("缓存目录不存在");
         }
     }
 }
@@ -3777,19 +2827,26 @@ pub fn update_settings_save_status(
 
     save_status.timer.tick(time.delta());
 
-    // 更新文本内容和颜色
+    // 更新文本内容和颜色（比较后写：toast 可见的 2 秒内不再每帧克隆/标脏）
     for (mut text, mut color) in text_query.iter_mut() {
-        **text = save_status.message.clone();
-        *color = if save_status.is_error {
-            TextColor(Color::srgb(0.9, 0.3, 0.3)) // 红色错误提示
+        if **text != save_status.message {
+            **text = save_status.message.clone();
+        }
+        let target = if save_status.is_error {
+            TextColor(AppColors::ERROR)
         } else {
             TextColor(Color::srgb(0.4, 0.8, 0.5)) // 绿色成功提示
         };
+        if color.0 != target.0 {
+            *color = target;
+        }
     }
 
     // 显示状态栏
     for mut node in bar_query.iter_mut() {
-        node.display = Display::Flex;
+        if node.display != Display::Flex {
+            node.display = Display::Flex;
+        }
     }
 
     if save_status.timer.just_finished() {
@@ -3800,289 +2857,58 @@ pub fn update_settings_save_status(
     }
 }
 
-/// 处理设置页面滚动
-pub fn handle_settings_scroll(
-    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<SettingsScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 限制设置页面滚动范围（防止越界）
-pub fn clamp_settings_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<SettingsScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动范围限制
-}
-
-/// 更新设置页面内容尺寸
-pub fn update_settings_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &Node, &mut ContentSizeInfo, &Children),
-        With<SettingsScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, node, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        // 加上容器的上下 padding（ComputedNode::size 包含 padding，
-        // 但子元素高度之和不含容器 padding，需要补偿）
-        let padding_top = match node.padding.top {
-            Val::Px(px) => px,
-            _ => 0.0,
-        };
-        let padding_bottom = match node.padding.bottom {
-            Val::Px(px) => px,
-            _ => 0.0,
-        };
-        content_height += padding_top + padding_bottom;
-
-        // 加上 row_gap（子元素间距）
-        let child_count = children.len();
-        if child_count > 1 {
-            let gap = match node.row_gap {
-                Val::Px(px) => px,
-                _ => 0.0,
-            };
-            content_height += gap * (child_count - 1) as f32;
-        }
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
 // ==================== 代理设置交互系统 ====================
 
 /// 代理启用复选框交互
 pub fn proxy_enabled_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<ProxyEnabledCheckbox>),
     >,
     mut proxy_state: ResMut<ProxySettingsInputState>,
     mut text_query: Query<&mut Text>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                proxy_state.enabled = !proxy_state.enabled;
-
-                // 更新显示
-                if proxy_state.enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                // 更新勾选符号
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if proxy_state.enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !proxy_state.enabled {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !proxy_state.enabled {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        proxy_state.enabled = !proxy_state.enabled;
+        apply_selected(&mut style, &mut border_color, proxy_state.enabled);
+        set_check_icon(children, &mut text_query, proxy_state.enabled);
     }
 }
 
-/// 代理类型按钮交互
+/// 代理类型按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn proxy_type_button_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &ProxyTypeButton,
-            &mut BackgroundColor,
-            &mut BorderColor,
-        ),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &ProxyTypeButton), Changed<Interaction>>,
     mut proxy_state: ResMut<ProxySettingsInputState>,
-    mut all_buttons_query: Query<
-        (&ProxyTypeButton, &mut BackgroundColor, &mut BorderColor),
-        Without<Interaction>,
-    >,
+    mut all_buttons_query: Query<(&ProxyTypeButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                proxy_state.proxy_type = btn.proxy_type;
+    let Some(picked) = interaction_query
+        .iter()
+        .find(|(interaction, _)| **interaction == Interaction::Pressed)
+        .map(|(_, btn)| btn.proxy_type)
+    else {
+        return;
+    };
 
-                // 更新当前按钮
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
+    proxy_state.proxy_type = picked;
 
-                // 更新其他按钮
-                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
-                    if other_btn.proxy_type != btn.proxy_type {
-                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                        *other_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if proxy_state.proxy_type != btn.proxy_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if proxy_state.proxy_type != btn.proxy_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons_query {
+        apply_selected(&mut style, &mut border, btn.proxy_type == picked);
     }
 }
 
-/// 代理主机输入框交互（设置 TextInput.focused）
-pub fn proxy_host_input_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-        ),
-        (Changed<Interaction>, With<ProxyHostInput>),
-    >,
-    mut port_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<ProxyPortInput>, Without<ProxyHostInput>),
-    >,
-) {
-    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-                // 失焦端口输入框
-                for (mut port_input, mut port_border) in port_query.iter_mut() {
-                    if port_input.focused {
-                        port_input.focused = false;
-                        *port_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                }
-            }
-            Interaction::None => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 代理端口输入框交互（设置 TextInput.focused）
-pub fn proxy_port_input_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-        ),
-        (Changed<Interaction>, With<ProxyPortInput>),
-    >,
-    mut host_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<ProxyHostInput>, Without<ProxyPortInput>),
-    >,
-) {
-    for (interaction, mut bg_color, mut border_color, mut input) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-                // 失焦主机输入框
-                for (mut host_input, mut host_border) in host_query.iter_mut() {
-                    if host_input.focused {
-                        host_input.focused = false;
-                        *host_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                }
-            }
-            Interaction::None => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 代理输入动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
+/// 代理输入动作键处理（Escape/Enter 失焦），点击聚焦与编辑由通用 TextInput
+/// 系统处理
 pub fn proxy_input_keyboard(
+    mut input_focus: ResMut<InputFocus>,
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut host_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<ProxyHostInput>, Without<ProxyPortInput>),
-    >,
-    mut port_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<ProxyPortInput>, Without<ProxyHostInput>),
-    >,
+    input_query: Query<(), Or<(With<ProxyHostInput>, With<ProxyPortInput>)>>,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    let has_focus =
-        host_query.iter().any(|(i, _)| i.focused) || port_query.iter().any(|(i, _)| i.focused);
-    if !has_focus {
+    if !input_focus.get().is_some_and(|e| input_query.contains(e)) {
         return;
     }
 
@@ -4092,18 +2918,7 @@ pub fn proxy_input_keyboard(
         }
 
         if matches!(&event.logical_key, Key::Escape | Key::Enter) {
-            for (mut input, mut border) in host_query.iter_mut() {
-                if input.focused {
-                    input.focused = false;
-                    *border = BorderColor::all(AppColors::BORDER);
-                }
-            }
-            for (mut input, mut border) in port_query.iter_mut() {
-                if input.focused {
-                    input.focused = false;
-                    *border = BorderColor::all(AppColors::BORDER);
-                }
-            }
+            input_focus.clear();
         }
     }
 }
@@ -4142,211 +2957,120 @@ pub fn sync_proxy_input_values(
 
 // ==================== 主题设置交互系统 ====================
 
-/// 主题模式按钮交互
+/// 主题模式按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn theme_mode_button_interaction(
-    mut buttons_query: Query<(
-        &Interaction,
-        &ThemeModeButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    interaction_query: Query<(&Interaction, &ThemeModeButton), Changed<Interaction>>,
     mut theme_state: ResMut<ThemeModeState>,
     mut save_status: ResMut<SettingsSaveStatus>,
+    mut all_buttons: Query<(&ThemeModeButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    // 先检查是否有按钮被按下，收集新选择的模式
-    let mut new_mode: Option<ThemeMode> = None;
-    for (interaction, btn, _, _) in buttons_query.iter() {
-        if *interaction == Interaction::Pressed && theme_state.mode != btn.mode {
-            new_mode = Some(btn.mode);
-            break;
-        }
-    }
+    // 只在选到不同模式时才动作
+    let Some(mode) = interaction_query
+        .iter()
+        .find(|(interaction, btn)| {
+            **interaction == Interaction::Pressed && theme_state.mode != btn.mode
+        })
+        .map(|(_, btn)| btn.mode)
+    else {
+        return;
+    };
 
-    // 如果有新选择，更新状态并提示重启
-    if let Some(mode) = new_mode {
-        tracing::info!("主题模式已选择: {:?}", mode);
-        theme_state.mode = mode;
+    tracing::info!("主题模式已选择: {:?}", mode);
+    theme_state.mode = mode;
 
-        // 显示重启提示
-        save_status.visible = true;
-        save_status.message = format!("主题已切换为「{}」，重启应用后生效", mode.display_name());
-        save_status.is_error = false;
-        save_status.timer.reset();
-    }
+    // 显示重启提示
+    save_status.visible = true;
+    save_status.message = format!("主题已切换为「{}」，重启应用后生效", mode.display_name());
+    save_status.is_error = false;
+    save_status.timer.reset();
 
-    // 更新所有按钮的外观
-    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
-        let is_selected = theme_state.mode == btn.mode;
-
-        if is_selected {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-            *border_color = BorderColor::all(AppColors::PRIMARY);
-        } else {
-            match *interaction {
-                Interaction::Hovered => {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-                _ => {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons {
+        apply_selected(&mut style, &mut border, btn.mode == mode);
     }
 }
 
 // ==================== 语言设置交互系统 ====================
 
-/// 语言选择按钮交互
+/// 语言选择按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn language_button_interaction(
-    mut buttons_query: Query<(
-        &Interaction,
-        &LanguageButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    interaction_query: Query<(&Interaction, &LanguageButton), Changed<Interaction>>,
     mut language_state: ResMut<LanguageState>,
     mut save_status: ResMut<SettingsSaveStatus>,
+    mut all_buttons: Query<(&LanguageButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    // 先检查是否有按钮被按下，收集新选择的语言
-    let mut new_language: Option<Language> = None;
-    for (interaction, btn, _, _) in buttons_query.iter() {
-        if *interaction == Interaction::Pressed && language_state.language != btn.language {
-            new_language = Some(btn.language);
-            break;
-        }
-    }
+    let Some(lang) = interaction_query
+        .iter()
+        .find(|(interaction, btn)| {
+            **interaction == Interaction::Pressed && language_state.language != btn.language
+        })
+        .map(|(_, btn)| btn.language)
+    else {
+        return;
+    };
 
-    // 如果有新选择，更新状态并提示重启
-    if let Some(lang) = new_language {
-        tracing::info!("界面语言已选择: {:?}", lang);
-        language_state.language = lang;
+    tracing::info!("界面语言已选择: {:?}", lang);
+    language_state.language = lang;
 
-        // 显示重启提示
-        save_status.visible = true;
-        save_status.message = format!("语言已切换为「{}」，重启应用后生效", lang.display_name());
-        save_status.is_error = false;
-        save_status.timer.reset();
-    }
+    // 显示重启提示
+    save_status.visible = true;
+    save_status.message = format!("语言已切换为「{}」，重启应用后生效", lang.display_name());
+    save_status.is_error = false;
+    save_status.timer.reset();
 
-    // 更新所有按钮的外观
-    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
-        let is_selected = language_state.language == btn.language;
-
-        if is_selected {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-            *border_color = BorderColor::all(AppColors::PRIMARY);
-        } else {
-            match *interaction {
-                Interaction::Hovered => {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-                _ => {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons {
+        apply_selected(&mut style, &mut border, btn.language == lang);
     }
 }
 
 // ==================== 关闭行为设置交互系统 ====================
 
-/// 关闭行为按钮交互
+/// 关闭行为按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn close_behavior_button_interaction(
-    mut buttons_query: Query<(
-        &Interaction,
-        &CloseBehaviorButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    interaction_query: Query<(&Interaction, &CloseBehaviorButton), Changed<Interaction>>,
     mut theme_state: ResMut<ThemeModeState>,
+    mut all_buttons: Query<(&CloseBehaviorButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    // 先检查是否有按钮被按下，收集新选择的行为
-    let mut new_behavior: Option<CloseBehavior> = None;
-    for (interaction, btn, _, _) in buttons_query.iter() {
-        if *interaction == Interaction::Pressed && theme_state.close_behavior != btn.behavior {
-            new_behavior = Some(btn.behavior);
-            break;
-        }
-    }
+    let Some(behavior) = interaction_query
+        .iter()
+        .find(|(interaction, btn)| {
+            **interaction == Interaction::Pressed && theme_state.close_behavior != btn.behavior
+        })
+        .map(|(_, btn)| btn.behavior)
+    else {
+        return;
+    };
 
-    // 如果有新选择，更新状态
-    if let Some(behavior) = new_behavior {
-        tracing::info!("关闭行为已选择: {:?}", behavior);
-        theme_state.close_behavior = behavior;
-    }
+    tracing::info!("关闭行为已选择: {:?}", behavior);
+    theme_state.close_behavior = behavior;
 
-    // 更新所有按钮的外观
-    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
-        let is_selected = theme_state.close_behavior == btn.behavior;
-
-        if is_selected {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-            *border_color = BorderColor::all(AppColors::PRIMARY);
-        } else {
-            match *interaction {
-                Interaction::Hovered => {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-                _ => {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons {
+        apply_selected(&mut style, &mut border, btn.behavior == behavior);
     }
 }
 
 // ==================== 日志等级交互系统 ====================
 
-/// 日志等级按钮交互
+/// 日志等级按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn log_level_button_interaction(
-    mut buttons_query: Query<(
-        &Interaction,
-        &LogLevelButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    interaction_query: Query<(&Interaction, &LogLevelButton), Changed<Interaction>>,
     mut log_state: ResMut<LogLevelInputState>,
+    mut all_buttons: Query<(&LogLevelButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    // 先检查是否有按钮被按下，收集新选择的等级
-    let mut new_level: Option<LogLevel> = None;
-    for (interaction, btn, _, _) in buttons_query.iter() {
-        if *interaction == Interaction::Pressed && log_state.level != btn.level {
-            new_level = Some(btn.level);
-            break;
-        }
-    }
+    let Some(level) = interaction_query
+        .iter()
+        .find(|(interaction, btn)| {
+            **interaction == Interaction::Pressed && log_state.level != btn.level
+        })
+        .map(|(_, btn)| btn.level)
+    else {
+        return;
+    };
 
-    // 如果有新选择，更新状态
-    if let Some(level) = new_level {
-        tracing::info!("日志等级已选择: {:?}", level);
-        log_state.level = level;
-    }
+    tracing::info!("日志等级已选择: {:?}", level);
+    log_state.level = level;
 
-    // 更新所有按钮的外观
-    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
-        let is_selected = log_state.level == btn.level;
-
-        if is_selected {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-            *border_color = BorderColor::all(AppColors::PRIMARY);
-        } else {
-            match *interaction {
-                Interaction::Hovered => {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-                _ => {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons {
+        apply_selected(&mut style, &mut border, btn.level == level);
     }
 }
 
@@ -4355,57 +3079,23 @@ pub fn log_level_button_interaction(
 /// 自动恢复下载勾选框交互
 pub fn auto_resume_downloads_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<AutoResumeDownloadsCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut auto_resume_state: ResMut<AutoResumeDownloadsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                // 切换状态
-                auto_resume_state.enabled = !auto_resume_state.enabled;
-                let is_enabled = auto_resume_state.enabled;
-
-                tracing::info!("自动恢复下载: {}", if is_enabled { "启用" } else { "禁用" });
-
-                // 更新外观
-                if is_enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                // 更新勾选标记
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if is_enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !auto_resume_state.enabled {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !auto_resume_state.enabled {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        auto_resume_state.enabled = !auto_resume_state.enabled;
+        let is_enabled = auto_resume_state.enabled;
+
+        tracing::info!("自动恢复下载: {}", if is_enabled { "启用" } else { "禁用" });
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }
 
@@ -4413,8 +3103,8 @@ pub fn auto_resume_downloads_checkbox_interaction(
 
 /// 最大并发下载数减少按钮交互
 pub fn max_concurrent_downloads_decrease_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
+    interaction_query: Query<
+        &Interaction,
         (
             Changed<Interaction>,
             With<MaxConcurrentDownloadsDecreaseButton>,
@@ -4423,25 +3113,17 @@ pub fn max_concurrent_downloads_decrease_interaction(
     mut state: ResMut<MaxConcurrentDownloadsState>,
     mut text_query: Query<&mut Text, With<MaxConcurrentDownloadsText>>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                // 最小值为 1
-                if state.value > 1 {
-                    state.value -= 1;
-                    tracing::info!("最大并发下载数: {}", state.value);
-                    // 更新显示文本
-                    for mut text in text_query.iter_mut() {
-                        **text = format!("{}", state.value);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 最小值为 1
+        if state.value > 1 {
+            state.value -= 1;
+            tracing::info!("最大并发下载数: {}", state.value);
+            // 更新显示文本
+            for mut text in text_query.iter_mut() {
+                **text = format!("{}", state.value);
             }
         }
     }
@@ -4449,8 +3131,8 @@ pub fn max_concurrent_downloads_decrease_interaction(
 
 /// 最大并发下载数增加按钮交互
 pub fn max_concurrent_downloads_increase_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
+    interaction_query: Query<
+        &Interaction,
         (
             Changed<Interaction>,
             With<MaxConcurrentDownloadsIncreaseButton>,
@@ -4459,25 +3141,17 @@ pub fn max_concurrent_downloads_increase_interaction(
     mut state: ResMut<MaxConcurrentDownloadsState>,
     mut text_query: Query<&mut Text, With<MaxConcurrentDownloadsText>>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                // 最大值为 10
-                if state.value < 10 {
-                    state.value += 1;
-                    tracing::info!("最大并发下载数: {}", state.value);
-                    // 更新显示文本
-                    for mut text in text_query.iter_mut() {
-                        **text = format!("{}", state.value);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 最大值为 10
+        if state.value < 10 {
+            state.value += 1;
+            tracing::info!("最大并发下载数: {}", state.value);
+            // 更新显示文本
+            for mut text in text_query.iter_mut() {
+                **text = format!("{}", state.value);
             }
         }
     }
@@ -4488,368 +3162,148 @@ pub fn max_concurrent_downloads_increase_interaction(
 /// 自动打包 CBZ 勾选框交互
 pub fn auto_pack_cbz_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<AutoPackCbzCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut cbz_state: ResMut<CbzPackageSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                // 切换状态
-                cbz_state.auto_pack_cbz = !cbz_state.auto_pack_cbz;
-                let is_enabled = cbz_state.auto_pack_cbz;
-
-                tracing::info!("自动打包 CBZ: {}", if is_enabled { "启用" } else { "禁用" });
-
-                // 更新外观
-                if is_enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                // 更新勾选标记
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if is_enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !cbz_state.auto_pack_cbz {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !cbz_state.auto_pack_cbz {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        cbz_state.auto_pack_cbz = !cbz_state.auto_pack_cbz;
+        let is_enabled = cbz_state.auto_pack_cbz;
+
+        tracing::info!("自动打包 CBZ: {}", if is_enabled { "启用" } else { "禁用" });
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }
 
 /// 打包后删除原图勾选框交互
 pub fn delete_images_after_cbz_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<DeleteImagesAfterCbzCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut cbz_state: ResMut<CbzPackageSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                // 切换状态
-                cbz_state.delete_images_after_cbz = !cbz_state.delete_images_after_cbz;
-                let is_enabled = cbz_state.delete_images_after_cbz;
-
-                tracing::info!(
-                    "打包后删除原图: {}",
-                    if is_enabled { "启用" } else { "禁用" }
-                );
-
-                // 更新外观
-                if is_enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                // 更新勾选标记
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if is_enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !cbz_state.delete_images_after_cbz {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !cbz_state.delete_images_after_cbz {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        cbz_state.delete_images_after_cbz = !cbz_state.delete_images_after_cbz;
+        let is_enabled = cbz_state.delete_images_after_cbz;
+
+        tracing::info!(
+            "打包后删除原图: {}",
+            if is_enabled { "启用" } else { "禁用" }
+        );
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }
 
 // ==================== 内容过滤交互系统 ====================
 
-/// 通用过滤模式复选框交互逻辑
-fn toggle_filter_checkbox(
-    bg_color: &mut BackgroundColor,
-    border_color: &mut BorderColor,
-    children: &Children,
-    text_query: &mut Query<&mut Text>,
-    is_enabled: bool,
-) {
-    if is_enabled {
-        *bg_color = BackgroundColor(AppColors::PRIMARY);
-        *border_color = BorderColor::all(AppColors::PRIMARY);
-    } else {
-        *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-        *border_color = BorderColor::all(AppColors::BORDER);
-    }
-    for child in children.iter() {
-        if let Ok(mut text) = text_query.get_mut(child) {
-            **text = if is_enabled {
-                ICON_CHECK.to_string()
-            } else {
-                String::new()
-            };
-        }
-    }
-}
-
 /// 按分类屏蔽复选框交互
 pub fn filter_by_category_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<FilterByCategoryCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut filter_state: ResMut<FilterSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                filter_state.filter_by_category = !filter_state.filter_by_category;
-                toggle_filter_checkbox(
-                    &mut bg_color,
-                    &mut border_color,
-                    children,
-                    &mut text_query,
-                    filter_state.filter_by_category,
-                );
-            }
-            Interaction::Hovered => {
-                if !filter_state.filter_by_category {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !filter_state.filter_by_category {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        filter_state.filter_by_category = !filter_state.filter_by_category;
+        let checked = filter_state.filter_by_category;
+        apply_selected(&mut style, &mut border_color, checked);
+        set_check_icon(children, &mut text_query, checked);
     }
 }
 
 /// 按标签屏蔽复选框交互
 pub fn filter_by_tag_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<FilterByTagCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut filter_state: ResMut<FilterSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                filter_state.filter_by_tag = !filter_state.filter_by_tag;
-                toggle_filter_checkbox(
-                    &mut bg_color,
-                    &mut border_color,
-                    children,
-                    &mut text_query,
-                    filter_state.filter_by_tag,
-                );
-            }
-            Interaction::Hovered => {
-                if !filter_state.filter_by_tag {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !filter_state.filter_by_tag {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        filter_state.filter_by_tag = !filter_state.filter_by_tag;
+        let checked = filter_state.filter_by_tag;
+        apply_selected(&mut style, &mut border_color, checked);
+        set_check_icon(children, &mut text_query, checked);
     }
 }
 
 /// 按标题屏蔽复选框交互
 pub fn filter_by_title_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<FilterByTitleCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut filter_state: ResMut<FilterSettingsState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                filter_state.filter_by_title = !filter_state.filter_by_title;
-                toggle_filter_checkbox(
-                    &mut bg_color,
-                    &mut border_color,
-                    children,
-                    &mut text_query,
-                    filter_state.filter_by_title,
-                );
-            }
-            Interaction::Hovered => {
-                if !filter_state.filter_by_title {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !filter_state.filter_by_title {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        filter_state.filter_by_title = !filter_state.filter_by_title;
+        let checked = filter_state.filter_by_title;
+        apply_selected(&mut style, &mut border_color, checked);
+        set_check_icon(children, &mut text_query, checked);
     }
 }
 
 /// 删除屏蔽词按钮交互
 pub fn remove_keyword_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &RemoveKeywordButton, &mut BackgroundColor),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &RemoveKeywordButton), Changed<Interaction>>,
     mut filter_state: ResMut<FilterSettingsState>,
 ) {
-    let mut keyword_to_remove: Option<String> = None;
-    for (interaction, btn, _) in interaction_query.iter() {
-        if *interaction == Interaction::Pressed {
-            keyword_to_remove = Some(btn.keyword.clone());
-            break;
-        }
-    }
+    let Some(keyword) = interaction_query
+        .iter()
+        .find(|(interaction, _)| **interaction == Interaction::Pressed)
+        .map(|(_, btn)| btn.keyword.clone())
+    else {
+        return;
+    };
 
-    if let Some(keyword) = keyword_to_remove {
-        filter_state.blocked_keywords.retain(|k| k != &keyword);
-        tracing::info!("删除屏蔽词: {}", keyword);
-    }
-
-    // 更新悬停样式
-    for (interaction, _, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.7, 0.2, 0.2, 0.7));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgba(0.5, 0.2, 0.2, 0.5));
-            }
-            _ => {}
-        }
-    }
+    filter_state.blocked_keywords.retain(|k| k != &keyword);
+    tracing::info!("删除屏蔽词: {}", keyword);
 }
 
-/// 新增屏蔽词输入框交互（设置 TextInput.focused，含 IME 启用）
-pub fn new_keyword_input_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-            &ComputedNode,
-        ),
-        (Changed<Interaction>, With<NewKeywordInput>),
-    >,
-    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
-) {
-    for (interaction, mut bg_color, mut border_color, mut input, computed) in
-        interaction_query.iter_mut()
-    {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-
-                // 启用 IME 并设置候选框位置
-                if let Ok(mut window) = window_query.single_mut() {
-                    window.ime_enabled = true;
-                    if let Some(cursor_pos) = window.cursor_position() {
-                        let scale_factor = window.scale_factor();
-                        let input_height = computed.size().y / scale_factor;
-                        window.ime_position = bevy::math::Vec2::new(
-                            cursor_pos.x,
-                            cursor_pos.y + input_height / 2.0 + 5.0,
-                        );
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                }
-            }
-            Interaction::None => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(AppColors::CARD_BG);
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 新增屏蔽词动作键处理（Enter 添加屏蔽词，Escape 失焦），编辑由通用 TextInput
-/// 处理
+/// 新增屏蔽词动作键处理（Enter 添加屏蔽词，Escape 失焦）
+///
+/// 点击聚焦、IME 开关与编辑由通用 TextInput 系统处理。
 pub fn new_keyword_keyboard_input(
+    mut input_focus: ResMut<InputFocus>,
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
     mut input_query: Query<&mut TextInput, With<NewKeywordInput>>,
     mut filter_state: ResMut<FilterSettingsState>,
-    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
 ) {
-    let has_focus = input_query.iter().any(|i| i.focused);
-    if !has_focus {
-        return;
-    }
-
     use bevy::input::{ButtonState, keyboard::Key};
+
+    let Some(focused) = input_focus.get() else {
+        return;
+    };
+    let Ok(mut input) = input_query.get_mut(focused) else {
+        return;
+    };
 
     for event in keyboard_events.read() {
         if event.state != ButtonState::Pressed {
@@ -4857,24 +3311,14 @@ pub fn new_keyword_keyboard_input(
         }
 
         match &event.logical_key {
-            Key::Escape => {
-                for mut input in input_query.iter_mut() {
-                    input.focused = false;
-                }
-                // 禁用 IME
-                if let Ok(mut window) = window_query.single_mut() {
-                    window.ime_enabled = false;
-                }
-            }
+            Key::Escape => input_focus.clear(),
             Key::Enter => {
                 // 回车添加屏蔽词（从 TextInput.value 读取）
-                for mut input in input_query.iter_mut() {
-                    let keyword = input.value.trim().to_string();
-                    if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
-                        tracing::info!("添加屏蔽词: {}", keyword);
-                        filter_state.blocked_keywords.push(keyword);
-                        input.set_value("");
-                    }
+                let keyword = input.value.trim().to_string();
+                if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                    tracing::info!("添加屏蔽词: {}", keyword);
+                    filter_state.blocked_keywords.push(keyword);
+                    input.set_value("");
                 }
             }
             _ => {}
@@ -4896,53 +3340,21 @@ pub fn sync_keyword_input_value(
 
 /// 添加屏蔽词按钮交互
 pub fn add_keyword_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<AddKeywordButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<AddKeywordButton>)>,
     mut filter_state: ResMut<FilterSettingsState>,
     mut input_query: Query<&mut TextInput, With<NewKeywordInput>>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
-                // 从 TextInput.value 读取关键词
-                for mut input in input_query.iter_mut() {
-                    let keyword = input.value.trim().to_string();
-                    if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
-                        tracing::info!("添加屏蔽词: {}", keyword);
-                        filter_state.blocked_keywords.push(keyword);
-                        input.set_value("");
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.9));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
-    }
-}
-
-/// 点击输入框外部取消焦点
-pub fn unfocus_keyword_input(
-    mouse_button: Res<ButtonInput<MouseButton>>,
-    mut input_query: Query<(&Interaction, &mut BorderColor, &mut TextInput), With<NewKeywordInput>>,
-    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
-) {
-    if mouse_button.just_pressed(MouseButton::Left) {
-        for (interaction, mut border, mut input) in input_query.iter_mut() {
-            if *interaction == Interaction::None && input.focused {
-                input.focused = false;
-                *border = BorderColor::all(AppColors::BORDER);
-
-                // 禁用 IME
-                if let Ok(mut window) = window_query.single_mut() {
-                    window.ime_enabled = false;
-                }
+        // 从 TextInput.value 读取关键词
+        for mut input in input_query.iter_mut() {
+            let keyword = input.value.trim().to_string();
+            if !keyword.is_empty() && !filter_state.blocked_keywords.contains(&keyword) {
+                tracing::info!("添加屏蔽词: {}", keyword);
+                filter_state.blocked_keywords.push(keyword);
+                input.set_value("");
             }
         }
     }
@@ -4951,45 +3363,30 @@ pub fn unfocus_keyword_input(
 /// 建议面板展开/折叠交互
 pub fn keyword_suggestion_toggle_interaction(
     mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor),
         (Changed<Interaction>, With<KeywordSuggestionToggle>),
     >,
     mut filter_state: ResMut<FilterSettingsState>,
     mut panel_query: Query<&mut Node, With<KeywordSuggestionPanel>>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                filter_state.show_suggestions = !filter_state.show_suggestions;
-                let display = if filter_state.show_suggestions {
-                    Display::Flex
-                } else {
-                    Display::None
-                };
-                for mut node in panel_query.iter_mut() {
-                    node.display = display;
-                }
-                // 按下状态高亮
-                if filter_state.show_suggestions {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.3));
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-            Interaction::Hovered => {
-                if !filter_state.show_suggestions {
-                    *bg_color = BackgroundColor(Color::srgb(0.18, 0.18, 0.24));
-                }
-            }
-            Interaction::None => {
-                if !filter_state.show_suggestions {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
+    for (interaction, mut style, mut border_color) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        filter_state.show_suggestions = !filter_state.show_suggestions;
+        let expanded = filter_state.show_suggestions;
+
+        let display = if expanded {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        for mut node in panel_query.iter_mut() {
+            node.display = display;
+        }
+
+        // 展开态钉在主色
+        apply_selected(&mut style, &mut border_color, expanded);
     }
 }
 
@@ -5021,19 +3418,21 @@ pub fn keyword_suggestion_item_interaction(
         filter_state.blocked_keywords.push(keyword);
     }
 
-    // 更新悬停样式
+    // 更新悬停样式（分类/标签两套底色 + 已屏蔽的禁用态，`ButtonStyle`
+    // 表达不了，故保留手写）
     for (interaction, item, mut bg_color, mut border_color) in interaction_query.iter_mut() {
         let already_blocked = filter_state.blocked_keywords.contains(&item.keyword);
         match *interaction {
             Interaction::Hovered if !already_blocked => {
-                *bg_color = BackgroundColor(Color::srgba(0.25, 0.25, 0.35, 0.8));
+                *bg_color = BackgroundColor(item.base_color.lighter(0.05));
             }
             Interaction::None => {
                 if already_blocked {
-                    *bg_color = BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.4));
-                    *border_color = BorderColor::all(Color::srgba(0.3, 0.3, 0.35, 0.3));
+                    *bg_color = BackgroundColor(SUGGESTION_BLOCKED_BG);
+                    *border_color = BorderColor::all(SUGGESTION_BLOCKED_BORDER);
                 } else {
-                    *bg_color = BackgroundColor(Color::srgba(0.2, 0.2, 0.3, 0.7));
+                    // 还原本项自己的底色，而非固定用分类色
+                    *bg_color = BackgroundColor(item.base_color);
                     *border_color = BorderColor::all(AppColors::BORDER);
                 }
             }
@@ -5044,225 +3443,80 @@ pub fn keyword_suggestion_item_interaction(
 
 // ==================== 分流设置交互系统 ====================
 
-/// API 分流按钮交互
+/// API 分流按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn api_channel_button_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &ApiChannelButton,
-            &mut BackgroundColor,
-            &mut BorderColor,
-        ),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &ApiChannelButton), Changed<Interaction>>,
     mut channel_state: ResMut<ChannelSettingsState>,
-    mut all_buttons_query: Query<
-        (&ApiChannelButton, &mut BackgroundColor, &mut BorderColor),
-        Without<Interaction>,
-    >,
+    mut all_buttons_query: Query<(&ApiChannelButton, &mut ButtonStyle, &mut BorderColor)>,
     mut api_ip_row_query: Query<&mut Node, With<CustomCdnApiIpRow>>,
 ) {
-    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                channel_state.api_channel = btn.channel_type;
+    let Some(picked) = interaction_query
+        .iter()
+        .find(|(interaction, _)| **interaction == Interaction::Pressed)
+        .map(|(_, btn)| btn.channel_type)
+    else {
+        return;
+    };
 
-                // 更新当前按钮样式
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
+    channel_state.api_channel = picked;
 
-                // 更新其他按钮样式
-                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
-                    if other_btn.channel_type != btn.channel_type {
-                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                        *other_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
+    for (btn, mut style, mut border) in &mut all_buttons_query {
+        apply_selected(&mut style, &mut border, btn.channel_type == picked);
+    }
 
-                // 切换自定义 IP 输入行显示
-                for mut node in api_ip_row_query.iter_mut() {
-                    node.display = if btn.channel_type == ChannelType::CustomCdnIp {
-                        Display::Flex
-                    } else {
-                        Display::None
-                    };
-                }
-            }
-            Interaction::Hovered => {
-                if channel_state.api_channel != btn.channel_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if channel_state.api_channel != btn.channel_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
-        }
+    // 切换自定义 IP 输入行显示
+    let display = if picked == ChannelType::CustomCdnIp {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in api_ip_row_query.iter_mut() {
+        node.display = display;
     }
 }
 
-/// 图片分流按钮交互
+/// 图片分流按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn image_channel_button_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &ImageChannelButton,
-            &mut BackgroundColor,
-            &mut BorderColor,
-        ),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &ImageChannelButton), Changed<Interaction>>,
     mut channel_state: ResMut<ChannelSettingsState>,
-    mut all_buttons_query: Query<
-        (&ImageChannelButton, &mut BackgroundColor, &mut BorderColor),
-        Without<Interaction>,
-    >,
+    mut all_buttons_query: Query<(&ImageChannelButton, &mut ButtonStyle, &mut BorderColor)>,
     mut img_ip_row_query: Query<&mut Node, With<CustomCdnImgIpRow>>,
 ) {
-    for (interaction, btn, mut bg_color, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                channel_state.image_channel = btn.channel_type;
+    let Some(picked) = interaction_query
+        .iter()
+        .find(|(interaction, _)| **interaction == Interaction::Pressed)
+        .map(|(_, btn)| btn.channel_type)
+    else {
+        return;
+    };
 
-                // 更新当前按钮样式
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
+    channel_state.image_channel = picked;
 
-                // 更新其他按钮样式
-                for (other_btn, mut other_bg, mut other_border) in all_buttons_query.iter_mut() {
-                    if other_btn.channel_type != btn.channel_type {
-                        *other_bg = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                        *other_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
+    for (btn, mut style, mut border) in &mut all_buttons_query {
+        apply_selected(&mut style, &mut border, btn.channel_type == picked);
+    }
 
-                // 切换自定义 IP 输入行显示
-                for mut node in img_ip_row_query.iter_mut() {
-                    node.display = if btn.channel_type == ChannelType::CustomCdnIp {
-                        Display::Flex
-                    } else {
-                        Display::None
-                    };
-                }
-            }
-            Interaction::Hovered => {
-                if channel_state.image_channel != btn.channel_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if channel_state.image_channel != btn.channel_type {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
-        }
+    // 切换自定义 IP 输入行显示
+    let display = if picked == ChannelType::CustomCdnIp {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in img_ip_row_query.iter_mut() {
+        node.display = display;
     }
 }
 
-/// 自定义 CDN IP 输入框交互（设置 TextInput.focused）
-pub fn custom_cdn_ip_input_interaction(
-    mut api_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-        ),
-        (
-            Changed<Interaction>,
-            With<CustomCdnApiIpInput>,
-            Without<CustomCdnImgIpInput>,
-        ),
-    >,
-    mut img_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &mut TextInput,
-        ),
-        (
-            Changed<Interaction>,
-            With<CustomCdnImgIpInput>,
-            Without<CustomCdnApiIpInput>,
-        ),
-    >,
-) {
-    for (interaction, mut bg_color, mut border_color, mut input) in api_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-                // 失焦图片 IP 输入框
-                for (_, _, mut img_border, mut img_input) in img_query.iter_mut() {
-                    if img_input.focused {
-                        img_input.focused = false;
-                        *img_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                }
-            }
-            Interaction::None => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-
-    for (interaction, mut bg_color, mut border_color, mut input) in img_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                input.focused = true;
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-                // 失焦 API IP 输入框
-                for (_, _, mut api_border, mut api_input) in api_query.iter_mut() {
-                    if api_input.focused {
-                        api_input.focused = false;
-                        *api_border = BorderColor::all(AppColors::BORDER);
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.14, 0.14, 0.18));
-                }
-            }
-            Interaction::None => {
-                if !input.focused {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 自定义 CDN IP 动作键处理（Escape/Enter 失焦），编辑由通用 TextInput 处理
+/// 自定义 CDN IP 动作键处理（Escape/Enter 失焦），点击聚焦与编辑由通用
+/// TextInput 系统处理
 pub fn custom_cdn_ip_keyboard_input(
+    mut input_focus: ResMut<InputFocus>,
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut api_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<CustomCdnApiIpInput>, Without<CustomCdnImgIpInput>),
-    >,
-    mut img_query: Query<
-        (&mut TextInput, &mut BorderColor),
-        (With<CustomCdnImgIpInput>, Without<CustomCdnApiIpInput>),
-    >,
+    input_query: Query<(), Or<(With<CustomCdnApiIpInput>, With<CustomCdnImgIpInput>)>>,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
-    let has_focus =
-        api_query.iter().any(|(i, _)| i.focused) || img_query.iter().any(|(i, _)| i.focused);
-    if !has_focus {
+    if !input_focus.get().is_some_and(|e| input_query.contains(e)) {
         return;
     }
 
@@ -5272,18 +3526,7 @@ pub fn custom_cdn_ip_keyboard_input(
         }
 
         if matches!(&event.logical_key, Key::Escape | Key::Enter) {
-            for (mut input, mut border) in api_query.iter_mut() {
-                if input.focused {
-                    input.focused = false;
-                    *border = BorderColor::all(AppColors::BORDER);
-                }
-            }
-            for (mut input, mut border) in img_query.iter_mut() {
-                if input.focused {
-                    input.focused = false;
-                    *border = BorderColor::all(AppColors::BORDER);
-                }
-            }
+            input_focus.clear();
         }
     }
 }
@@ -5325,33 +3568,17 @@ pub fn sync_cdn_ip_input_values(
 /// 检查更新按钮点击交互（预留，待接入更新检查流程）
 #[allow(dead_code)]
 pub fn check_update_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<CheckUpdateButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<CheckUpdateButton>)>,
     mut check_update_messages: MessageWriter<crate::events::CheckUpdateRequest>,
     update_state: Res<crate::resources::UpdateCheckState>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                if !update_state.is_checking {
-                    check_update_messages.write(crate::events::CheckUpdateRequest);
-                    tracing::info!("用户点击检查更新");
-                }
-            }
-            Interaction::Hovered => {
-                if !update_state.is_checking {
-                    *bg_color = BackgroundColor(Color::srgb(0.25, 0.55, 0.95));
-                }
-            }
-            Interaction::None => {
-                if update_state.is_checking {
-                    *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-                } else {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                }
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if !update_state.is_checking {
+            check_update_messages.write(crate::events::CheckUpdateRequest);
+            tracing::info!("用户点击检查更新");
         }
     }
 }
@@ -5361,19 +3588,15 @@ pub fn check_update_button_interaction(
 pub fn refresh_update_status(
     update_state: Res<crate::resources::UpdateCheckState>,
     mut text_query: Query<(&mut Text, &mut TextColor), With<UpdateStatusText>>,
-    mut btn_query: Query<&mut BackgroundColor, With<CheckUpdateButton>>,
+    mut btn_query: Query<&mut ButtonStyle, With<CheckUpdateButton>>,
 ) {
     if !update_state.is_changed() {
         return;
     }
 
-    // 更新按钮颜色（检查中置灰）
-    for mut bg_color in btn_query.iter_mut() {
-        if update_state.is_checking {
-            *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-        } else {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-        }
+    // 检查中降为次要色
+    for mut style in btn_query.iter_mut() {
+        set_busy(&mut style, update_state.is_checking);
     }
 
     // 更新状态文本
@@ -5383,7 +3606,7 @@ pub fn refresh_update_status(
             *color = TextColor(AppColors::TEXT_SECONDARY);
         } else if let Some(ref error) = update_state.error {
             **text = format!("检查失败: {}", error);
-            *color = TextColor(Color::srgb(0.9, 0.3, 0.3));
+            *color = TextColor(AppColors::ERROR);
         } else if let Some(has_update) = update_state.has_update {
             if has_update {
                 let version = update_state.latest_version.as_deref().unwrap_or("未知");
@@ -5400,177 +3623,116 @@ pub fn refresh_update_status(
 // ==================== 网络诊断 ====================
 
 /// 创建网络诊断区域
-fn spawn_network_diag_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((Node {
+fn network_diag_section() -> impl Scene {
+    let speed_label = format!("{ICON_DOWNLOAD} 测速");
+    let ping_label = format!("{ICON_REFRESH} Ping");
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(12.0),
-            ..default()
-        },))
-        .with_children(|col| {
-            // 说明文本
-            col.spawn((
-                Text::new("测试当前网络到服务器的连通性和速度"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-
-            // 按钮行
-            col.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(12.0),
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 测速按钮
-                    row.spawn((
-                        SpeedTestButton,
-                        Button,
-                        Interaction::default(),
+        }
+        Children [
+            (
+                // 说明文本
+                Text("测试当前网络到服务器的连通性和速度")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 按钮行
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(12.0),
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        // 测速按钮
+                        SpeedTestButton
+                        Button
+                        template_value(ButtonStyle::primary())
                         Node {
-                            padding: UiRect::new(
-                                Val::Px(16.0),
-                                Val::Px(16.0),
-                                Val::Px(8.0),
-                                Val::Px(8.0),
-                            ),
+                            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                        BorderColor::all(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(format!("{ICON_DOWNLOAD} 测速")),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-
-                    // Ping 按钮
-                    row.spawn((
-                        PingTestButton,
-                        Button,
-                        Interaction::default(),
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({speed_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                    (
+                        // Ping 按钮
+                        PingTestButton
+                        Button
+                        template_value(ButtonStyle::primary())
                         Node {
-                            padding: UiRect::new(
-                                Val::Px(16.0),
-                                Val::Px(16.0),
-                                Val::Px(8.0),
-                                Val::Px(8.0),
-                            ),
+                            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
                             border: UiRect::all(Val::Px(1.0)),
                             border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                        BorderColor::all(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(format!("{ICON_REFRESH} Ping")),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-                });
-
-            // 结果文本
-            col.spawn((
-                NetworkDiagResultText,
-                Text::new("点击按钮开始测试"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        });
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({ping_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 结果文本
+                NetworkDiagResultText
+                Text("点击按钮开始测试")
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+        ]
+    }
 }
 
 /// 测速按钮交互
 pub fn speed_test_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<SpeedTestButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<SpeedTestButton>)>,
     diag_state: Res<crate::resources::NetworkDiagState>,
     mut speed_test_messages: MessageWriter<crate::events::SpeedTestRequest>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                if diag_state.is_testing_speed {
-                    return;
-                }
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.35, 0.6));
-                speed_test_messages.write(crate::events::SpeedTestRequest);
-            }
-            Interaction::Hovered => {
-                if !diag_state.is_testing_speed {
-                    *bg_color = BackgroundColor(Color::srgb(0.25, 0.5, 0.85));
-                }
-            }
-            Interaction::None => {
-                if diag_state.is_testing_speed {
-                    *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-                } else {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                }
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        if diag_state.is_testing_speed {
+            return;
+        }
+        speed_test_messages.write(crate::events::SpeedTestRequest);
     }
 }
 
 /// Ping 测试按钮交互
 pub fn ping_test_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<PingTestButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<PingTestButton>)>,
     diag_state: Res<crate::resources::NetworkDiagState>,
     mut ping_test_messages: MessageWriter<crate::events::PingTestRequest>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                if diag_state.is_testing_ping {
-                    return;
-                }
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.35, 0.6));
-                ping_test_messages.write(crate::events::PingTestRequest);
-            }
-            Interaction::Hovered => {
-                if !diag_state.is_testing_ping {
-                    *bg_color = BackgroundColor(Color::srgb(0.25, 0.5, 0.85));
-                }
-            }
-            Interaction::None => {
-                if diag_state.is_testing_ping {
-                    *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-                } else {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                }
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        if diag_state.is_testing_ping {
+            return;
+        }
+        ping_test_messages.write(crate::events::PingTestRequest);
     }
 }
 
@@ -5578,33 +3740,19 @@ pub fn ping_test_button_interaction(
 pub fn update_network_diag_result(
     diag_state: Res<crate::resources::NetworkDiagState>,
     mut text_query: Query<(&mut Text, &mut TextColor), With<NetworkDiagResultText>>,
-    mut speed_btn_query: Query<
-        &mut BackgroundColor,
-        (With<SpeedTestButton>, Without<PingTestButton>),
-    >,
-    mut ping_btn_query: Query<
-        &mut BackgroundColor,
-        (With<PingTestButton>, Without<SpeedTestButton>),
-    >,
+    mut speed_btn_query: Query<&mut ButtonStyle, (With<SpeedTestButton>, Without<PingTestButton>)>,
+    mut ping_btn_query: Query<&mut ButtonStyle, (With<PingTestButton>, Without<SpeedTestButton>)>,
 ) {
     if !diag_state.is_changed() {
         return;
     }
 
-    // 更新按钮颜色（测试中置灰）
-    for mut bg_color in speed_btn_query.iter_mut() {
-        if diag_state.is_testing_speed {
-            *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-        } else {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-        }
+    // 测试中降为次要色
+    for mut style in speed_btn_query.iter_mut() {
+        set_busy(&mut style, diag_state.is_testing_speed);
     }
-    for mut bg_color in ping_btn_query.iter_mut() {
-        if diag_state.is_testing_ping {
-            *bg_color = BackgroundColor(AppColors::TEXT_SECONDARY);
-        } else {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-        }
+    for mut style in ping_btn_query.iter_mut() {
+        set_busy(&mut style, diag_state.is_testing_ping);
     }
 
     // 构建结果文本
@@ -5638,7 +3786,7 @@ pub fn update_network_diag_result(
 
     // 决定文本颜色
     let color = if diag_state.error.is_some() {
-        Color::srgb(0.9, 0.3, 0.3)
+        AppColors::ERROR
     } else if diag_state.is_testing_speed || diag_state.is_testing_ping {
         AppColors::TEXT_SECONDARY
     } else {
@@ -5655,153 +3803,83 @@ pub fn update_network_diag_result(
 
 /// 界面缩放按钮交互
 pub fn ui_scale_button_interaction(
-    mut buttons_query: Query<(
-        &Interaction,
-        &UiScaleButton,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    interaction_query: Query<(&Interaction, &UiScaleButton), Changed<Interaction>>,
     mut ui_scale_state: ResMut<UiScaleState>,
     mut save_status: ResMut<SettingsSaveStatus>,
+    mut all_buttons: Query<(&UiScaleButton, &mut ButtonStyle, &mut BorderColor)>,
 ) {
-    // 检查是否有按钮被按下
-    let mut new_scale: Option<f32> = None;
-    for (interaction, btn, _, _) in buttons_query.iter() {
-        if *interaction == Interaction::Pressed && (ui_scale_state.scale - btn.scale).abs() > 0.01 {
-            new_scale = Some(btn.scale);
-            break;
-        }
-    }
+    // 浮点比较：差值小于 0.01 视为同一档
+    let Some(scale) = interaction_query
+        .iter()
+        .find(|(interaction, btn)| {
+            **interaction == Interaction::Pressed && (ui_scale_state.scale - btn.scale).abs() > 0.01
+        })
+        .map(|(_, btn)| btn.scale)
+    else {
+        return;
+    };
 
-    // 更新状态并提示重启
-    if let Some(scale) = new_scale {
-        tracing::info!("界面缩放已选择: {}", scale);
-        ui_scale_state.scale = scale;
+    tracing::info!("界面缩放已选择: {}", scale);
+    ui_scale_state.scale = scale;
 
-        let label = UI_SCALE_OPTIONS
-            .iter()
-            .find(|(s, _)| (*s - scale).abs() < 0.01)
-            .map(|(_, l)| *l)
-            .unwrap_or("未知");
-        save_status.visible = true;
-        save_status.message = format!("界面缩放已切换为「{}」，重启应用后生效", label);
-        save_status.is_error = false;
-        save_status.timer.reset();
-    }
+    let label = UI_SCALE_OPTIONS
+        .iter()
+        .find(|(s, _)| (*s - scale).abs() < 0.01)
+        .map(|(_, l)| *l)
+        .unwrap_or("未知");
+    save_status.visible = true;
+    save_status.message = format!("界面缩放已切换为「{}」，重启应用后生效", label);
+    save_status.is_error = false;
+    save_status.timer.reset();
 
-    // 更新所有按钮外观
-    for (interaction, btn, mut bg_color, mut border_color) in buttons_query.iter_mut() {
-        let is_selected = (ui_scale_state.scale - btn.scale).abs() < 0.01;
-
-        if is_selected {
-            *bg_color = BackgroundColor(AppColors::PRIMARY);
-            *border_color = BorderColor::all(AppColors::PRIMARY);
-        } else {
-            match *interaction {
-                Interaction::Hovered => {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-                _ => {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
+    for (btn, mut style, mut border) in &mut all_buttons {
+        apply_selected(&mut style, &mut border, (btn.scale - scale).abs() < 0.01);
     }
 }
 
-/// 自定义字体路径输入框交互（点击聚焦）
-pub fn custom_font_path_input_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut TextInput, &mut BorderColor),
-        (Changed<Interaction>, With<CustomFontPathInput>),
-    >,
-    mut font_path_state: ResMut<CustomFontPathInputState>,
-    mut window_query: Query<&mut bevy::window::Window, With<PrimaryWindow>>,
-) {
-    for (interaction, mut text_input, mut border_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                text_input.focused = true;
-                font_path_state.is_focused = true;
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-                // 启用 IME
-                if let Ok(mut window) = window_query.single_mut() {
-                    window.ime_enabled = true;
-                }
-            }
-            Interaction::Hovered => {
-                if !text_input.focused {
-                    *border_color = BorderColor::all(Color::srgb(0.4, 0.4, 0.5));
-                }
-            }
-            Interaction::None => {
-                if !text_input.focused {
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-            }
-        }
-    }
-}
-
-/// 自定义字体路径键盘输入同步
-pub fn custom_font_path_keyboard_input(
-    mut input_query: Query<&mut TextInput, With<CustomFontPathInput>>,
-    mut font_path_state: ResMut<CustomFontPathInputState>,
-) {
-    for text_input in input_query.iter_mut() {
-        if text_input.focused && text_input.value != font_path_state.value {
-            font_path_state.value = text_input.value.clone();
-        }
-    }
-}
-
-/// 同步自定义字体路径值到输入框
+/// 自定义字体路径双向同步
+///
+/// 输入框被编辑 → 写回状态；状态被外部改写（文件选择器）→ 推回输入框。
 pub fn sync_custom_font_path_value(
     mut input_query: Query<&mut TextInput, With<CustomFontPathInput>>,
-    font_path_state: Res<CustomFontPathInputState>,
+    mut font_path_state: ResMut<CustomFontPathInputState>,
 ) {
-    if font_path_state.is_changed() {
-        for mut text_input in input_query.iter_mut() {
-            if text_input.value != font_path_state.value {
-                text_input.set_value(font_path_state.value.clone());
-            }
+    for mut text_input in input_query.iter_mut() {
+        if text_input.value == font_path_state.value {
+            continue;
+        }
+        // 编辑优先：输入框本帧有改动时以输入框为准
+        if text_input.is_changed() {
+            font_path_state.value.clone_from(&text_input.value);
+        } else if font_path_state.is_changed() {
+            text_input.set_value(font_path_state.value.clone());
         }
     }
 }
 
 /// 自定义字体文件选择按钮交互
 pub fn custom_font_path_picker_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
+    interaction_query: Query<
+        &Interaction,
         (Changed<Interaction>, With<CustomFontPathPickerButton>),
     >,
     mut picker: ResMut<CustomFontPathPickerResult>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                // 防止重复打开
-                if picker.receiver.is_none() {
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    picker.receiver = Some(std::sync::Mutex::new(rx));
-                    std::thread::spawn(move || {
-                        let path = rfd::FileDialog::new()
-                            .add_filter("字体文件", &["ttf", "otf", "ttc", "otc"])
-                            .pick_file()
-                            .map(|p| p.to_string_lossy().to_string());
-                        let _ = tx.send(path);
-                    });
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::SECONDARY_HOVER);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SECONDARY);
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 防止重复打开
+        if picker.receiver.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            picker.receiver = Some(std::sync::Mutex::new(rx));
+            std::thread::spawn(move || {
+                let path = rfd::FileDialog::new()
+                    .add_filter("字体文件", &["ttf", "otf", "ttc", "otc"])
+                    .pick_file()
+                    .map(|p| p.to_string_lossy().to_string());
+                let _ = tx.send(path);
+            });
         }
     }
 }
@@ -5828,10 +3906,8 @@ pub fn handle_custom_font_path_picker_result(
     if let Some(path_str) = result {
         for mut input in input_query.iter_mut() {
             input.set_value(path_str.clone());
-            input.focused = false;
         }
         font_path_state.value = path_str;
-        font_path_state.is_focused = false;
 
         // 提示重启生效
         save_status.visible = true;
@@ -5844,107 +3920,45 @@ pub fn handle_custom_font_path_picker_result(
 /// SNI 伪装复选框交互
 pub fn sni_pretend_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<SniPretendCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut network_state: ResMut<NetworkAdvancedState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                network_state.sni_pretend = !network_state.sni_pretend;
-                let is_enabled = network_state.sni_pretend;
-
-                tracing::info!("SNI 伪装: {}", if is_enabled { "启用" } else { "禁用" });
-
-                if is_enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if is_enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !network_state.sni_pretend {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !network_state.sni_pretend {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        network_state.sni_pretend = !network_state.sni_pretend;
+        let is_enabled = network_state.sni_pretend;
+
+        tracing::info!("SNI 伪装: {}", if is_enabled { "启用" } else { "禁用" });
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }
 
 /// IPv6 优先复选框交互
 pub fn prefer_ipv6_checkbox_interaction(
     mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &Children,
-        ),
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
         (Changed<Interaction>, With<PreferIpv6Checkbox>),
     >,
     mut text_query: Query<&mut Text>,
     mut network_state: ResMut<NetworkAdvancedState>,
 ) {
-    for (interaction, mut bg_color, mut border_color, children) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                network_state.prefer_ipv6 = !network_state.prefer_ipv6;
-                let is_enabled = network_state.prefer_ipv6;
-
-                tracing::info!("IPv6 优先: {}", if is_enabled { "启用" } else { "禁用" });
-
-                if is_enabled {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                } else {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                    *border_color = BorderColor::all(AppColors::BORDER);
-                }
-
-                for child in children.iter() {
-                    if let Ok(mut text) = text_query.get_mut(child) {
-                        **text = if is_enabled {
-                            ICON_CHECK.to_string()
-                        } else {
-                            String::new()
-                        };
-                    }
-                }
-            }
-            Interaction::Hovered => {
-                if !network_state.prefer_ipv6 {
-                    *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                }
-            }
-            Interaction::None => {
-                if !network_state.prefer_ipv6 {
-                    *bg_color = BackgroundColor(Color::srgb(0.12, 0.12, 0.16));
-                }
-            }
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        network_state.prefer_ipv6 = !network_state.prefer_ipv6;
+        let is_enabled = network_state.prefer_ipv6;
+
+        tracing::info!("IPv6 优先: {}", if is_enabled { "启用" } else { "禁用" });
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }

@@ -2,58 +2,68 @@
 //!
 //! WebSocket 实时聊天室，支持消息收发和自动滚动
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
-use picacg_api::endpoints::chat::{ChatMessage, ChatMessageType};
+use bevy::{
+    input::{
+        ButtonState,
+        keyboard::{Key, KeyboardInput},
+    },
+    input_focus::InputFocus,
+    prelude::*,
+    ui::RelativeCursorPosition,
+};
+use picacg_api::endpoints::chat::{ChatMessage, ChatMessageType, ParsedChatMessage};
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar},
+        widgets::ButtonStyle,
     },
-    utils::icons::*,
+    utils::{
+        icons::*,
+        text_input::{TextInput, TextInputDisplay},
+    },
 };
 
 // ==================== 组件定义 ====================
 
 /// 聊天室根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatRoomRoot;
 
 /// 聊天室消息滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatRoomScrollContainer;
 
 /// 聊天室输入框容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatRoomInputContainer;
 
-/// 聊天室输入框文本
-#[derive(Component)]
-pub struct ChatRoomInputText;
+/// 聊天室输入框（配合通用 `TextInput` 使用）
+#[derive(Component, Default, Clone)]
+pub struct ChatRoomInputField;
 
 /// 发送按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatRoomSendButton;
 
 /// 返回按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatRoomBackButton;
 
 /// 在线人数文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct OnlineCountText;
 
 /// 连接状态文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ConnectionStatusText;
 
 /// 消息列表容器（放在滚动容器内部）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ChatMessageList;
 
 // ==================== 布局常量 ====================
@@ -84,222 +94,9 @@ pub fn setup_chat_room_ui(
         commands.entity(entity).despawn();
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
-    let chat_room_root = commands
-        .spawn((
-            ChatRoomRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 顶部工具栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(50.0),
-                    padding: UiRect::horizontal(Val::Px(12.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 返回按钮
-                header
-                    .spawn((
-                        ChatRoomBackButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(ICON_CHEVRON_LEFT),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                // 房间标题
-                header.spawn((
-                    Text::new(&chat_room_state.room_title),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 弹性空间
-                header.spawn(Node {
-                    flex_grow: 1.0,
-                    ..default()
-                });
-
-                // 连接状态
-                header.spawn((
-                    ConnectionStatusText,
-                    Text::new("连接中..."),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-
-                // 在线人数
-                header.spawn((
-                    OnlineCountText,
-                    Text::new(" "),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            });
-
-            // 消息区域（中间可滚动）
-            root.spawn((Node {
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                overflow: Overflow::clip(),
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    let scroll_container = wrapper
-                        .spawn((
-                            ChatRoomScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                overflow: Overflow::scroll_y(),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect::all(Val::Px(room_layout::PADDING)),
-                                row_gap: Val::Px(room_layout::MSG_GAP),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|scroll| {
-                            // 消息列表（初始为空）
-                            scroll.spawn((
-                                ChatMessageList,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    flex_direction: FlexDirection::Column,
-                                    row_gap: Val::Px(room_layout::MSG_GAP),
-                                    ..default()
-                                },
-                            ));
-                        })
-                        .id();
-
-                    // 滚动条
-                    spawn_scrollbar(wrapper, scroll_container);
-                });
-
-            // 底部输入栏
-            root.spawn((
-                ChatRoomInputContainer,
-                Node {
-                    width: Val::Percent(100.0),
-                    min_height: Val::Px(room_layout::INPUT_BAR_HEIGHT),
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(8.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            ))
-            .with_children(|input_bar| {
-                // 输入框
-                input_bar
-                    .spawn((
-                        Node {
-                            flex_grow: 1.0,
-                            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(6.0)),
-                            min_height: Val::Px(36.0),
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BorderColor::all(AppColors::BORDER),
-                        BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
-                    ))
-                    .with_children(|input_area| {
-                        input_area.spawn((
-                            ChatRoomInputText,
-                            Text::new("输入消息..."),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
-
-                // 发送按钮
-                input_bar
-                    .spawn((
-                        ChatRoomSendButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
-                            border_radius: BorderRadius::all(Val::Px(6.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            min_height: Val::Px(36.0),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("发送"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-            });
-        })
-        .id();
+    let chat_room_root = commands.spawn_scene(chat_room_page(&chat_room_state)).id();
 
     // 挂载到内容区域
     if let Some(content) = content_area {
@@ -315,12 +112,197 @@ pub fn setup_chat_room_ui(
     }
 }
 
+/// 聊天室页面场景
+fn chat_room_page(chat_room_state: &ChatRoomState) -> impl Scene + use<> {
+    let room_title = chat_room_state.room_title.clone();
+
+    bsn! {
+        ChatRoomRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 顶部工具栏
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Px(50.0),
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                    flex_shrink: 0.0,
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 返回按钮
+                        ChatRoomBackButton
+                        Button
+                        template_value(ButtonStyle::ghost())
+                        Node {
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text(ICON_CHEVRON_LEFT)
+                                TextFont { font_size: FontSize::Px(18.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        // 房间标题
+                        Text({room_title})
+                        TextFont { font_size: FontSize::Px(16.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 弹性空间
+                        Node { flex_grow: 1.0 }
+                    ),
+                    (
+                        // 连接状态
+                        ConnectionStatusText
+                        Text("连接中...")
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        // 在线人数
+                        OnlineCountText
+                        Text(" ")
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 消息区域（中间可滚动）
+                Node {
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                    overflow: Overflow::clip(),
+                }
+                Children [
+                    (
+                        #ChatRoomScroll
+                        ChatRoomScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            overflow: Overflow::scroll_y(),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(room_layout::PADDING)),
+                            row_gap: Val::Px(room_layout::MSG_GAP),
+                        }
+                        ScrollArea
+                        Children [
+                            (
+                                // 消息列表（初始为空）
+                                ChatMessageList
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    flex_direction: FlexDirection::Column,
+                                    row_gap: Val::Px(room_layout::MSG_GAP),
+                                }
+                            )
+                        ]
+                    ),
+                    // 滚动条
+                    scrollbar(#ChatRoomScroll),
+                ]
+            ),
+            (
+                // 底部输入栏
+                ChatRoomInputContainer
+                Node {
+                    width: Val::Percent(100.0),
+                    min_height: Val::Px(room_layout::INPUT_BAR_HEIGHT),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    border: UiRect::top(Val::Px(1.0)),
+                    flex_shrink: 0.0,
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                BackgroundColor(AppColors::HEADER_BG)
+                Children [
+                    (
+                        // 输入框（通用 TextInput 组件：点击聚焦、光标、IME 全由通用系统接管）
+                        ChatRoomInputField
+                        template_value(TextInput::new("输入消息..."))
+                        Button
+                        Node {
+                            flex_grow: 1.0,
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            min_height: Val::Px(36.0),
+                            align_items: AlignItems::Center,
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(AppColors::BACKGROUND)
+                        RelativeCursorPosition
+                        Children [
+                            (
+                                TextInputDisplay
+                                Text("输入消息...")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            )
+                        ]
+                    ),
+                    (
+                        // 发送按钮
+                        ChatRoomSendButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+                            border_radius: BorderRadius::all(Val::Px(6.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            min_height: Val::Px(36.0),
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        Children [
+                            (
+                                Text("发送")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
+}
+
 /// 清理聊天室界面（销毁 UI + 关闭 WebSocket 连接）
 pub fn cleanup_chat_room_ui(
     mut commands: Commands,
     query: Query<Entity, With<ChatRoomRoot>>,
     mut chat_room_state: ResMut<ChatRoomState>,
+    mut input_focus: ResMut<InputFocus>,
+    input_query: Query<Entity, With<ChatRoomInputField>>,
 ) {
+    // 交还输入焦点（IME 随焦点由 text_input_focus_visuals 关闭），
+    // 否则焦点留在被销毁的输入框上，输入法状态会泄漏到下一个页面
+    if let Some(focused) = input_focus.get()
+        && input_query.contains(focused)
+    {
+        input_focus.clear();
+    }
+
     // 销毁聊天室 UI（参数化页面，不同聊天室数据不同，不适合缓存）
     for entity in query.iter() {
         commands.entity(entity).despawn();
@@ -440,8 +422,6 @@ pub fn rebuild_chat_messages_ui(
     }
     chat_room_state.needs_rebuild = false;
 
-    let font: Handle<Font> = get_font();
-
     for (list_entity, children) in message_list_query.iter() {
         // 清空旧消息：逐个 despawn 子实体
         if let Some(children) = children {
@@ -451,187 +431,174 @@ pub fn rebuild_chat_messages_ui(
         }
 
         // 渲染所有消息
-        commands.entity(list_entity).with_children(|list| {
-            for msg in &chat_room_state.messages {
-                spawn_chat_message_bubble(list, &font, msg);
-            }
-        });
+        for msg in &chat_room_state.messages {
+            commands
+                .spawn_scene(chat_message_bubble(msg))
+                .insert(ChildOf(list_entity));
+        }
     }
 }
 
-/// 创建消息气泡
-fn spawn_chat_message_bubble(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    msg: &picacg_api::endpoints::chat::ParsedChatMessage,
-) {
-    parent
-        .spawn((Node {
+/// 消息气泡场景
+fn chat_message_bubble(msg: &ParsedChatMessage) -> impl Scene + use<> {
+    let sender_name = msg.sender_name.clone();
+
+    // 等级
+    let level: Box<dyn SceneList> = if msg.sender_level > 0 {
+        let level_label = format!("LV.{}", msg.sender_level);
+        Box::new(bsn_list![(
+            Text({level_label})
+            TextFont { font_size: FontSize::Px(10.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    // 称号
+    let title: Box<dyn SceneList> = if msg.sender_title.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        let sender_title = msg.sender_title.clone();
+        Box::new(bsn_list![(
+            Node {
+                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(3.0)),
+            }
+            template_value(BorderColor::all(AppColors::TEXT_SECONDARY))
+            Children [
+                (
+                    Text({sender_title})
+                    TextFont { font_size: FontSize::Px(10.0) }
+                    TextColor(AppColors::TEXT_SECONDARY)
+                )
+            ]
+        )])
+    };
+
+    // 角色标签（VIP 等）
+    let mut characters: Vec<Box<dyn Scene>> = Vec::new();
+    for character in &msg.sender_characters {
+        let (label, color) = match character.as_str() {
+            "vip" => ("VIP", Color::srgb(1.0, 0.84, 0.0)),
+            "girl" => ("♀", Color::srgb(1.0, 0.5, 0.7)),
+            "manager" => ("管理", Color::srgb(0.3, 0.8, 0.3)),
+            "official" => ("官方", Color::srgb(0.3, 0.6, 1.0)),
+            _ => continue,
+        };
+        let label = label.to_string();
+        characters.push(Box::new(bsn! {
+            Text({label})
+            TextFont { font_size: FontSize::Px(10.0) }
+            TextColor(color)
+        }));
+    }
+
+    // 时间戳
+    let timestamp: Box<dyn SceneList> = if msg.created_at.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        // 简单提取时间部分（HH:MM:SS）
+        let time_str = extract_time(&msg.created_at);
+        Box::new(bsn_list![(
+            Text({time_str})
+            TextFont { font_size: FontSize::Px(10.0) }
+            TextColor(Color::srgba(0.5, 0.5, 0.5, 0.7))
+        )])
+    };
+
+    // @提及
+    let mut mentions: Vec<Box<dyn Scene>> = Vec::new();
+    for mention in &msg.mentions {
+        let mention_label = format!("@{}", mention);
+        mentions.push(Box::new(bsn! {
+            Text({mention_label})
+            TextFont { font_size: FontSize::Px(12.0) }
+            TextColor(Color::srgb(0.2, 0.4, 0.8))
+        }));
+    }
+
+    // 回复信息
+    let reply: Box<dyn SceneList> = if let Some(ref reply_info) = msg.reply {
+        let reply_label = format!("@{}: {}", reply_info.name, reply_info.message);
+        Box::new(bsn_list![(
+            Node {
+                padding: UiRect::all(Val::Px(6.0)),
+                border: UiRect::left(Val::Px(3.0)),
+                margin: UiRect::vertical(Val::Px(2.0)),
+            }
+            template_value(BorderColor::all(Color::srgba(0.3, 0.3, 0.5, 0.5)))
+            BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.5))
+            Children [
+                (
+                    Text({reply_label})
+                    TextFont { font_size: FontSize::Px(11.0) }
+                    TextColor(AppColors::TEXT_SECONDARY)
+                )
+            ]
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    // 消息正文
+    let body: Box<dyn SceneList> = if msg.message.is_empty() {
+        Box::new(bsn_list![])
+    } else {
+        let message = msg.message.clone();
+        Box::new(bsn_list![(
+            Text({message})
+            TextFont { font_size: FontSize::Px(14.0) }
+            TextColor(AppColors::TEXT)
+        )])
+    };
+
+    // 图片消息的图片 URL（简单显示）
+    let mut media: Vec<Box<dyn Scene>> = Vec::new();
+    for url in &msg.media_urls {
+        let media_label = format!("[图片] {}", url);
+        media.push(Box::new(bsn! {
+            Text({media_label})
+            TextFont { font_size: FontSize::Px(12.0) }
+            TextColor(Color::srgb(0.4, 0.6, 0.8))
+        }));
+    }
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             padding: UiRect::axes(Val::Px(8.0), Val::Px(4.0)),
             row_gap: Val::Px(2.0),
-            ..default()
-        },))
-        .with_children(|bubble| {
-            // 发送者信息行
-            bubble
-                .spawn((Node {
+        }
+        Children [
+            (
+                // 发送者信息行
+                Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(6.0),
-                    ..default()
-                },))
-                .with_children(|row| {
-                    // 用户名
-                    row.spawn((
-                        Text::new(&msg.sender_name),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 13.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::PRIMARY),
-                    ));
-
-                    // 等级
-                    if msg.sender_level > 0 {
-                        row.spawn((
-                            Text::new(format!("LV.{}", msg.sender_level)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 10.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    }
-
-                    // 称号
-                    if !msg.sender_title.is_empty() {
-                        row.spawn((
-                            Node {
-                                padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            BorderColor::all(AppColors::TEXT_SECONDARY),
-                        ))
-                        .with_children(|badge| {
-                            badge.spawn((
-                                Text::new(&msg.sender_title),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 10.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        });
-                    }
-
-                    // 角色标签（VIP 等）
-                    for character in &msg.sender_characters {
-                        let (label, color) = match character.as_str() {
-                            "vip" => ("VIP", Color::srgb(1.0, 0.84, 0.0)),
-                            "girl" => ("♀", Color::srgb(1.0, 0.5, 0.7)),
-                            "manager" => ("管理", Color::srgb(0.3, 0.8, 0.3)),
-                            "official" => ("官方", Color::srgb(0.3, 0.6, 1.0)),
-                            _ => continue,
-                        };
-                        row.spawn((
-                            Text::new(label),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 10.0,
-                                ..default()
-                            },
-                            TextColor(color),
-                        ));
-                    }
-
-                    // 时间戳
-                    if !msg.created_at.is_empty() {
-                        // 简单提取时间部分（HH:MM:SS）
-                        let time_str = extract_time(&msg.created_at);
-                        row.spawn((
-                            Text::new(time_str),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 10.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgba(0.5, 0.5, 0.5, 0.7)),
-                        ));
-                    }
-                });
-
-            // @提及
-            for mention in &msg.mentions {
-                bubble.spawn((
-                    Text::new(format!("@{}", mention)),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.2, 0.4, 0.8)),
-                ));
-            }
-
-            // 回复信息
-            if let Some(ref reply) = msg.reply {
-                bubble
-                    .spawn((
-                        Node {
-                            padding: UiRect::all(Val::Px(6.0)),
-                            border: UiRect::left(Val::Px(3.0)),
-                            margin: UiRect::vertical(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BorderColor::all(Color::srgba(0.3, 0.3, 0.5, 0.5)),
-                        BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 0.5)),
-                    ))
-                    .with_children(|reply_area| {
-                        reply_area.spawn((
-                            Text::new(format!("@{}: {}", reply.name, reply.message)),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-                    });
-            }
-
-            // 消息正文
-            if !msg.message.is_empty() {
-                bubble.spawn((
-                    Text::new(&msg.message),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            }
-
-            // 图片消息的图片 URL（简单显示）
-            for url in &msg.media_urls {
-                bubble.spawn((
-                    Text::new(format!("[图片] {}", url)),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.4, 0.6, 0.8)),
-                ));
-            }
-        });
+                }
+                Children [
+                    (
+                        // 用户名
+                        Text({sender_name})
+                        TextFont { font_size: FontSize::Px(13.0) }
+                        TextColor(AppColors::PRIMARY)
+                    ),
+                    {level},
+                    {title},
+                    {characters},
+                    {timestamp},
+                ]
+            ),
+            {mentions},
+            {reply},
+            {body},
+            {media},
+        ]
+    }
 }
 
 /// 从 ISO 时间字符串提取 HH:MM:SS
@@ -669,7 +636,7 @@ pub fn update_connection_status(
             *color = TextColor(AppColors::TEXT_SECONDARY);
         } else if chat_room_state.error.is_some() {
             **text = "连接失败".to_string();
-            *color = TextColor(Color::srgb(0.8, 0.3, 0.3));
+            *color = TextColor(AppColors::ERROR);
         } else {
             **text = "未连接".to_string();
             *color = TextColor(AppColors::TEXT_SECONDARY);
@@ -686,20 +653,17 @@ pub fn update_connection_status(
 /// 自动滚动到底部
 pub fn auto_scroll_chat(
     chat_room_state: Res<ChatRoomState>,
-    mut scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<ChatRoomScrollContainer>,
-    >,
+    mut scroll_query: Query<(&ComputedNode, &mut ScrollPosition), With<ChatRoomScrollContainer>>,
 ) {
     if !chat_room_state.auto_scroll || !chat_room_state.is_changed() {
         return;
     }
 
-    for (mut scroll_pos, content_info) in scroll_query.iter_mut() {
-        if let Some(info) = content_info {
-            let max_scroll = (info.content_height - info.viewport_height).max(0.0);
-            scroll_pos.y = max_scroll;
-        }
+    // 内容/视口尺寸由引擎布局输出（物理像素 → 逻辑像素）
+    for (computed, mut scroll_pos) in scroll_query.iter_mut() {
+        let content_h = computed.content_size().y * computed.inverse_scale_factor;
+        let viewport_h = computed.size().y * computed.inverse_scale_factor;
+        scroll_pos.y = (content_h - viewport_h).max(0.0);
     }
 }
 
@@ -707,176 +671,83 @@ pub fn auto_scroll_chat(
 
 /// 返回按钮交互
 pub fn chat_room_back_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<ChatRoomBackButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ChatRoomBackButton>)>,
     mut back_events: MessageWriter<NavigateBackEvent>,
 ) {
-    for (interaction, mut bg_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                back_events.write(NavigateBackEvent);
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::NONE);
-            }
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            back_events.write(NavigateBackEvent);
         }
     }
 }
 
 /// 发送按钮交互
 pub fn chat_room_send_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<ChatRoomSendButton>),
-    >,
-    mut chat_room_state: ResMut<ChatRoomState>,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ChatRoomSendButton>)>,
+    mut input_query: Query<&mut TextInput, With<ChatRoomInputField>>,
+    chat_room_state: Res<ChatRoomState>,
     mut send_messages: MessageWriter<SendChatMessageRequest>,
 ) {
-    for (interaction, mut bg_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                let text = chat_room_state.input_text.trim().to_string();
-                if !text.is_empty() && chat_room_state.is_connected {
-                    let room_id = chat_room_state.room_id.clone();
-                    send_messages.write(SendChatMessageRequest {
-                        room_id,
-                        message: text,
-                    });
-                    chat_room_state.input_text.clear();
-                }
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_HOVER);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        let Ok(mut input) = input_query.single_mut() else {
+            continue;
+        };
+        send_chat_message(&chat_room_state, &mut input, &mut send_messages);
     }
 }
 
-/// 聊天室键盘输入
-pub fn chat_room_keyboard_input(
-    mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    mut chat_room_state: ResMut<ChatRoomState>,
+/// 输入框动作键（Enter 发送 / Escape 失焦）
+///
+/// 字符编辑、光标、剪贴板、IME 全归通用 TextInput 系统，这里只认动作键，
+/// 且只在焦点确实落在聊天输入框上时才响应。
+pub fn chat_room_input_action_keys(
+    mut keyboard_events: MessageReader<KeyboardInput>,
+    mut input_focus: ResMut<InputFocus>,
+    mut input_query: Query<&mut TextInput, With<ChatRoomInputField>>,
+    chat_room_state: Res<ChatRoomState>,
     mut send_messages: MessageWriter<SendChatMessageRequest>,
-    mut input_text_query: Query<(&mut Text, &mut TextColor), With<ChatRoomInputText>>,
 ) {
+    let Some(focused) = input_focus.get() else {
+        return;
+    };
+    let Ok(mut input) = input_query.get_mut(focused) else {
+        return;
+    };
+
     for event in keyboard_events.read() {
-        if event.state != bevy::input::ButtonState::Pressed {
+        if event.state != ButtonState::Pressed {
             continue;
         }
 
         match &event.logical_key {
-            bevy::input::keyboard::Key::Backspace => {
-                chat_room_state.input_text.pop();
-            }
-            bevy::input::keyboard::Key::Enter => {
-                let text = chat_room_state.input_text.trim().to_string();
-                if !text.is_empty() && chat_room_state.is_connected {
-                    let room_id = chat_room_state.room_id.clone();
-                    send_messages.write(SendChatMessageRequest {
-                        room_id,
-                        message: text,
-                    });
-                    chat_room_state.input_text.clear();
-                }
-            }
-            bevy::input::keyboard::Key::Character(input) => {
-                for c in input.chars() {
-                    if !c.is_control() {
-                        chat_room_state.input_text.push(c);
-                    }
-                }
-            }
+            Key::Enter => send_chat_message(&chat_room_state, &mut input, &mut send_messages),
+            Key::Escape => input_focus.clear(),
             _ => {}
         }
     }
-
-    // 更新输入框文本显示
-    for (mut text, mut color) in input_text_query.iter_mut() {
-        if chat_room_state.input_text.is_empty() {
-            **text = "输入消息...".to_string();
-            *color = TextColor(AppColors::TEXT_SECONDARY);
-        } else {
-            **text = chat_room_state.input_text.clone();
-            *color = TextColor(AppColors::TEXT);
-        }
-    }
 }
 
-/// 聊天室 IME 输入
-pub fn chat_room_ime_input(
-    mut ime_events: MessageReader<bevy::window::Ime>,
-    mut chat_room_state: ResMut<ChatRoomState>,
+/// 发送输入框里的消息并清空（发送按钮与 Enter 共用）
+///
+/// 未连接或内容为空时不发送，也不清空输入 —— 重连后内容还在。
+fn send_chat_message(
+    chat_room_state: &ChatRoomState,
+    input: &mut TextInput,
+    send_messages: &mut MessageWriter<SendChatMessageRequest>,
 ) {
-    for event in ime_events.read() {
-        if let bevy::window::Ime::Commit { value, .. } = event {
-            chat_room_state.input_text.push_str(value);
-        }
+    let message = input.value.trim().to_string();
+    if message.is_empty() || !chat_room_state.is_connected {
+        return;
     }
-}
 
-/// 聊天室滚动处理
-pub fn handle_chat_room_scroll(
-    scroll_query: Query<
-        (&ScrollPosition, Option<&ContentSizeInfo>),
-        (Changed<ScrollPosition>, With<ChatRoomScrollContainer>),
-    >,
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    mut chat_room_state: ResMut<ChatRoomState>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-    // 这里只监听 ScrollPosition 变化来更新自动滚动状态
-    for (scroll_pos, content_info) in scroll_query.iter() {
-        let max_scroll = content_info
-            .map(|info| (info.content_height - info.viewport_height).max(0.0))
-            .unwrap_or(0.0);
-
-        // 如果用户滚动到底部附近，恢复自动滚动；否则禁止自动滚动
-        if max_scroll > 0.0 {
-            chat_room_state.auto_scroll = (max_scroll - scroll_pos.y) < 50.0;
-        }
-    }
-}
-
-/// 更新聊天室内容尺寸
-pub fn update_chat_room_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<ChatRoomScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        content_height += room_layout::PADDING * 2.0;
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
+    send_messages.write(SendChatMessageRequest {
+        room_id: chat_room_state.room_id.clone(),
+        message,
+    });
+    input.set_value("");
 }
 
 /// 处理发送消息响应

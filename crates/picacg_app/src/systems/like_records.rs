@@ -2,17 +2,17 @@
 //!
 //! 实现点赞记录页面，展示用户点赞过的漫画
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        ui_common::format_timestamp,
+        widgets::ButtonStyle,
     },
     utils::icons::*,
 };
@@ -20,34 +20,33 @@ use crate::{
 // ==================== 组件定义 ====================
 
 /// 点赞记录页面根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordsRoot;
 
 /// 点赞记录滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordsScrollContainer;
 
 /// 点赞记录卡片
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordCard {
     pub comic_id: String,
 }
 
 /// 点赞记录删除按钮（取消点赞）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordDeleteButton {
     pub comic_id: String,
 }
 
-/// 点赞记录封面缩略图
-#[derive(Component)]
+/// 点赞记录封面缩略图（占位与成图共用，`url` 是替换图片的唯一依据）
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordThumbnail {
-    #[allow(dead_code)]
     pub url: String,
 }
 
 /// 点赞记录空状态提示
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LikeRecordsEmptyHint;
 
 // ==================== 布局常量 ====================
@@ -91,129 +90,10 @@ pub fn setup_like_records_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     let like_records_root = commands
-        .spawn((
-            LikeRecordsRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 左侧标题
-                header
-                    .spawn((Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    },))
-                    .with_children(|title_row| {
-                        title_row.spawn((
-                            Text::new(ICON_THUMB_UP),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::PRIMARY),
-                        ));
-                        title_row.spawn((
-                            Text::new("点赞记录"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 18.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 列表（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            LikeRecordsScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect {
-                                    left: Val::Px(like_records_layout::PADDING_LEFT),
-                                    right: Val::Px(like_records_layout::PADDING_RIGHT),
-                                    top: Val::Px(like_records_layout::PADDING_TOP),
-                                    bottom: Val::Px(like_records_layout::PADDING_BOTTOM),
-                                },
-                                row_gap: Val::Px(like_records_layout::CARD_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|list| {
-                            if like_records_state.is_loading {
-                                list.spawn((
-                                    LoadingIndicator,
-                                    Text::new("加载中..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            } else if like_records_state.records.is_empty()
-                                && like_records_state.error.is_none()
-                            {
-                                list.spawn((
-                                    LikeRecordsEmptyHint,
-                                    Text::new("暂无点赞记录"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT_SECONDARY),
-                                ));
-                            }
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
-        })
+        .spawn_scene(like_records_page(&like_records_state))
         .id();
 
     // 如果有 ContentArea，将点赞记录作为其子实体
@@ -227,6 +107,126 @@ pub fn setup_like_records_ui(
     }
 
     tracing::info!("点赞记录页面 UI 已创建");
+}
+
+/// 点赞记录页面场景
+fn like_records_page(like_records_state: &LikeRecordsState) -> impl Scene + use<> {
+    // 列表初始占位内容：加载指示器 / 空状态提示 / 两者皆无
+    let list_placeholder: Box<dyn SceneList> = if like_records_state.is_loading {
+        Box::new(bsn_list![(
+            LoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT)
+        )])
+    } else if like_records_state.records.is_empty() && like_records_state.error.is_none() {
+        Box::new(bsn_list![empty_hint()])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    bsn! {
+        LikeRecordsRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 左侧标题
+                        Node {
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(8.0),
+                        }
+                        Children [
+                            (
+                                Text(ICON_THUMB_UP)
+                                TextFont { font_size: FontSize::Px(18.0) }
+                                TextColor(AppColors::PRIMARY)
+                            ),
+                            (
+                                Text("点赞记录")
+                                TextFont { font_size: FontSize::Px(18.0) }
+                                TextColor(AppColors::TEXT)
+                            ),
+                        ]
+                    )
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 列表（可滚动）
+                        #LikeRecordsScroll
+                        LikeRecordsScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::new(
+                                Val::Px(like_records_layout::PADDING_LEFT),
+                                Val::Px(like_records_layout::PADDING_RIGHT),
+                                Val::Px(like_records_layout::PADDING_TOP),
+                                Val::Px(like_records_layout::PADDING_BOTTOM),
+                            ),
+                            row_gap: Val::Px(like_records_layout::CARD_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {list_placeholder} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#LikeRecordsScroll),
+                ]
+            ),
+        ]
+    }
+}
+
+/// 封面缩略图场景（图片已缓存时使用）
+fn thumbnail_image(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+    bsn! {
+        LikeRecordThumbnail { url: {url} }
+        ImageNode { image: {handle} }
+        Node {
+            width: Val::Px(like_records_layout::THUMB_WIDTH),
+            height: Val::Px(like_records_layout::THUMB_HEIGHT),
+            flex_shrink: 0.0,
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+    }
+}
+
+/// 空状态提示场景
+fn empty_hint() -> impl Scene {
+    bsn! {
+        LikeRecordsEmptyHint
+        Text("暂无点赞记录")
+        TextFont { font_size: FontSize::Px(16.0) }
+        TextColor(AppColors::TEXT_SECONDARY)
+    }
 }
 
 /// 清理点赞记录页面（用 Display::None 隐藏，保留 UI 结构）
@@ -264,19 +264,15 @@ pub fn refresh_like_records_ui(
             commands.entity(entity).despawn();
         }
 
-        let font: Handle<Font> = get_font();
-        commands.entity(scroll_entity).with_children(|parent| {
-            parent.spawn((
-                ErrorMessage,
-                Text::new(format!("加载失败: {}", error)),
-                TextFont {
-                    font,
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.3, 0.3)),
-            ));
-        });
+        let error_text = format!("加载失败: {}", error);
+        commands
+            .spawn_scene(bsn! {
+                ErrorMessage
+                Text({error_text})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::ERROR)
+            })
+            .insert(ChildOf(scroll_entity));
         return;
     }
 
@@ -294,19 +290,9 @@ pub fn refresh_like_records_ui(
             && empty_hint_query.is_empty()
             && loading_query.is_empty()
         {
-            let font: Handle<Font> = get_font();
-            commands.entity(scroll_entity).with_children(|parent| {
-                parent.spawn((
-                    LikeRecordsEmptyHint,
-                    Text::new("暂无点赞记录"),
-                    TextFont {
-                        font,
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            });
+            commands
+                .spawn_scene(empty_hint())
+                .insert(ChildOf(scroll_entity));
         }
         return;
     }
@@ -320,153 +306,124 @@ pub fn refresh_like_records_ui(
     }
 
     // 创建所有点赞记录卡片
-    let font: Handle<Font> = get_font();
-    commands.entity(scroll_entity).with_children(|parent| {
-        for record in like_records_state.records.iter() {
-            spawn_like_record_card(parent, record, &font, &image_cache);
-        }
-    });
+    for record in like_records_state.records.iter() {
+        commands
+            .spawn_scene(like_record_card(record, &image_cache))
+            .insert(ChildOf(scroll_entity));
+    }
 }
 
-/// 创建单个点赞记录卡片
-fn spawn_like_record_card(
-    parent: &mut ChildSpawnerCommands,
+/// 单个点赞记录卡片场景
+fn like_record_card(
     record: &picacg_db::DbLikeRecord,
-    font: &Handle<Font>,
     image_cache: &ImageCache,
-) {
+) -> impl Scene + use<> {
     let time_str = format_timestamp(record.liked_at);
+    let card_comic_id = record.comic_id.clone();
+    let menu_comic_id = record.comic_id.clone();
+    let menu_comic_title = record.comic_title.clone();
+    let delete_comic_id = record.comic_id.clone();
+    let comic_title = record.comic_title.clone();
+    let liked_label = format!("点赞于 {}", time_str);
 
-    parent
-        .spawn((
-            LikeRecordCard {
-                comic_id: record.comic_id.clone(),
-            },
-            ContextMenuTarget {
-                comic_id: record.comic_id.clone(),
-                comic_title: record.comic_title.clone(),
-            },
-            Button,
-            Interaction::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(like_records_layout::CARD_HEIGHT),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                column_gap: Val::Px(12.0),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(AppColors::SURFACE),
-        ))
-        .with_children(|card| {
-            // 封面缩略图
-            let thumb_url = record.thumb_url.as_deref().unwrap_or("");
-            if !thumb_url.is_empty() {
-                if let Some(handle) = image_cache.get(thumb_url) {
-                    card.spawn((
-                        LikeRecordThumbnail {
-                            url: thumb_url.to_string(),
-                        },
-                        ImageNode::new(handle.clone()),
-                        Node {
-                            width: Val::Px(like_records_layout::THUMB_WIDTH),
-                            height: Val::Px(like_records_layout::THUMB_HEIGHT),
-                            flex_shrink: 0.0,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                    ));
-                } else {
-                    // 占位符
-                    card.spawn((
-                        PlaceholderImage,
-                        Node {
-                            width: Val::Px(like_records_layout::THUMB_WIDTH),
-                            height: Val::Px(like_records_layout::THUMB_HEIGHT),
-                            flex_shrink: 0.0,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                    ));
+    // 封面缩略图
+    let thumb_url = record.thumb_url.as_deref().unwrap_or("");
+    let thumbnail: Box<dyn SceneList> = if !thumb_url.is_empty() {
+        if let Some(handle) = image_cache.get(thumb_url) {
+            Box::new(bsn_list![thumbnail_image(
+                thumb_url.to_string(),
+                handle.clone()
+            )])
+        } else {
+            // 占位符：自带 URL，图片就绪后由 update_like_records_images 直接替换
+            let placeholder_url = thumb_url.to_string();
+            Box::new(bsn_list![(
+                PlaceholderImage
+                LikeRecordThumbnail { url: {placeholder_url} }
+                Node {
+                    width: Val::Px(like_records_layout::THUMB_WIDTH),
+                    height: Val::Px(like_records_layout::THUMB_HEIGHT),
+                    flex_shrink: 0.0,
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
                 }
-            } else {
-                // 无封面占位符
-                card.spawn((
-                    Node {
-                        width: Val::Px(like_records_layout::THUMB_WIDTH),
-                        height: Val::Px(like_records_layout::THUMB_HEIGHT),
-                        flex_shrink: 0.0,
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ))
-                .with_children(|ph| {
-                    ph.spawn((
-                        Text::new(ICON_BOOK),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-            }
-
-            // 中间信息区域
-            card.spawn((Node {
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_direction: FlexDirection::Column,
+                BackgroundColor(AppColors::SURFACE_HOVER)
+            )])
+        }
+    } else {
+        // 无封面占位符
+        Box::new(bsn_list![(
+            Node {
+                width: Val::Px(like_records_layout::THUMB_WIDTH),
+                height: Val::Px(like_records_layout::THUMB_HEIGHT),
+                flex_shrink: 0.0,
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(4.0),
-                overflow: Overflow::clip(),
-                ..default()
-            },))
-                .with_children(|info| {
-                    // 漫画标题
-                    info.spawn((
-                        Text::new(record.comic_title.as_str()),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 15.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
+                align_items: AlignItems::Center,
+            }
+            BackgroundColor(AppColors::SURFACE_HOVER)
+            Children [
+                (
+                    Text(ICON_BOOK)
+                    TextFont { font_size: FontSize::Px(20.0) }
+                    TextColor(AppColors::TEXT_SECONDARY)
+                )
+            ]
+        )])
+    };
+
+    bsn! {
+        LikeRecordCard { comic_id: {card_comic_id} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(like_records_layout::CARD_HEIGHT),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            column_gap: Val::Px(12.0),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        BackgroundColor(AppColors::SURFACE)
+        Children [
+            {thumbnail},
+            (
+                // 中间信息区域
+                Node {
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(4.0),
+                    overflow: Overflow::clip(),
+                }
+                Children [
+                    (
+                        // 漫画标题
+                        Text({comic_title})
+                        TextFont { font_size: FontSize::Px(15.0) }
+                        TextColor(AppColors::TEXT)
                         Node {
                             max_width: Val::Percent(100.0),
                             overflow: Overflow::clip(),
-                            ..default()
-                        },
-                    ));
-
-                    // 点赞时间
-                    info.spawn((
-                        Text::new(format!("点赞于 {}", time_str)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-
-            // 右侧取消点赞按钮
-            card.spawn((
-                LikeRecordDeleteButton {
-                    comic_id: record.comic_id.clone(),
-                },
-                Button,
-                Interaction::default(),
+                        }
+                    ),
+                    (
+                        // 点赞时间
+                        Text({liked_label})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 右侧取消点赞按钮
+                LikeRecordDeleteButton { comic_id: {delete_comic_id} }
+                Button
+                template_value(ButtonStyle::ghost())
                 Node {
                     width: Val::Px(32.0),
                     height: Val::Px(32.0),
@@ -474,129 +431,46 @@ fn spawn_like_record_card(
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(ICON_CLOSE),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.5, 0.5, 0.55)),
-                ));
-            });
-        });
-}
-
-/// 格式化时间戳为可读字符串
-fn format_timestamp(timestamp: i64) -> String {
-    use chrono::{Local, TimeZone};
-
-    if timestamp == 0 {
-        return "未知时间".to_string();
-    }
-
-    match Local.timestamp_opt(timestamp, 0) {
-        chrono::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),
-        _ => "未知时间".to_string(),
+                }
+                BackgroundColor(Color::NONE)
+                Children [
+                    (
+                        Text(ICON_CLOSE)
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::srgb(0.5, 0.5, 0.55))
+                    )
+                ]
+            ),
+        ]
     }
 }
 
-/// 点赞记录卡片点击交互（跳转到漫画详情）
+/// 点赞记录卡片点击交互（跳转到漫画详情；配色由 `ButtonStyle` 统一接管）
 pub fn like_record_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &LikeRecordCard),
-        (Changed<Interaction>, Without<LikeRecordDeleteButton>),
-    >,
+    interaction_query: Query<(&Interaction, &LikeRecordCard), Changed<Interaction>>,
     mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
-    for (interaction, mut bg_color, card) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                detail_messages.write(NavigateToComicDetailEvent {
-                    comic_id: card.comic_id.clone(),
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SURFACE);
-            }
+    for (interaction, card) in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            detail_messages.write(NavigateToComicDetailEvent {
+                comic_id: card.comic_id.clone(),
+            });
         }
     }
 }
 
-/// 点赞记录删除按钮交互（取消点赞）
+/// 点赞记录删除按钮交互（取消点赞；配色由 `ButtonStyle` 统一接管）
 pub fn like_record_delete_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &LikeRecordDeleteButton),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &LikeRecordDeleteButton), Changed<Interaction>>,
     mut delete_messages: MessageWriter<DeleteLikeRecordRequest>,
 ) {
-    for (interaction, mut bg_color, btn) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgba(0.9, 0.3, 0.3, 0.3));
-                delete_messages.write(DeleteLikeRecordRequest {
-                    comic_id: btn.comic_id.clone(),
-                });
-                tracing::info!("取消点赞: {}", btn.comic_id);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.2));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::NONE);
-            }
+    for (interaction, btn) in &interaction_query {
+        if *interaction == Interaction::Pressed {
+            delete_messages.write(DeleteLikeRecordRequest {
+                comic_id: btn.comic_id.clone(),
+            });
+            tracing::info!("取消点赞: {}", btn.comic_id);
         }
-    }
-}
-
-/// 点赞记录页面滚动处理
-pub fn handle_like_records_scroll(
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<LikeRecordsScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新点赞记录内容尺寸信息
-pub fn update_like_records_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<LikeRecordsScrollContainer>,
-    >,
-    _children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        // 计算内容高度（列表布局：每个卡片高度 + 间距）
-        let card_count = children.len();
-        let content_height = like_records_layout::PADDING_TOP
-            + like_records_layout::PADDING_BOTTOM
-            + (card_count as f32 * like_records_layout::CARD_HEIGHT)
-            + (card_count.saturating_sub(1) as f32 * like_records_layout::CARD_GAP);
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
     }
 }
 
@@ -613,11 +487,11 @@ pub fn handle_like_records_loaded(
         like_records_state.is_loading = false;
         like_records_state.error = None;
 
-        // 预加载封面图片
+        // 预加载封面图片（已有状态的 URL 不再重复请求，含加载中与失败）
         for record in &like_records_state.records {
             if let Some(ref url) = record.thumb_url
                 && !url.is_empty()
-                && image_cache.get(url).is_none()
+                && !image_cache.is_known(url)
             {
                 load_image_messages.write(LoadImageRequest { url: url.clone() });
             }
@@ -643,67 +517,40 @@ pub fn handle_like_records_load_failed(
 }
 
 /// 更新点赞记录封面图片（当图片加载完成时替换占位符）
+///
+/// 占位实体自带 URL，无需反查 `LikeRecordsState`；失败的图片摘掉占位标记
+/// 退出扫描集（此前失败图片永久留在集合里被每帧重扫）。
 pub fn update_like_records_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    like_records_state: Res<LikeRecordsState>,
-    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
-    card_query: Query<&LikeRecordCard>,
+    placeholder_query: Query<
+        (Entity, &LikeRecordThumbnail, &ChildOf),
+        (With<PlaceholderImage>, Without<ImageNode>),
+    >,
 ) {
-    let placeholder_count = placeholder_query.iter().count();
-    if placeholder_count == 0 {
-        return;
-    }
-
     let mut replaced_count = 0;
-    for (placeholder_entity, child_of) in placeholder_query.iter() {
-        let parent_entity: Entity = child_of.parent();
-        let Ok(card) = card_query.get(parent_entity) else {
-            continue;
-        };
-
-        // 找到对应的点赞记录
-        let Some(record) = like_records_state
-            .records
-            .iter()
-            .find(|r| r.comic_id == card.comic_id)
-        else {
-            continue;
-        };
-
-        let Some(ref thumb_url) = record.thumb_url else {
-            continue;
-        };
-
-        if thumb_url.is_empty() {
-            continue;
-        }
-
-        // 检查图片是否已加载
-        if let Some(handle) = image_cache.get(thumb_url) {
-            commands.entity(placeholder_entity).despawn();
-            let image_entity = commands
-                .spawn((
-                    LikeRecordThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(like_records_layout::THUMB_WIDTH),
-                        height: Val::Px(like_records_layout::THUMB_HEIGHT),
-                        flex_shrink: 0.0,
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                ))
-                .id();
-
-            // 插入到第一个位置（在信息区域之前）
+    for (placeholder_entity, thumb, child_of) in placeholder_query.iter() {
+        if image_cache.is_failed(&thumb.url) {
             commands
-                .entity(parent_entity)
-                .insert_children(0, &[image_entity]);
-            replaced_count += 1;
+                .entity(placeholder_entity)
+                .remove::<PlaceholderImage>();
+            continue;
         }
+
+        let Some(handle) = image_cache.get(&thumb.url) else {
+            continue;
+        };
+
+        commands.entity(placeholder_entity).despawn();
+        let image_entity = commands
+            .spawn_scene(thumbnail_image(thumb.url.clone(), handle.clone()))
+            .id();
+
+        // 插入到第一个位置（在信息区域之前）
+        commands
+            .entity(child_of.parent())
+            .insert_children(0, &[image_entity]);
+        replaced_count += 1;
     }
 
     if replaced_count > 0 {

@@ -570,7 +570,8 @@ fn handle_comics_response(
 ) {
     for event in loaded_messages.read() {
         comics_state.total_pages = event.total_pages;
-        let filtered = apply_block_filter(event.comics.clone());
+        let filtered = apply_block_filter(&event.comics);
+        let added = filtered.len();
 
         if event.page <= 1 {
             // 首次加载：替换数据
@@ -583,8 +584,9 @@ fn handle_comics_response(
             comics_state.comics.extend(filtered);
         }
 
-        // 触发加载图片
-        for comic in &event.comics {
+        // 触发加载图片（只为过滤后真正会显示的漫画预取，屏蔽的不下载）
+        let start = comics_state.comics.len() - added;
+        for comic in &comics_state.comics[start..] {
             image_messages.write(LoadImageRequest {
                 url: comic.thumb.url(),
             });
@@ -649,6 +651,9 @@ fn enqueue_image_requests(
 
 /// 处理图片加载队列（每帧处理有限数量）
 fn process_image_queue(runtime: ResMut<TokioTasksRuntime>, mut image_cache: ResMut<ImageCache>) {
+    // 退避期已过的失败条目重新排队（无待重试项时 O(1) 直返）
+    image_cache.requeue_ready_retries();
+
     // 获取可以开始加载的批次
     let batch = image_cache.take_pending_batch();
     if batch.is_empty() {
@@ -687,16 +692,30 @@ fn process_image_queue(runtime: ResMut<TokioTasksRuntime>, mut image_cache: ResM
                 data
             };
 
-            // 在后台线程解码图片（CPU 密集型操作）
+            // 解码走 spawn_blocking：纯 CPU 密集操作不占 tokio worker
+            // （此前直接写在 async 块里，最多 15 个解码任务同时饿住网络 I/O）
             let decoded_result = match result {
-                Ok(image_data) => match image::load_from_memory(&image_data) {
-                    Ok(img) => {
-                        let rgba = img.to_rgba8();
-                        let (width, height) = rgba.dimensions();
-                        Ok((width, height, rgba.into_raw()))
+                Ok(image_data) => {
+                    let decoded = tokio::task::spawn_blocking(move || {
+                        match image::load_from_memory(&image_data) {
+                            Ok(img) => {
+                                // 已是 RGBA8 时直接取缓冲，避免整图额外拷贝
+                                let rgba = match img {
+                                    image::DynamicImage::ImageRgba8(buffer) => buffer,
+                                    other => other.to_rgba8(),
+                                };
+                                let (width, height) = rgba.dimensions();
+                                Ok((width, height, rgba.into_raw()))
+                            }
+                            Err(e) => Err(e.to_string()),
+                        }
+                    })
+                    .await;
+                    match decoded {
+                        Ok(inner) => inner,
+                        Err(e) => Err(format!("解码任务被取消: {e}")),
                     }
-                    Err(e) => Err(e.to_string()),
-                },
+                }
                 Err(e) => Err(e),
             };
 
@@ -713,7 +732,7 @@ fn process_image_queue(runtime: ResMut<TokioTasksRuntime>, mut image_cache: ResM
                             bevy::render::render_resource::TextureDimension::D2,
                             rgba_data,
                             bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                            RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
+                            RenderAssetUsages::RENDER_WORLD,
                         );
 
                         // 添加到 Assets<Image>
@@ -737,7 +756,7 @@ fn process_image_queue(runtime: ResMut<TokioTasksRuntime>, mut image_cache: ResM
 async fn download_image(url: &str) -> Result<Vec<u8>, String> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use reqwest::Proxy;
     use sha2::Sha256;
 
@@ -1448,7 +1467,7 @@ fn handle_favorites_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
-        let filtered = apply_block_filter(event.comics.clone());
+        let filtered = apply_block_filter(&event.comics);
         favorites_state.comics = filtered;
         favorites_state.total_pages = event.total_pages;
         favorites_state.is_loading = false;
@@ -1528,7 +1547,7 @@ fn handle_recommendations_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
-        let filtered = apply_block_filter(event.comics.clone());
+        let filtered = apply_block_filter(&event.comics);
         home_state.recommendations = filtered;
         home_state.is_loading = false;
         home_state.error = None;
@@ -2384,7 +2403,7 @@ async fn download_image_to_file(
         .unwrap_or("unknown");
     tracing::trace!("开始下载: {}", file_name);
 
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use reqwest::Proxy;
     use sha2::Sha256;
 
@@ -3040,40 +3059,15 @@ fn handle_keywords_response(
     }
 }
 
-/// 判断漫画是否应该被屏蔽
-fn is_comic_blocked(
-    comic: &picacg_api::models::Comic,
-    filter: &picacg_config::FilterSettings,
-) -> bool {
-    if filter.blocked_keywords.is_empty() {
-        return false;
-    }
-    for keyword in &filter.blocked_keywords {
-        let kw = keyword.to_lowercase();
-        if filter.filter_by_category && comic.categories.iter().any(|c| c.to_lowercase() == kw) {
-            return true;
-        }
-        if filter.filter_by_tag && comic.tags.iter().any(|t| t.to_lowercase() == kw) {
-            return true;
-        }
-        if filter.filter_by_title && comic.title.to_lowercase().contains(&kw) {
-            return true;
-        }
-    }
-    false
-}
-
-/// 对漫画列表应用屏蔽过滤
-fn apply_block_filter(comics: Vec<picacg_api::models::Comic>) -> Vec<picacg_api::models::Comic> {
-    let filter = AppSettings::global().read().filter.clone();
-    if filter.blocked_keywords.is_empty() {
-        return comics;
+/// 对漫画列表应用屏蔽过滤（只克隆保留项；语义统一走
+/// CompiledFilter，含繁简转换）
+fn apply_block_filter(comics: &[picacg_api::models::Comic]) -> Vec<picacg_api::models::Comic> {
+    let filter = crate::utils::content_filter::CompiledFilter::from_settings();
+    if filter.is_noop() {
+        return comics.to_vec();
     }
     let before = comics.len();
-    let filtered: Vec<_> = comics
-        .into_iter()
-        .filter(|c| !is_comic_blocked(c, &filter))
-        .collect();
+    let filtered = filter.filter_comics_cloned(comics);
     let after = filtered.len();
     if before != after {
         tracing::debug!(
@@ -3096,7 +3090,7 @@ fn handle_search_response(
     for event in loaded_messages.read() {
         search_state.is_loading = false;
         search_state.has_searched = true;
-        let filtered = apply_block_filter(event.comics.clone());
+        let filtered = apply_block_filter(&event.comics);
         search_state.results = filtered;
         search_state.total_pages = event.total_pages;
         search_state.error = None;
@@ -3179,7 +3173,7 @@ fn handle_rankings_response(
 ) {
     for event in loaded_messages.read() {
         rankings_state.is_loading = false;
-        let filtered = apply_block_filter(event.comics.clone());
+        let filtered = apply_block_filter(&event.comics);
         rankings_state.set_comics(event.time_type, filtered);
 
         // 触发加载封面图片
@@ -3310,14 +3304,14 @@ fn download_queue_manager(
             // 启用了自动恢复：恢复所有 Paused/Waiting 任务
             let mut resumed_count = 0;
             for fsm in &download_state.fsm_tasks {
-                let task = fsm.to_ui_task();
+                // 直接判 FSM 状态，不做 UI 深拷贝
                 if matches!(
-                    task.status,
-                    crate::resources::ComicDownloadStatus::Paused
-                        | crate::resources::ComicDownloadStatus::Waiting
+                    fsm.meta.state,
+                    crate::resources::DownloadState::Paused { .. }
+                        | crate::resources::DownloadState::Queued
                 ) {
                     resume_messages.write(ResumeDownloadRequest {
-                        comic_id: task.comic_id.clone(),
+                        comic_id: fsm.meta.comic_id.clone(),
                     });
                     resumed_count += 1;
                 }
@@ -3348,9 +3342,8 @@ fn download_queue_manager(
             continue;
         }
 
-        let task = fsm.to_ui_task();
-        // 只自动启动 Waiting 状态的任务（用户手动暂停的不自动恢复）
-        if matches!(task.status, crate::resources::ComicDownloadStatus::Waiting) {
+        // 只自动启动排队中的任务（用户手动暂停的不自动恢复）；直接判 FSM 状态免深拷贝
+        if matches!(fsm.meta.state, crate::resources::DownloadState::Queued) {
             resume_messages.write(ResumeDownloadRequest {
                 comic_id: fsm.meta.comic_id.clone(),
             });

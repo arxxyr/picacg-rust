@@ -62,6 +62,9 @@ jobs:
       - name: Run Clippy
         run: cargo clippy --all --all-targets -- -D warnings
 
+      - name: Query 冲突扫描（B0001 静态检查）
+        run: python3 scripts/check_query_conflicts.py
+
   # ============ 测试 ============
   test:
     name: Test

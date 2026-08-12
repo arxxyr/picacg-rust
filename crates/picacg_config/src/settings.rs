@@ -1,8 +1,11 @@
 //! 应用配置
 
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    path::PathBuf,
+    sync::{Arc, OnceLock},
+};
 
-use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use picacg_core::Result;
 use serde::{Deserialize, Serialize};
@@ -12,7 +15,7 @@ use tracing_subscriber::{EnvFilter, Registry, reload::Handle};
 pub type LogLevelHandle = Handle<EnvFilter, Registry>;
 
 /// 全局日志等级 reload handle
-static LOG_LEVEL_HANDLE: OnceCell<Arc<LogLevelHandle>> = OnceCell::new();
+static LOG_LEVEL_HANDLE: OnceLock<Arc<LogLevelHandle>> = OnceLock::new();
 
 /// 设置日志等级 reload handle（程序启动时调用一次）
 pub fn set_log_level_handle(handle: LogLevelHandle) {
@@ -550,7 +553,7 @@ impl Default for AppSettings {
 impl AppSettings {
     /// 获取全局单例
     pub fn global() -> &'static RwLock<AppSettings> {
-        static INSTANCE: OnceCell<RwLock<AppSettings>> = OnceCell::new();
+        static INSTANCE: OnceLock<RwLock<AppSettings>> = OnceLock::new();
         INSTANCE.get_or_init(|| RwLock::new(Self::load().unwrap_or_default()))
     }
 

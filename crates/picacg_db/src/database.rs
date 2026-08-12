@@ -1,8 +1,11 @@
 //! 数据库操作
 
-use std::{path::PathBuf, str::FromStr};
+use std::{
+    path::PathBuf,
+    str::FromStr,
+    sync::{LazyLock, OnceLock},
+};
 
-use once_cell::sync::OnceCell;
 use parking_lot::RwLock;
 use picacg_core::{PicacgError, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -13,17 +16,16 @@ use crate::models::{
 };
 
 // 数据库单例
-static DATABASE: OnceCell<RwLock<Database>> = OnceCell::new();
+static DATABASE: OnceLock<RwLock<Database>> = OnceLock::new();
 
 // 数据库专用的 tokio 运行时（用于在非异步上下文中执行数据库操作）
-static DB_RUNTIME: once_cell::sync::Lazy<tokio::runtime::Runtime> =
-    once_cell::sync::Lazy::new(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("无法创建数据库运行时")
-    });
+static DB_RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("无法创建数据库运行时")
+});
 
 /// 获取数据库专用运行时
 pub fn db_runtime() -> &'static tokio::runtime::Runtime {

@@ -56,6 +56,7 @@ clippy:
   stage: check
   script:
     - cargo clippy --all --all-targets -- -D warnings
+    - python3 scripts/check_query_conflicts.py
   allow_failure: false
 
 # ============ Test 阶段 ============

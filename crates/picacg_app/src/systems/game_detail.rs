@@ -2,18 +2,17 @@
 //!
 //! 实现游戏详情页面的 UI 和交互
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        navigation::NavigationHistory,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        ui_common::truncate_text,
+        widgets::ButtonStyle,
     },
     utils::icons::*,
 };
@@ -21,22 +20,567 @@ use crate::{
 // ==================== 组件定义 ====================
 
 /// 游戏详情根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct GameDetailRoot;
 
 /// 游戏详情滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct GameDetailScrollContainer;
 
 /// 游戏详情返回按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct GameDetailBackButton;
 
-/// 游戏详情图标
-#[derive(Component)]
+/// 游戏详情图标（图标与截图共用，图片就绪后就地换成 `ImageNode`）
+#[derive(Component, Default, Clone)]
 pub struct GameDetailIcon {
-    #[allow(dead_code)]
     pub url: String,
+}
+
+// ==================== 场景函数 ====================
+
+/// 游戏详情页面场景（供 setup 和 refresh 共用）
+fn game_detail_page(
+    game_detail_state: &GameDetailState,
+    image_cache: &ImageCache,
+) -> impl Scene + use<> {
+    // 滚动区内边距（右侧额外让出滚动条宽度）
+    let scroll_padding = UiRect {
+        left: Val::Px(20.0),
+        right: Val::Px(20.0 + SCROLLBAR_WIDTH),
+        top: Val::Px(20.0),
+        bottom: Val::Px(20.0),
+    };
+
+    // 滚动区内容：加载中 / 加载失败 / 游戏详情 / 暂无数据
+    let content: Box<dyn SceneList> = if game_detail_state.is_loading {
+        Box::new(bsn_list![(
+            LoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
+    } else if let Some(ref error) = game_detail_state.error {
+        let error_text = format!("加载失败: {}", error);
+        Box::new(bsn_list![(
+            ErrorMessage
+            Text({error_text})
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::ERROR)
+        )])
+    } else if let Some(ref game) = game_detail_state.game {
+        game_detail_content(game, image_cache)
+    } else {
+        Box::new(bsn_list![(
+            Text("暂无数据")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )])
+    };
+
+    bsn! {
+        GameDetailRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 返回按钮
+                        GameDetailBackButton
+                        Button
+                        template_value(ButtonStyle::ghost())
+                        Node {
+                            width: Val::Px(32.0),
+                            height: Val::Px(32.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                        }
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text(ICON_CHEVRON_LEFT)
+                                TextFont { font_size: FontSize::Px(20.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        Text("游戏详情")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 可滚动内容区域
+                        #GameDetailScroll
+                        GameDetailScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: {scroll_padding},
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [
+                            {content},
+                            (
+                                // 底部间距
+                                Node {
+                                    height: Val::Px(30.0),
+                                    min_height: Val::Px(30.0),
+                                }
+                            ),
+                        ]
+                    ),
+                    // 滚动条
+                    scrollbar(#GameDetailScroll),
+                ]
+            ),
+        ]
+    }
+}
+
+/// 游戏详情内容（滚动区内的并列区块）
+fn game_detail_content(
+    game: &picacg_api::models::Game,
+    image_cache: &ImageCache,
+) -> Box<dyn SceneList> {
+    let mut blocks: Vec<Box<dyn Scene>> = Vec::new();
+
+    // 基本信息区域（图标 + 基本信息）
+    blocks.push(Box::new(game_basic_info(game, image_cache)));
+
+    // 分隔线
+    blocks.push(Box::new(divider()));
+
+    // 描述区域
+    blocks.push(Box::new(section("简介", &game.description)));
+
+    // 更新内容
+    if let Some(ref update_content) = game.update_content
+        && !update_content.is_empty()
+    {
+        blocks.push(Box::new(section("更新内容", update_content)));
+    }
+
+    // 下载链接区域
+    let has_android = game.android_link.is_some()
+        || game
+            .android_links
+            .as_ref()
+            .is_some_and(|links| !links.is_empty());
+    let has_ios = game.ios_link.is_some()
+        || game
+            .ios_links
+            .as_ref()
+            .is_some_and(|links| !links.is_empty());
+
+    if has_android || has_ios {
+        blocks.push(Box::new(divider()));
+        blocks.push(Box::new(download_links_section(game)));
+    }
+
+    // 截图区域
+    if let Some(ref screenshots) = game.screenshots
+        && !screenshots.is_empty()
+    {
+        blocks.push(Box::new(divider()));
+        blocks.push(Box::new(screenshots_section(screenshots, image_cache)));
+    }
+
+    Box::new(blocks)
+}
+
+/// 基本信息区域场景（图标 + 标题 / 开发者 / 版本 / 互动数据）
+fn game_basic_info(
+    game: &picacg_api::models::Game,
+    image_cache: &ImageCache,
+) -> impl Scene + use<> {
+    let icon_url = game.icon.url();
+    let title = game.title.clone();
+
+    // 发布者 / 版本
+    let mut rows: Vec<Box<dyn Scene>> = Vec::new();
+    if let Some(ref publisher) = game.publisher {
+        rows.push(Box::new(info_row("开发者", publisher)));
+    }
+    if let Some(ref version) = game.version {
+        rows.push(Box::new(info_row("版本", version)));
+    }
+
+    // 互动数据
+    let mut stats: Vec<Box<dyn Scene>> = Vec::new();
+    if let Some(likes) = game.likes_count {
+        stats.push(Box::new(stat_badge(ICON_HEART, &format!("{}", likes))));
+    }
+    if let Some(comments) = game.comments_count {
+        stats.push(Box::new(stat_badge(ICON_CHAT, &format!("{}", comments))));
+    }
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            column_gap: Val::Px(20.0),
+            margin: UiRect::bottom(Val::Px(20.0)),
+        }
+        Children [
+            // 游戏图标
+            game_icon(icon_url, image_cache),
+            (
+                // 基本信息
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    row_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        // 标题
+                        Text({title})
+                        TextFont { font_size: FontSize::Px(22.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    {rows},
+                    (
+                        // 互动数据
+                        Node {
+                            column_gap: Val::Px(15.0),
+                            margin: UiRect::top(Val::Px(4.0)),
+                        }
+                        Children [ {stats} ]
+                    ),
+                ]
+            ),
+        ]
+    }
+}
+
+/// 游戏图标场景（缓存命中显示图片，否则显示占位图标）
+fn game_icon(url: String, image_cache: &ImageCache) -> impl Scene + use<> {
+    // 尝试从缓存加载图标
+    let inner: Box<dyn SceneList> = match image_cache.get(&url) {
+        Some(handle) => {
+            let handle = handle.clone();
+            Box::new(bsn_list![(
+                ImageNode { image: {handle} }
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    border_radius: BorderRadius::all(Val::Px(20.0)),
+                }
+            )])
+        }
+        None => Box::new(bsn_list![(
+            Text(ICON_GAMEPAD)
+            TextFont { font_size: FontSize::Px(48.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )]),
+    };
+
+    bsn! {
+        GameDetailIcon { url: {url} }
+        Node {
+            width: Val::Px(120.0),
+            height: Val::Px(120.0),
+            min_width: Val::Px(120.0),
+            min_height: Val::Px(120.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(20.0)),
+        }
+        BackgroundColor(AppColors::SURFACE)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [ {inner} ]
+    }
+}
+
+/// 分隔线场景
+fn divider() -> impl Scene {
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(1.0),
+            margin: UiRect::vertical(Val::Px(10.0)),
+        }
+        BackgroundColor(AppColors::BORDER)
+    }
+}
+
+/// 信息行场景（标签 + 值）
+fn info_row(label: &str, value: &str) -> impl Scene + use<> {
+    let label = format!("{}:", label);
+    let value = value.to_string();
+
+    bsn! {
+        Node {
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+        }
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                Text({value})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            ),
+        ]
+    }
+}
+
+/// 统计徽章场景
+fn stat_badge(icon: &str, value: &str) -> impl Scene + use<> {
+    let icon = icon.to_string();
+    let value = value.to_string();
+
+    bsn! {
+        Node {
+            column_gap: Val::Px(4.0),
+            align_items: AlignItems::Center,
+        }
+        Children [
+            (
+                Text({icon})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::PRIMARY)
+            ),
+            (
+                Text({value})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+        ]
+    }
+}
+
+/// 内容段落场景（标题 + 正文）
+fn section(title: &str, body: &str) -> impl Scene + use<> {
+    let title = title.to_string();
+    let body = body.to_string();
+
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+            margin: UiRect::bottom(Val::Px(15.0)),
+        }
+        Children [
+            (
+                Text({title})
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text({body})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+        ]
+    }
+}
+
+/// 下载链接区域场景
+fn download_links_section(game: &picacg_api::models::Game) -> impl Scene + use<> {
+    let mut rows: Vec<Box<dyn Scene>> = Vec::new();
+
+    // Android 链接
+    if let Some(ref link) = game.android_link {
+        rows.push(Box::new(link_row("Android", link)));
+    }
+    if let Some(ref links) = game.android_links {
+        for (i, link) in links.iter().enumerate() {
+            let label = if links.len() > 1 {
+                format!("Android {}", i + 1)
+            } else {
+                "Android".to_string()
+            };
+            rows.push(Box::new(link_row(&label, link)));
+        }
+    }
+
+    // iOS 链接
+    if let Some(ref link) = game.ios_link {
+        rows.push(Box::new(link_row("iOS", link)));
+    }
+    if let Some(ref links) = game.ios_links {
+        for (i, link) in links.iter().enumerate() {
+            let label = if links.len() > 1 {
+                format!("iOS {}", i + 1)
+            } else {
+                "iOS".to_string()
+            };
+            rows.push(Box::new(link_row(&label, link)));
+        }
+    }
+
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+            margin: UiRect::bottom(Val::Px(15.0)),
+        }
+        Children [
+            (
+                Text("下载链接")
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::bottom(Val::Px(8.0)) }
+            ),
+            {rows},
+        ]
+    }
+}
+
+/// 链接行场景
+fn link_row(platform: &str, url: &str) -> impl Scene + use<> {
+    let platform = platform.to_string();
+    // URL（截断显示；按字符计，避免非 ASCII URL 切在字节边界上 panic）
+    let display_url = truncate_text(url, 50);
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            column_gap: Val::Px(8.0),
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+        }
+        BackgroundColor(AppColors::SURFACE_SUNKEN)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                // 平台标签
+                Node {
+                    padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                }
+                BackgroundColor(AppColors::PRIMARY)
+                Children [
+                    (
+                        Text({platform})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+            (
+                Text({display_url})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+                Node { flex_shrink: 1.0 }
+            ),
+        ]
+    }
+}
+
+/// 截图区域场景
+fn screenshots_section(
+    screenshots: &[picacg_api::models::ImageInfo],
+    image_cache: &ImageCache,
+) -> impl Scene + use<> {
+    let title = format!("截图 ({})", screenshots.len());
+    let items: Vec<_> = screenshots
+        .iter()
+        .map(|screenshot| screenshot_item(screenshot.url(), image_cache))
+        .collect();
+
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Column,
+            width: Val::Percent(100.0),
+            row_gap: Val::Px(8.0),
+        }
+        Children [
+            (
+                Text({title})
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::bottom(Val::Px(8.0)) }
+            ),
+            (
+                // 截图列表（横向滚动）
+                Node {
+                    width: Val::Percent(100.0),
+                    column_gap: Val::Px(10.0),
+                    overflow: Overflow::scroll_x(),
+                }
+                Children [ {items} ]
+            ),
+        ]
+    }
+}
+
+/// 单张截图场景（缓存命中显示图片，否则显示等待图标）
+fn screenshot_item(url: String, image_cache: &ImageCache) -> impl Scene + use<> {
+    let inner: Box<dyn SceneList> = match image_cache.get(&url) {
+        Some(handle) => {
+            let handle = handle.clone();
+            Box::new(bsn_list![(
+                ImageNode { image: {handle} }
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                }
+            )])
+        }
+        None => Box::new(bsn_list![(
+            Text(ICON_TIMER_SAND)
+            TextFont { font_size: FontSize::Px(24.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )]),
+    };
+
+    bsn! {
+        GameDetailIcon { url: {url} }
+        Node {
+            width: Val::Px(200.0),
+            height: Val::Px(150.0),
+            min_width: Val::Px(200.0),
+            min_height: Val::Px(150.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+        }
+        BackgroundColor(AppColors::SURFACE)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [ {inner} ]
+    }
 }
 
 // ==================== 系统函数 ====================
@@ -56,11 +600,11 @@ pub fn setup_game_detail_ui(
         commands.entity(entity).despawn();
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
-    let detail_root =
-        create_game_detail_ui_internal(&mut commands, &font, &game_detail_state, &image_cache);
+    let detail_root = commands
+        .spawn_scene(game_detail_page(&game_detail_state, &image_cache))
+        .id();
 
     // 挂载到内容区域
     if let Some(content_area) = content_area {
@@ -76,635 +620,6 @@ pub fn setup_game_detail_ui(
             game_id: game_detail_state.game_id.clone(),
         });
     }
-}
-
-/// 内部创建游戏详情 UI（供 setup 和 refresh 共用）
-fn create_game_detail_ui_internal(
-    commands: &mut Commands,
-    font: &Handle<Font>,
-    game_detail_state: &GameDetailState,
-    image_cache: &ImageCache,
-) -> Entity {
-    commands
-        .spawn((
-            GameDetailRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            })
-            .insert(BorderColor::all(AppColors::BORDER))
-            .with_children(|header| {
-                // 返回按钮
-                header
-                    .spawn((
-                        GameDetailBackButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            width: Val::Px(32.0),
-                            height: Val::Px(32.0),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
-                        },
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(ICON_CHEVRON_LEFT),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 20.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
-
-                header.spawn((
-                    Text::new("游戏详情"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-
-            // 滚动区域包装器
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
-            .with_children(|wrapper| {
-                // 可滚动内容区域
-                let scroll_container_id = wrapper
-                    .spawn((
-                        GameDetailScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect {
-                                left: Val::Px(20.0),
-                                right: Val::Px(20.0 + SCROLLBAR_WIDTH),
-                                top: Val::Px(20.0),
-                                bottom: Val::Px(20.0),
-                            },
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        Scrollable,
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|content| {
-                        if game_detail_state.is_loading {
-                            content.spawn((
-                                LoadingIndicator,
-                                Text::new("加载中..."),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        } else if let Some(ref error) = game_detail_state.error {
-                            content.spawn((
-                                ErrorMessage,
-                                Text::new(format!("加载失败: {}", error)),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                            ));
-                        } else if let Some(ref game) = game_detail_state.game {
-                            spawn_game_detail_content(content, font, game, image_cache);
-                        } else {
-                            content.spawn((
-                                Text::new("暂无数据"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 16.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        }
-
-                        // 底部间距
-                        content.spawn(Node {
-                            height: Val::Px(30.0),
-                            min_height: Val::Px(30.0),
-                            ..default()
-                        });
-                    })
-                    .id();
-
-                // 滚动条
-                spawn_scrollbar(wrapper, scroll_container_id);
-            });
-        })
-        .id()
-}
-
-/// 创建游戏详情内容
-fn spawn_game_detail_content(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    game: &picacg_api::models::Game,
-    image_cache: &ImageCache,
-) {
-    // 基本信息区域（图标 + 基本信息）
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            column_gap: Val::Px(20.0),
-            margin: UiRect::bottom(Val::Px(20.0)),
-            ..default()
-        })
-        .with_children(|header| {
-            // 游戏图标
-            let icon_url = game.icon.url();
-            let mut icon_entity = header.spawn((
-                GameDetailIcon {
-                    url: icon_url.clone(),
-                },
-                Node {
-                    width: Val::Px(120.0),
-                    height: Val::Px(120.0),
-                    min_width: Val::Px(120.0),
-                    min_height: Val::Px(120.0),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(20.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                BorderColor::all(AppColors::BORDER),
-            ));
-
-            // 尝试从缓存加载图标
-            if let Some(handle) = image_cache.get(&icon_url) {
-                icon_entity.with_children(|icon_area| {
-                    icon_area.spawn((
-                        ImageNode {
-                            image: handle.clone(),
-                            ..default()
-                        },
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(20.0)),
-                            ..default()
-                        },
-                    ));
-                });
-            } else {
-                icon_entity.with_children(|icon_area| {
-                    icon_area.spawn((
-                        Text::new(ICON_GAMEPAD),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 48.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-            }
-
-            // 基本信息
-            header
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|info| {
-                    // 标题
-                    info.spawn((
-                        Text::new(&game.title),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 22.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-
-                    // 发布者
-                    if let Some(ref publisher) = game.publisher {
-                        spawn_info_row(info, font, "开发者", publisher);
-                    }
-
-                    // 版本
-                    if let Some(ref version) = game.version {
-                        spawn_info_row(info, font, "版本", version);
-                    }
-
-                    // 互动数据
-                    info.spawn(Node {
-                        column_gap: Val::Px(15.0),
-                        margin: UiRect::top(Val::Px(4.0)),
-                        ..default()
-                    })
-                    .with_children(|stats| {
-                        if let Some(likes) = game.likes_count {
-                            spawn_stat_badge(stats, font, ICON_HEART, &format!("{}", likes));
-                        }
-                        if let Some(comments) = game.comments_count {
-                            spawn_stat_badge(stats, font, "💬", &format!("{}", comments));
-                        }
-                    });
-                });
-        });
-
-    // 分隔线
-    parent.spawn((
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(1.0),
-            margin: UiRect::vertical(Val::Px(10.0)),
-            ..default()
-        },
-        BackgroundColor(AppColors::BORDER),
-    ));
-
-    // 描述区域
-    spawn_section(parent, font, "简介", &game.description);
-
-    // 更新内容
-    if let Some(ref update_content) = game.update_content
-        && !update_content.is_empty()
-    {
-        spawn_section(parent, font, "更新内容", update_content);
-    }
-
-    // 下载链接区域
-    let has_android = game.android_link.is_some()
-        || game
-            .android_links
-            .as_ref()
-            .is_some_and(|links| !links.is_empty());
-    let has_ios = game.ios_link.is_some()
-        || game
-            .ios_links
-            .as_ref()
-            .is_some_and(|links| !links.is_empty());
-
-    if has_android || has_ios {
-        parent.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(1.0),
-                margin: UiRect::vertical(Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(AppColors::BORDER),
-        ));
-
-        parent
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                width: Val::Percent(100.0),
-                row_gap: Val::Px(8.0),
-                margin: UiRect::bottom(Val::Px(15.0)),
-                ..default()
-            })
-            .with_children(|links_section| {
-                links_section.spawn((
-                    Text::new("下载链接"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                    Node {
-                        margin: UiRect::bottom(Val::Px(8.0)),
-                        ..default()
-                    },
-                ));
-
-                // Android 链接
-                if let Some(ref link) = game.android_link {
-                    spawn_link_row(links_section, font, "Android", link);
-                }
-                if let Some(ref links) = game.android_links {
-                    for (i, link) in links.iter().enumerate() {
-                        let label = if links.len() > 1 {
-                            format!("Android {}", i + 1)
-                        } else {
-                            "Android".to_string()
-                        };
-                        spawn_link_row(links_section, font, &label, link);
-                    }
-                }
-
-                // iOS 链接
-                if let Some(ref link) = game.ios_link {
-                    spawn_link_row(links_section, font, "iOS", link);
-                }
-                if let Some(ref links) = game.ios_links {
-                    for (i, link) in links.iter().enumerate() {
-                        let label = if links.len() > 1 {
-                            format!("iOS {}", i + 1)
-                        } else {
-                            "iOS".to_string()
-                        };
-                        spawn_link_row(links_section, font, &label, link);
-                    }
-                }
-            });
-    }
-
-    // 截图区域
-    if let Some(ref screenshots) = game.screenshots
-        && !screenshots.is_empty()
-    {
-        parent.spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(1.0),
-                margin: UiRect::vertical(Val::Px(10.0)),
-                ..default()
-            },
-            BackgroundColor(AppColors::BORDER),
-        ));
-
-        parent
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                width: Val::Percent(100.0),
-                row_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(|screenshots_section| {
-                screenshots_section.spawn((
-                    Text::new(format!("截图 ({})", screenshots.len())),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                    Node {
-                        margin: UiRect::bottom(Val::Px(8.0)),
-                        ..default()
-                    },
-                ));
-
-                // 截图列表（横向滚动）
-                screenshots_section
-                    .spawn(Node {
-                        width: Val::Percent(100.0),
-                        column_gap: Val::Px(10.0),
-                        overflow: Overflow::scroll_x(),
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        for screenshot in screenshots {
-                            let url = screenshot.url();
-                            let mut img_container = row.spawn((
-                                GameDetailIcon { url: url.clone() },
-                                Node {
-                                    width: Val::Px(200.0),
-                                    height: Val::Px(150.0),
-                                    min_width: Val::Px(200.0),
-                                    min_height: Val::Px(150.0),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(8.0)),
-                                    ..default()
-                                },
-                                BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                                BorderColor::all(AppColors::BORDER),
-                            ));
-
-                            if let Some(handle) = image_cache.get(&url) {
-                                img_container.with_children(|parent| {
-                                    parent.spawn((
-                                        ImageNode {
-                                            image: handle.clone(),
-                                            ..default()
-                                        },
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            height: Val::Percent(100.0),
-                                            border_radius: BorderRadius::all(Val::Px(8.0)),
-                                            ..default()
-                                        },
-                                    ));
-                                });
-                            } else {
-                                img_container.with_children(|parent| {
-                                    parent.spawn((
-                                        Text::new(ICON_TIMER_SAND),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 24.0,
-                                            ..default()
-                                        },
-                                        TextColor(AppColors::TEXT_SECONDARY),
-                                    ));
-                                });
-                            }
-                        }
-                    });
-            });
-    }
-}
-
-/// 创建信息行（标签 + 值）
-fn spawn_info_row(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
-    value: &str,
-) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(8.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|row| {
-            row.spawn((
-                Text::new(format!("{}:", label)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            row.spawn((
-                Text::new(value),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
-}
-
-/// 创建统计徽章
-fn spawn_stat_badge(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    icon: &str,
-    value: &str,
-) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(4.0),
-            align_items: AlignItems::Center,
-            ..default()
-        })
-        .with_children(|badge| {
-            badge.spawn((
-                Text::new(icon),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::PRIMARY),
-            ));
-            badge.spawn((
-                Text::new(value),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        });
-}
-
-/// 创建内容段落（标题 + 正文）
-fn spawn_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>, title: &str, body: &str) {
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            width: Val::Percent(100.0),
-            row_gap: Val::Px(8.0),
-            margin: UiRect::bottom(Val::Px(15.0)),
-            ..default()
-        })
-        .with_children(|section| {
-            section.spawn((
-                Text::new(title),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-            section.spawn((
-                Text::new(body),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        });
-}
-
-/// 创建链接行
-fn spawn_link_row(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    platform: &str,
-    url: &str,
-) {
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            padding: UiRect::all(Val::Px(8.0)),
-            column_gap: Val::Px(8.0),
-            align_items: AlignItems::Center,
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
-            ..default()
-        })
-        .insert(BackgroundColor(Color::srgb(0.12, 0.12, 0.16)))
-        .insert(BorderColor::all(AppColors::BORDER))
-        .with_children(|row| {
-            // 平台标签
-            row.spawn((
-                Node {
-                    padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(AppColors::PRIMARY),
-            ))
-            .with_children(|badge| {
-                badge.spawn((
-                    Text::new(platform),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 11.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-
-            // URL（截断显示）
-            let display_url = if url.len() > 50 {
-                format!("{}...", &url[..50])
-            } else {
-                url.to_string()
-            };
-            row.spawn((
-                Text::new(display_url),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 11.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-                Node {
-                    flex_shrink: 1.0,
-                    ..default()
-                },
-            ));
-        });
 }
 
 /// 清理游戏详情界面（销毁 UI，参数化页面不适合缓存）
@@ -743,10 +658,10 @@ pub fn refresh_game_detail_ui(
 
     // 重建（直接内联创建逻辑，不调用 setup 避免 deferred despawn 导致
     // existing_query 误判）
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
-    let detail_root =
-        create_game_detail_ui_internal(&mut commands, &font, &game_detail_state, &image_cache);
+    let detail_root = commands
+        .spawn_scene(game_detail_page(&game_detail_state, &image_cache))
+        .id();
 
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(detail_root);
@@ -775,88 +690,41 @@ pub fn game_detail_back_interaction(
     }
 }
 
-/// 处理游戏详情滚动
-pub fn handle_game_detail_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<GameDetailScrollContainer>,
-    >,
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新游戏详情内容尺寸
-pub fn update_game_detail_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<GameDetailScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
-/// 更新游戏详情图标和截图图片
+/// 更新游戏详情图标和截图图片（图片就绪后就地挂 `ImageNode`）
+///
+/// `Without<ImageNode>` 让换过图的实体永久退出扫描集，取代原先"背景色 !=
+/// NONE"的占位哨兵；加载失败的图标摘掉标记组件，同样不再每帧重扫。
+/// 图片直接挂在占位实体上，圆角随各自容器（图标 20px / 截图 8px），
+/// 与首次渲染路径一致。
 pub fn update_game_detail_images(
-    mut icon_query: Query<(
-        Entity,
-        &GameDetailIcon,
-        &mut BackgroundColor,
-        Option<&Children>,
-    )>,
-    image_cache: Res<ImageCache>,
     mut commands: Commands,
+    image_cache: Res<ImageCache>,
+    icon_query: Query<(Entity, &GameDetailIcon, Option<&Children>), Without<ImageNode>>,
 ) {
-    for (entity, icon, mut bg_color, children) in icon_query.iter_mut() {
-        if let Some(handle) = image_cache.get(&icon.url) {
-            // 通过背景色判断是否还是占位状态
-            let is_placeholder = bg_color.0 != Color::NONE;
+    for (entity, icon, children) in icon_query.iter() {
+        if image_cache.is_failed(&icon.url) {
+            commands.entity(entity).remove::<GameDetailIcon>();
+            continue;
+        }
 
-            if is_placeholder {
-                // 清除占位子节点
-                if let Some(children) = children {
-                    for child in children.iter() {
-                        commands.entity(child).despawn();
-                    }
-                }
-                // 添加图片节点
-                commands.entity(entity).with_children(|parent| {
-                    parent.spawn((
-                        ImageNode {
-                            image: handle.clone(),
-                            ..default()
-                        },
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
-                            ..default()
-                        },
-                    ));
-                });
-                *bg_color = BackgroundColor(Color::NONE);
+        let Some(handle) = image_cache.get(&icon.url) else {
+            continue;
+        };
+
+        // 清除占位子节点（占位图标文字）
+        if let Some(children) = children {
+            for child in children.iter() {
+                commands.entity(child).despawn();
             }
         }
+
+        commands.entity(entity).insert((
+            ImageNode {
+                image: handle.clone(),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+        ));
     }
 }
 
@@ -865,21 +733,24 @@ pub fn handle_game_detail_loaded(
     mut loaded_messages: MessageReader<GameDetailLoadedEvent>,
     mut game_detail_state: ResMut<GameDetailState>,
     mut image_messages: MessageWriter<LoadImageRequest>,
+    image_cache: Res<ImageCache>,
 ) {
     for event in loaded_messages.read() {
         tracing::info!("游戏详情加载完成: {}", event.game.title);
 
-        // 触发加载图标
-        image_messages.write(LoadImageRequest {
-            url: event.game.icon.url(),
-        });
+        // 触发加载图标（已有状态的 URL 不再重复请求）
+        let icon_url = event.game.icon.url();
+        if !image_cache.is_known(&icon_url) {
+            image_messages.write(LoadImageRequest { url: icon_url });
+        }
 
         // 触发加载截图
         if let Some(ref screenshots) = event.game.screenshots {
             for screenshot in screenshots {
-                image_messages.write(LoadImageRequest {
-                    url: screenshot.url(),
-                });
+                let url = screenshot.url();
+                if !image_cache.is_known(&url) {
+                    image_messages.write(LoadImageRequest { url });
+                }
             }
         }
 

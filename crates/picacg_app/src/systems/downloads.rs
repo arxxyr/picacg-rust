@@ -4,29 +4,25 @@
 
 #![allow(dead_code)]
 
-use bevy::{
-    prelude::*,
-    ui::{FocusPolicy, RelativeCursorPosition},
-};
+use bevy::prelude::*;
 use picacg_config::AppSettings;
 
-use super::font_loader::get_font;
 use crate::{
-    components::{
-        ContentArea, ContentSizeInfo, ScrollbarContainer, ScrollbarThumb, ScrollbarTrack,
-    },
+    components::ContentArea,
     events::{
         DownloadCompletedEvent, NavigateToComicDetailEvent, NavigateToComicsListEvent,
         RedownloadRequest, ResumeDownloadRequest, SearchComicsRequestEvent,
     },
     resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, DownloadState, SearchState},
-    systems::{login::AppColors, navigation::NavigationHistory, ui_common::Scrollable},
+    systems::{
+        login::AppColors,
+        navigation::NavigationHistory,
+        scrollbar::{ScrollArea, scrollbar},
+        theme::Scale,
+        widgets::ButtonStyle,
+    },
     utils::{icons::*, tokio_tasks::TokioTasksRuntime},
 };
-
-/// 下载滚动容器组件（本地定义）
-#[derive(Component)]
-pub struct ScrollContainer;
 
 /// 获取下载保存路径
 pub fn get_download_base_path() -> std::path::PathBuf {
@@ -54,31 +50,31 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 /// 下载页面根标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadsRoot;
 
 /// 下载滚动容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadsScrollContainer;
 
 /// 下载任务列表容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTaskList;
 
 /// "下载中" 区域容器（包含标题和任务列表）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadingSection;
 
 /// "下载中" 标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadingTitleText;
 
 /// "全部更新" 按钮标记（检查已下载漫画的新章节）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct UpdateAllDownloadsButton;
 
 /// "开始全部下载" 按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct StartAllDownloadsButton;
 
 /// 已完成下载项目（历史记录）
@@ -95,46 +91,46 @@ pub struct CompletedDownload {
 }
 
 /// 已下载漫画项标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CompletedDownloadItem {
     pub comic_id: String,
     pub path: String,
 }
 
 /// 已下载列表容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CompletedDownloadList;
 
 /// "已下载" 区域容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CompletedSection;
 
 /// "已下载" 标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CompletedTitleText;
 
 /// "等待中" 区域容器（排队等待下载的任务）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct WaitingSection;
 
 /// "等待中" 标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct WaitingTitleText;
 
 /// "等待中" 任务列表容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct WaitingTaskList;
 
 /// "已停止" 区域容器（暂停和失败的任务）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct StoppedSection;
 
 /// "已停止" 标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct StoppedTitleText;
 
 /// "已停止" 任务列表容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct StoppedTaskList;
 
 /// 下载区域折叠状态资源
@@ -162,8 +158,9 @@ impl Default for DownloadSectionCollapseState {
 }
 
 /// 区域类型（用于折叠交互）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SectionType {
+    #[default]
     Downloading,
     Waiting,
     Stopped,
@@ -171,55 +168,55 @@ pub enum SectionType {
 }
 
 /// 可折叠的区域标题按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CollapsibleSectionHeader {
     pub section_type: SectionType,
 }
 
 /// 折叠图标标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CollapseIcon {
     pub section_type: SectionType,
 }
 
 /// 区域内容容器标记（用于折叠/展开）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct SectionContent {
     pub section_type: SectionType,
 }
 
 /// 浮动标题容器（固定在滚动区域顶部）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FloatingHeader;
 
 /// 浮动标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FloatingHeaderText;
 
 /// 浮动标题折叠图标
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FloatingHeaderIcon;
 
 /// 浮动标题按钮（可点击折叠）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct FloatingHeaderButton {
     pub section_type: Option<SectionType>,
 }
 
 /// 重新下载按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct RedownloadButton {
     pub comic_id: String,
 }
 
 /// 打开已下载漫画文件夹按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct OpenCompletedFolderButton {
     pub path: String,
 }
 
 /// 移动已下载漫画按钮（同时移动 Images 和 CBZ）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct MoveCompletedButton {
     pub comic_id: String,
     pub comic_title: String,
@@ -284,18 +281,19 @@ fn scan_completed_downloads(
 }
 
 /// 单个下载任务项标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTaskItem {
     pub comic_id: String,
 }
 
 /// 下载任务分类标签容器标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTaskTagsContainer {
     pub comic_id: String,
 }
 
 /// 标签颜色类型
+#[derive(Clone, Copy)]
 enum TagColor {
     /// 分类（蓝色）
     Category,
@@ -304,30 +302,29 @@ enum TagColor {
 }
 
 /// 下载列表中可点击的标题（跳转到漫画详情）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTitleButton {
     pub comic_id: String,
 }
 
 /// 下载列表中可点击的分类标签（跳转到分类列表）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadCategoryTag {
     pub category: String,
 }
 
 /// 下载列表中可点击的标签（跳转到搜索）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTagButton {
     pub tag: String,
 }
 
-/// 创建标签徽章（可点击）
-fn spawn_tag_badge(
-    parent: &mut ChildSpawnerCommands,
-    text: &str,
-    font: &Handle<Font>,
-    color_type: TagColor,
-) {
+/// 标签徽章场景（可点击）
+///
+/// 分类与标签的标记组件类型不同（`DownloadCategoryTag` /
+/// `DownloadTagButton`）， 用 `Box<dyn Scene>` 在外层分派，内部结构由
+/// `tag_badge_with_marker` 共用。
+fn tag_badge(text: &str, color_type: TagColor) -> Box<dyn Scene> {
     let (bg_color, text_color) = match color_type {
         TagColor::Category => (Color::srgba(0.2, 0.4, 0.8, 0.3), Color::srgb(0.6, 0.8, 1.0)),
         TagColor::Tag => (Color::srgba(0.2, 0.6, 0.4, 0.3), Color::srgb(0.5, 0.9, 0.7)),
@@ -342,160 +339,169 @@ fn spawn_tag_badge(
 
     let text_owned = text.to_string();
 
-    let mut entity_commands = parent.spawn((
-        Button,
-        Interaction::default(),
+    // 根据类型添加不同的组件
+    match color_type {
+        TagColor::Category => Box::new(tag_badge_with_marker(
+            DownloadCategoryTag {
+                category: text_owned,
+            },
+            display_text,
+            bg_color,
+            text_color,
+        )),
+        TagColor::Tag => Box::new(tag_badge_with_marker(
+            DownloadTagButton { tag: text_owned },
+            display_text,
+            bg_color,
+            text_color,
+        )),
+    }
+}
+
+/// 标签徽章公共结构（标记组件由调用方决定）
+fn tag_badge_with_marker<M: Component + Default + Clone + Unpin>(
+    marker: M,
+    display_text: String,
+    bg_color: Color,
+    text_color: Color,
+) -> impl Scene + use<M> {
+    bsn! {
+        template_value(marker)
+        Button
         Node {
             padding: UiRect::new(Val::Px(6.0), Val::Px(6.0), Val::Px(2.0), Val::Px(2.0)),
             border_radius: BorderRadius::all(Val::Px(3.0)),
-            ..default()
-        },
-        BackgroundColor(bg_color),
-    ));
-
-    // 根据类型添加不同的组件
-    match color_type {
-        TagColor::Category => {
-            entity_commands.insert(DownloadCategoryTag {
-                category: text_owned,
-            });
         }
-        TagColor::Tag => {
-            entity_commands.insert(DownloadTagButton { tag: text_owned });
-        }
+        BackgroundColor(bg_color)
+        Children [
+            (
+                Text({display_text})
+                TextFont { font_size: FontSize::Px(10.0) }
+                TextColor(text_color)
+            )
+        ]
     }
-
-    entity_commands.with_children(|badge| {
-        badge.spawn((
-            Text::new(display_text),
-            TextFont {
-                font: font.clone(),
-                font_size: 10.0,
-                ..default()
-            },
-            TextColor(text_color),
-        ));
-    });
 }
 
 /// 下载进度条标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadProgressBar {
     pub comic_id: String,
 }
 
 /// 下载状态文本标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadStatusText {
     pub comic_id: String,
 }
 
 /// 打开下载文件夹按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct OpenDownloadFolderButton;
 
 /// "全部移动"按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct MoveAllDownloadsButton;
 
 /// 标题栏"全部开始"按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct StartAllHeaderButton;
 
 /// 标题栏"全部暂停"按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct PauseAllHeaderButton;
 
 /// 打开 CBZ 文件夹按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct OpenCbzFolderButton;
 
 /// 暂停下载按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct PauseDownloadButton {
     pub comic_id: String,
 }
 
 /// 继续下载按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ResumeDownloadButton {
     pub comic_id: String,
 }
 
 /// 删除下载按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DeleteDownloadButton {
     pub comic_id: String,
 }
 
 /// 重试下载按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct RetryDownloadButton {
     pub comic_id: String,
 }
 
 /// 删除已下载漫画按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DeleteCompletedDownloadButton {
     pub comic_id: String,
     pub path: String,
 }
 
 /// 删除确认面板标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DeleteConfirmPanel {
     pub comic_id: String,
     pub path: String,
 }
 
 /// "同时删除磁盘文件" 勾选框标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DeleteFilesCheckbox {
     pub comic_id: String,
     pub checked: bool,
 }
 
 /// 确认删除按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ConfirmDeleteButton {
     pub comic_id: String,
     pub path: String,
 }
 
 /// 取消删除按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct CancelDeleteButton {
     pub comic_id: String,
 }
 
 /// 下载任务独立设置按钮标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTaskSettingsButton {
     pub comic_id: String,
 }
 
 /// 下载任务独立设置面板标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadTaskSettingsPanel {
     pub comic_id: String,
 }
 
 /// 下载任务独立路径选择按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct TaskPathSelectButton {
     pub comic_id: String,
 }
 
 /// 下载任务独立 CBZ 开关
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct TaskCbzToggle {
     pub comic_id: String,
 }
 
 /// 下载统计类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DownloadStatType {
     /// 总计
+    #[default]
     Total,
     /// 下载中
     Downloading,
@@ -510,11 +516,11 @@ pub enum DownloadStatType {
 }
 
 /// 下载统计面板标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadStatsPanel;
 
 /// 下载统计文本标记
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct DownloadStatText {
     pub stat_type: DownloadStatType,
 }
@@ -538,8 +544,6 @@ pub fn setup_downloads_ui(
         commands.entity(entity).despawn();
     }
 
-    let font: Handle<Font> = get_font();
-
     // 查找内容区域
     let content_area = match content_area_query.iter().next() {
         Some(entity) => entity,
@@ -550,637 +554,408 @@ pub fn setup_downloads_ui(
     };
 
     // 在内容区域下创建下载页面
-    commands.entity(content_area).with_children(|parent| {
-        parent
-            .spawn((
-                DownloadsRoot,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    ..default()
-                },
-                BackgroundColor(AppColors::BACKGROUND),
-            ))
-            .with_children(|root| {
-                // 标题栏
-                spawn_downloads_header(root, &font);
+    let downloads_root = commands
+        .spawn_scene(downloads_page(&download_state, &collapse_state))
+        .id();
+    commands.entity(content_area).add_child(downloads_root);
 
-                // 下载统计面板（固定在标题栏下方，不随内容滚动）
-                spawn_download_stats_panel(root, &font, &download_state);
+    tracing::info!("下载页面 UI 已创建");
+}
 
+/// 下载页面场景
+fn downloads_page(
+    download_state: &DownloadManagerState,
+    collapse_state: &DownloadSectionCollapseState,
+) -> impl Scene + use<> {
+    // 获取所有任务并按状态分类
+    let all_tasks: Vec<_> = download_state
+        .active_tasks()
+        .into_iter()
+        .map(|fsm| fsm.to_ui_task())
+        .collect();
+
+    // 收集所有活跃任务的 ID（用于过滤已完成列表）
+    let active_task_ids: std::collections::HashSet<String> =
+        all_tasks.iter().map(|t| t.comic_id.clone()).collect();
+
+    // 扫描已下载的漫画（排除所有活跃任务）
+    let completed_downloads = scan_completed_downloads(&active_task_ids);
+
+    // 分类任务
+    let downloading_tasks: Vec<_> = all_tasks
+        .iter()
+        .filter(|t| matches!(t.status, ComicDownloadStatus::Downloading))
+        .collect();
+    let waiting_tasks: Vec<_> = all_tasks
+        .iter()
+        .filter(|t| matches!(t.status, ComicDownloadStatus::Waiting))
+        .collect();
+    let stopped_tasks: Vec<_> = all_tasks
+        .iter()
+        .filter(|t| {
+            matches!(
+                t.status,
+                ComicDownloadStatus::Paused | ComicDownloadStatus::Failed(_)
+            )
+        })
+        .collect();
+
+    // 获取折叠状态
+    let downloading_collapsed = collapse_state.downloading_collapsed;
+    let waiting_collapsed = collapse_state.waiting_collapsed;
+    let stopped_collapsed = collapse_state.stopped_collapsed;
+    let completed_collapsed = collapse_state.completed_collapsed;
+
+    bsn! {
+        DownloadsRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            // 标题栏
+            downloads_header(),
+            // 下载统计面板（固定在标题栏下方，不随内容滚动）
+            download_stats_panel(download_state),
+            (
                 // 下载内容（可滚动）
-                root.spawn((Node {
+                Node {
                     width: Val::Percent(100.0),
                     flex_grow: 1.0,
                     flex_shrink: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
                     position_type: PositionType::Relative,
-                    ..default()
-                },))
-                    .with_children(|content_wrapper| {
+                }
+                Children [
+                    (
                         // 滚动容器
-                        let scroll_container = content_wrapper
-                            .spawn((
-                                DownloadsScrollContainer,
-                                ScrollContainer,
-                                Node {
-                                    width: Val::Percent(100.0),
-                                    height: Val::Percent(100.0),
-                                    flex_direction: FlexDirection::Column,
-                                    padding: UiRect::all(Val::Px(20.0)),
-                                    overflow: Overflow::scroll_y(),
-                                    ..default()
-                                },
-                                Scrollable,
-                                ScrollPosition::default(),
-                                ContentSizeInfo::default(),
-                            ))
-                            .with_children(|scroll| {
-                                // 获取所有任务并按状态分类
-                                let all_tasks: Vec<_> = download_state
-                                    .active_tasks()
-                                    .into_iter()
-                                    .map(|fsm| fsm.to_ui_task())
-                                    .collect();
-
-                                // 收集所有活跃任务的 ID（用于过滤已完成列表）
-                                let active_task_ids: std::collections::HashSet<String> =
-                                    all_tasks.iter().map(|t| t.comic_id.clone()).collect();
-
-                                // 扫描已下载的漫画（排除所有活跃任务）
-                                let completed_downloads =
-                                    scan_completed_downloads(&active_task_ids);
-
-                                // 分类任务
-                                let downloading_tasks: Vec<_> = all_tasks
-                                    .iter()
-                                    .filter(|t| {
-                                        matches!(t.status, ComicDownloadStatus::Downloading)
-                                    })
-                                    .collect();
-                                let waiting_tasks: Vec<_> = all_tasks
-                                    .iter()
-                                    .filter(|t| matches!(t.status, ComicDownloadStatus::Waiting))
-                                    .collect();
-                                let stopped_tasks: Vec<_> = all_tasks
-                                    .iter()
-                                    .filter(|t| {
-                                        matches!(
-                                            t.status,
-                                            ComicDownloadStatus::Paused
-                                                | ComicDownloadStatus::Failed(_)
-                                        )
-                                    })
-                                    .collect();
-
-                                // 获取折叠状态
-                                let downloading_collapsed = collapse_state.downloading_collapsed;
-                                let waiting_collapsed = collapse_state.waiting_collapsed;
-                                let stopped_collapsed = collapse_state.stopped_collapsed;
-                                let completed_collapsed = collapse_state.completed_collapsed;
-
-                                // 1. "下载中" 区域 - 始终显示标题，内容可折叠
-                                scroll
-                                    .spawn((
-                                        DownloadingSection,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            margin: UiRect::bottom(Val::Px(10.0)),
-                                            ..default()
-                                        },
-                                    ))
-                                    .with_children(|section| {
-                                        // 可折叠标题
-                                        section
-                                            .spawn((
-                                                CollapsibleSectionHeader {
-                                                    section_type: SectionType::Downloading,
-                                                },
-                                                Button,
-                                                Interaction::default(),
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    align_items: AlignItems::Center,
-                                                    padding: UiRect::new(
-                                                        Val::Px(8.0),
-                                                        Val::Px(8.0),
-                                                        Val::Px(6.0),
-                                                        Val::Px(6.0),
-                                                    ),
-                                                    border: UiRect::all(Val::Px(1.0)),
-                                                    column_gap: Val::Px(8.0),
-                                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                                    ..default()
-                                                },
-                                                BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                                                BorderColor::all(AppColors::BORDER),
-                                            ))
-                                            .with_children(|header| {
-                                                // 折叠图标
-                                                let icon = if downloading_collapsed {
-                                                    ICON_CHEVRON_RIGHT
-                                                } else {
-                                                    ICON_CHEVRON_DOWN
-                                                };
-                                                header.spawn((
-                                                    CollapseIcon {
-                                                        section_type: SectionType::Downloading,
-                                                    },
-                                                    Text::new(icon),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT_MUTED),
-                                                ));
-
-                                                // 下载中标题
-                                                header.spawn((
-                                                    DownloadingTitleText,
-                                                    Text::new(format!(
-                                                        "{ICON_DOWNLOAD} 下载中 ({})",
-                                                        downloading_tasks.len()
-                                                    )),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 16.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-
-                                        // 任务列表容器（可折叠内容）
-                                        section
-                                            .spawn((
-                                                SectionContent {
-                                                    section_type: SectionType::Downloading,
-                                                },
-                                                DownloadTaskList,
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    flex_direction: FlexDirection::Column,
-                                                    row_gap: Val::Px(10.0),
-                                                    padding: UiRect::top(Val::Px(10.0)),
-                                                    display: if downloading_collapsed {
-                                                        Display::None
-                                                    } else {
-                                                        Display::Flex
-                                                    },
-                                                    ..default()
-                                                },
-                                            ))
-                                            .with_children(|list| {
-                                                for task in &downloading_tasks {
-                                                    spawn_download_task_item(list, &font, task);
-                                                }
-                                            });
-                                    });
-
-                                // 2. "等待中" 区域 - 排队等待下载的任务
-                                scroll
-                                    .spawn((
-                                        WaitingSection,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            margin: UiRect::bottom(Val::Px(10.0)),
-                                            ..default()
-                                        },
-                                    ))
-                                    .with_children(|section| {
-                                        // 可折叠标题
-                                        section
-                                            .spawn((
-                                                CollapsibleSectionHeader {
-                                                    section_type: SectionType::Waiting,
-                                                },
-                                                Button,
-                                                Interaction::default(),
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    align_items: AlignItems::Center,
-                                                    padding: UiRect::new(
-                                                        Val::Px(8.0),
-                                                        Val::Px(8.0),
-                                                        Val::Px(6.0),
-                                                        Val::Px(6.0),
-                                                    ),
-                                                    border: UiRect::all(Val::Px(1.0)),
-                                                    column_gap: Val::Px(8.0),
-                                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                                    ..default()
-                                                },
-                                                BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                                                BorderColor::all(AppColors::BORDER),
-                                            ))
-                                            .with_children(|header| {
-                                                // 折叠图标
-                                                let icon = if waiting_collapsed {
-                                                    ICON_CHEVRON_RIGHT
-                                                } else {
-                                                    ICON_CHEVRON_DOWN
-                                                };
-                                                header.spawn((
-                                                    CollapseIcon {
-                                                        section_type: SectionType::Waiting,
-                                                    },
-                                                    Text::new(icon),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT_MUTED),
-                                                ));
-
-                                                // 等待中标题
-                                                header.spawn((
-                                                    WaitingTitleText,
-                                                    Text::new(format!(
-                                                        "{ICON_TIMER_SAND} 等待中 ({})",
-                                                        waiting_tasks.len()
-                                                    )),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 16.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT),
-                                                ));
-                                            });
-
-                                        // 任务列表容器（可折叠内容）
-                                        section
-                                            .spawn((
-                                                SectionContent {
-                                                    section_type: SectionType::Waiting,
-                                                },
-                                                WaitingTaskList,
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    flex_direction: FlexDirection::Column,
-                                                    row_gap: Val::Px(10.0),
-                                                    padding: UiRect::top(Val::Px(10.0)),
-                                                    display: if waiting_collapsed {
-                                                        Display::None
-                                                    } else {
-                                                        Display::Flex
-                                                    },
-                                                    ..default()
-                                                },
-                                            ))
-                                            .with_children(|list| {
-                                                for task in &waiting_tasks {
-                                                    spawn_download_task_item(list, &font, task);
-                                                }
-                                            });
-                                    });
-
-                                // 3. "已停止" 区域 - 暂停和失败的任务
-                                scroll
-                                    .spawn((
-                                        StoppedSection,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            margin: UiRect::bottom(Val::Px(10.0)),
-                                            ..default()
-                                        },
-                                    ))
-                                    .with_children(|section| {
-                                        // 标题行容器（包含可折叠标题 + 全部开始按钮）
-                                        section
-                                            .spawn((Node {
-                                                width: Val::Percent(100.0),
-                                                justify_content: JustifyContent::SpaceBetween,
-                                                align_items: AlignItems::Center,
-                                                column_gap: Val::Px(10.0),
-                                                ..default()
-                                            },))
-                                            .with_children(|header_row| {
-                                                // 可折叠标题（左侧）
-                                                header_row
-                                                    .spawn((
-                                                        CollapsibleSectionHeader {
-                                                            section_type: SectionType::Stopped,
-                                                        },
-                                                        Button,
-                                                        Interaction::default(),
-                                                        Node {
-                                                            flex_grow: 1.0,
-                                                            align_items: AlignItems::Center,
-                                                            padding: UiRect::new(
-                                                                Val::Px(8.0),
-                                                                Val::Px(8.0),
-                                                                Val::Px(6.0),
-                                                                Val::Px(6.0),
-                                                            ),
-                                                            border: UiRect::all(Val::Px(1.0)),
-                                                            column_gap: Val::Px(8.0),
-                                                            border_radius: BorderRadius::all(
-                                                                Val::Px(4.0),
-                                                            ),
-                                                            ..default()
-                                                        },
-                                                        BackgroundColor(Color::srgb(
-                                                            0.12, 0.12, 0.16,
-                                                        )),
-                                                        BorderColor::all(AppColors::BORDER),
-                                                    ))
-                                                    .with_children(|header| {
-                                                        // 折叠图标
-                                                        let icon = if stopped_collapsed {
-                                                            ICON_CHEVRON_RIGHT
-                                                        } else {
-                                                            ICON_CHEVRON_DOWN
-                                                        };
-                                                        header.spawn((
-                                                            CollapseIcon {
-                                                                section_type: SectionType::Stopped,
-                                                            },
-                                                            Text::new(icon),
-                                                            TextFont {
-                                                                font: font.clone(),
-                                                                font_size: 14.0,
-                                                                ..default()
-                                                            },
-                                                            TextColor(AppColors::TEXT_MUTED),
-                                                        ));
-
-                                                        // 已停止标题
-                                                        header.spawn((
-                                                            StoppedTitleText,
-                                                            Text::new(format!(
-                                                                "{ICON_STOP} 已停止 ({})",
-                                                                stopped_tasks.len()
-                                                            )),
-                                                            TextFont {
-                                                                font: font.clone(),
-                                                                font_size: 16.0,
-                                                                ..default()
-                                                            },
-                                                            TextColor(Color::srgb(0.8, 0.6, 0.2)),
-                                                        ));
-                                                    });
-
-                                                // 全部开始按钮（右侧）
-                                                header_row
-                                                    .spawn((
-                                                        StartAllDownloadsButton,
-                                                        Button,
-                                                        Interaction::default(),
-                                                        Node {
-                                                            padding: UiRect::new(
-                                                                Val::Px(12.0),
-                                                                Val::Px(12.0),
-                                                                Val::Px(6.0),
-                                                                Val::Px(6.0),
-                                                            ),
-                                                            border: UiRect::all(Val::Px(1.0)),
-                                                            border_radius: BorderRadius::all(
-                                                                Val::Px(4.0),
-                                                            ),
-                                                            ..default()
-                                                        },
-                                                        BackgroundColor(Color::srgb(0.2, 0.5, 0.3)),
-                                                        BorderColor::all(Color::srgb(
-                                                            0.3, 0.7, 0.4,
-                                                        )),
-                                                    ))
-                                                    .with_children(|btn| {
-                                                        btn.spawn((
-                                                            Text::new(format!(
-                                                                "{ICON_PLAY} 全部开始"
-                                                            )),
-                                                            TextFont {
-                                                                font: font.clone(),
-                                                                font_size: 13.0,
-                                                                ..default()
-                                                            },
-                                                            TextColor(AppColors::TEXT),
-                                                        ));
-                                                    });
-                                            });
-
-                                        // 任务列表容器（可折叠内容）
-                                        section
-                                            .spawn((
-                                                SectionContent {
-                                                    section_type: SectionType::Stopped,
-                                                },
-                                                StoppedTaskList,
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    flex_direction: FlexDirection::Column,
-                                                    row_gap: Val::Px(10.0),
-                                                    padding: UiRect::top(Val::Px(10.0)),
-                                                    display: if stopped_collapsed {
-                                                        Display::None
-                                                    } else {
-                                                        Display::Flex
-                                                    },
-                                                    ..default()
-                                                },
-                                            ))
-                                            .with_children(|list| {
-                                                for task in &stopped_tasks {
-                                                    spawn_download_task_item(list, &font, task);
-                                                }
-                                            });
-                                    });
-
-                                // 4. "已下载" 区域 - 已完成的任务
-                                scroll
-                                    .spawn((
-                                        CompletedSection,
-                                        Node {
-                                            width: Val::Percent(100.0),
-                                            flex_direction: FlexDirection::Column,
-                                            margin: UiRect::bottom(Val::Px(10.0)),
-                                            ..default()
-                                        },
-                                    ))
-                                    .with_children(|section| {
-                                        // 可折叠标题
-                                        section
-                                            .spawn((
-                                                CollapsibleSectionHeader {
-                                                    section_type: SectionType::Completed,
-                                                },
-                                                Button,
-                                                Interaction::default(),
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    align_items: AlignItems::Center,
-                                                    padding: UiRect::new(
-                                                        Val::Px(8.0),
-                                                        Val::Px(8.0),
-                                                        Val::Px(6.0),
-                                                        Val::Px(6.0),
-                                                    ),
-                                                    border: UiRect::all(Val::Px(1.0)),
-                                                    column_gap: Val::Px(8.0),
-                                                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                                                    ..default()
-                                                },
-                                                BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-                                                BorderColor::all(AppColors::BORDER),
-                                            ))
-                                            .with_children(|header| {
-                                                // 折叠图标
-                                                let icon = if completed_collapsed {
-                                                    ICON_CHEVRON_RIGHT
-                                                } else {
-                                                    ICON_CHEVRON_DOWN
-                                                };
-                                                header.spawn((
-                                                    CollapseIcon {
-                                                        section_type: SectionType::Completed,
-                                                    },
-                                                    Text::new(icon),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 14.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(AppColors::TEXT_MUTED),
-                                                ));
-
-                                                // 已下载标题
-                                                header.spawn((
-                                                    CompletedTitleText,
-                                                    Text::new(format!(
-                                                        "{ICON_CHECK} 已下载 ({})",
-                                                        completed_downloads.len()
-                                                    )),
-                                                    TextFont {
-                                                        font: font.clone(),
-                                                        font_size: 16.0,
-                                                        ..default()
-                                                    },
-                                                    TextColor(Color::srgb(0.3, 0.8, 0.3)),
-                                                ));
-                                            });
-
-                                        // 列表容器（可折叠内容）
-                                        section
-                                            .spawn((
-                                                SectionContent {
-                                                    section_type: SectionType::Completed,
-                                                },
-                                                CompletedDownloadList,
-                                                Node {
-                                                    width: Val::Percent(100.0),
-                                                    flex_direction: FlexDirection::Column,
-                                                    row_gap: Val::Px(10.0),
-                                                    padding: UiRect::top(Val::Px(10.0)),
-                                                    display: if completed_collapsed {
-                                                        Display::None
-                                                    } else {
-                                                        Display::Flex
-                                                    },
-                                                    ..default()
-                                                },
-                                            ))
-                                            .with_children(|list| {
-                                                for download in &completed_downloads {
-                                                    spawn_completed_download_item(
-                                                        list, &font, download,
-                                                    );
-                                                }
-                                            });
-                                    });
-
+                        #DownloadsScroll
+                        DownloadsScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::all(Val::Px(20.0)),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [
+                            // 1. "下载中" 区域 - 始终显示标题，内容可折叠
+                            downloading_section(downloading_collapsed, &downloading_tasks),
+                            // 2. "等待中" 区域 - 排队等待下载的任务
+                            waiting_section(waiting_collapsed, &waiting_tasks),
+                            // 3. "已停止" 区域 - 暂停和失败的任务
+                            stopped_section(stopped_collapsed, &stopped_tasks),
+                            // 4. "已下载" 区域 - 已完成的任务
+                            completed_section(completed_collapsed, &completed_downloads),
+                            (
                                 // 底部间距，确保最后的内容不会贴着窗口底部
-                                scroll.spawn((Node {
+                                Node {
                                     height: Val::Px(40.0),
                                     min_height: Val::Px(40.0),
-                                    ..default()
-                                },));
-                            })
-                            .id();
-
-                        // 滚动条
-                        spawn_downloads_scrollbar(content_wrapper, scroll_container);
-
-                        // 浮动标题（固定在顶部，初始隐藏）
-                        spawn_floating_header(content_wrapper, &font);
-                    });
-            });
-    });
-
-    tracing::info!("下载页面 UI 已创建");
+                                }
+                            ),
+                        ]
+                    ),
+                    // 滚动条
+                    scrollbar(#DownloadsScroll),
+                    // 浮动标题（固定在顶部，初始隐藏）
+                    floating_header(),
+                ]
+            ),
+        ]
+    }
 }
 
-/// 创建浮动标题（当区域标题滚出视口时显示）
-fn spawn_floating_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            FloatingHeader,
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(0.0),
-                left: Val::Px(20.0),
-                right: Val::Px(32.0), // 给滚动条留空间
-                height: Val::Px(36.0),
-                display: Display::None, // 初始隐藏，滚动时显示
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.98)),
-            ZIndex(100), // 提高 ZIndex 确保可见
-        ))
-        .with_children(|header| {
-            // 可点击按钮
-            header
-                .spawn((
-                    FloatingHeaderButton { section_type: None },
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Percent(100.0),
-                        align_items: AlignItems::Center,
-                        padding: UiRect::horizontal(Val::Px(12.0)),
-                        column_gap: Val::Px(8.0),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.12, 0.12, 0.16, 0.98)),
-                    BorderColor::all(AppColors::BORDER),
-                ))
-                .with_children(|btn| {
-                    // 折叠图标
-                    btn.spawn((
-                        FloatingHeaderIcon,
-                        Text::new(ICON_CHEVRON_DOWN),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_MUTED),
-                    ));
+/// 可折叠区域标题按钮场景（折叠图标 + 标题文本）
+///
+/// `grow`: 标题位于标题行内时占据剩余宽度（"已停止" 区域），否则铺满整行
+fn collapsible_section_header<T: Component + Default + Clone + Unpin>(
+    section_type: SectionType,
+    collapsed: bool,
+    title_marker: T,
+    title: String,
+    title_color: Color,
+    grow: bool,
+) -> impl Scene + use<T> {
+    // 折叠图标
+    let icon = if collapsed {
+        ICON_CHEVRON_RIGHT
+    } else {
+        ICON_CHEVRON_DOWN
+    };
+    let (width, flex_grow) = if grow {
+        (Val::Auto, 1.0_f32)
+    } else {
+        (Val::Percent(100.0), 0.0_f32)
+    };
 
-                    // 标题文本
-                    btn.spawn((
-                        FloatingHeaderText,
-                        Text::new(" "),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-                });
-        });
+    bsn! {
+        CollapsibleSectionHeader { section_type: {section_type} }
+        Button
+        Node {
+            width: {width},
+            flex_grow: {flex_grow},
+            align_items: AlignItems::Center,
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            column_gap: Val::Px(8.0),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(AppColors::SURFACE_SUNKEN)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                // 折叠图标
+                CollapseIcon { section_type: {section_type} }
+                Text({icon})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT_MUTED)
+            ),
+            (
+                // 区域标题
+                template_value(title_marker)
+                Text({title})
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(title_color)
+            ),
+        ]
+    }
+}
+
+/// 区域任务列表容器场景（可折叠内容）
+fn section_content_list<L: Component + Default + Clone + Unpin, C: SceneList>(
+    section_type: SectionType,
+    list_marker: L,
+    collapsed: bool,
+    items: C,
+) -> impl Scene + use<L, C> {
+    let display = if collapsed {
+        Display::None
+    } else {
+        Display::Flex
+    };
+
+    bsn! {
+        SectionContent { section_type: {section_type} }
+        template_value(list_marker)
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            padding: UiRect::top(Val::Px(10.0)),
+            display: {display},
+        }
+        Children [ {items} ]
+    }
+}
+
+/// 区域外框场景（标题 + 可折叠内容）
+fn section_frame<S: Component + Default + Clone + Unpin, C: SceneList>(
+    section_marker: S,
+    contents: C,
+) -> impl Scene + use<S, C> {
+    bsn! {
+        template_value(section_marker)
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            margin: UiRect::bottom(Val::Px(10.0)),
+        }
+        Children [ {contents} ]
+    }
+}
+
+/// "下载中" 区域场景
+fn downloading_section(
+    collapsed: bool,
+    tasks: &[&crate::resources::ComicDownloadTask],
+) -> impl Scene + use<> {
+    let title = format!("{ICON_DOWNLOAD} 下载中 ({})", tasks.len());
+    let items: Vec<_> = tasks.iter().copied().map(download_task_item).collect();
+
+    section_frame(
+        DownloadingSection,
+        bsn_list![
+            // 可折叠标题
+            collapsible_section_header(
+                SectionType::Downloading,
+                collapsed,
+                DownloadingTitleText,
+                title,
+                AppColors::TEXT,
+                false,
+            ),
+            // 任务列表容器（可折叠内容）
+            section_content_list(SectionType::Downloading, DownloadTaskList, collapsed, items),
+        ],
+    )
+}
+
+/// "等待中" 区域场景
+fn waiting_section(
+    collapsed: bool,
+    tasks: &[&crate::resources::ComicDownloadTask],
+) -> impl Scene + use<> {
+    let title = format!("{ICON_TIMER_SAND} 等待中 ({})", tasks.len());
+    let items: Vec<_> = tasks.iter().copied().map(download_task_item).collect();
+
+    section_frame(
+        WaitingSection,
+        bsn_list![
+            // 可折叠标题
+            collapsible_section_header(
+                SectionType::Waiting,
+                collapsed,
+                WaitingTitleText,
+                title,
+                AppColors::TEXT,
+                false,
+            ),
+            // 任务列表容器（可折叠内容）
+            section_content_list(SectionType::Waiting, WaitingTaskList, collapsed, items),
+        ],
+    )
+}
+
+/// "已停止" 区域场景（标题行额外带 "全部开始" 按钮）
+fn stopped_section(
+    collapsed: bool,
+    tasks: &[&crate::resources::ComicDownloadTask],
+) -> impl Scene + use<> {
+    let title = format!("{ICON_STOP} 已停止 ({})", tasks.len());
+    let start_all_label = format!("{ICON_PLAY} 全部开始");
+    let items: Vec<_> = tasks.iter().copied().map(download_task_item).collect();
+
+    section_frame(
+        StoppedSection,
+        bsn_list![
+            (
+                // 标题行容器（包含可折叠标题 + 全部开始按钮）
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                }
+                Children [
+                    // 可折叠标题（左侧）
+                    collapsible_section_header(
+                        SectionType::Stopped,
+                        collapsed,
+                        StoppedTitleText,
+                        title,
+                        PAUSED_COLOR,
+                        true,
+                    ),
+                    (
+                        // 全部开始按钮（右侧）
+                        StartAllDownloadsButton
+                        Button
+                        Node {
+                            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(START_ALL_COLOR)
+                        template_value(BorderColor::all(REDOWNLOAD_COLOR))
+                        Children [
+                            (
+                                Text({start_all_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            // 任务列表容器（可折叠内容）
+            section_content_list(SectionType::Stopped, StoppedTaskList, collapsed, items),
+        ],
+    )
+}
+
+/// "已下载" 区域场景
+fn completed_section(collapsed: bool, downloads: &[CompletedDownload]) -> impl Scene + use<> {
+    let title = format!("{ICON_CHECK} 已下载 ({})", downloads.len());
+    let items: Vec<_> = downloads.iter().map(completed_download_item).collect();
+
+    section_frame(
+        CompletedSection,
+        bsn_list![
+            // 可折叠标题
+            collapsible_section_header(
+                SectionType::Completed,
+                collapsed,
+                CompletedTitleText,
+                title,
+                COMPLETED_COLOR,
+                false,
+            ),
+            // 列表容器（可折叠内容）
+            section_content_list(
+                SectionType::Completed,
+                CompletedDownloadList,
+                collapsed,
+                items,
+            ),
+        ],
+    )
+}
+
+/// 浮动标题场景（当区域标题滚出视口时显示）
+fn floating_header() -> impl Scene {
+    bsn! {
+        FloatingHeader
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(20.0),
+            right: Val::Px(32.0), // 给滚动条留空间
+            height: Val::Px(36.0),
+            display: Display::None, // 初始隐藏，滚动时显示
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(Color::srgba(0.2, 0.2, 0.25, 0.98))
+        ZIndex(100) // 提高 ZIndex 确保可见
+        Children [
+            (
+                // 可点击按钮
+                FloatingHeaderButton
+                Button
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    column_gap: Val::Px(8.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                }
+                BackgroundColor(Color::srgba(0.12, 0.12, 0.16, 0.98))
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 折叠图标
+                        FloatingHeaderIcon
+                        Text(ICON_CHEVRON_DOWN)
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT_MUTED)
+                    ),
+                    (
+                        // 标题文本
+                        FloatingHeaderText
+                        Text(" ")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                ]
+            )
+        ]
+    }
 }
 
 /// 各统计类型对应的数字颜色
@@ -1191,7 +966,7 @@ fn stat_value_color(stat_type: DownloadStatType) -> Color {
         DownloadStatType::Waiting => Color::srgb(0.8, 0.7, 0.2),
         DownloadStatType::Paused => Color::srgb(0.8, 0.5, 0.2),
         DownloadStatType::Completed => Color::srgb(0.3, 0.7, 0.3),
-        DownloadStatType::Failed => Color::srgb(0.8, 0.3, 0.3),
+        DownloadStatType::Failed => AppColors::ERROR,
     }
 }
 
@@ -1237,315 +1012,249 @@ fn count_download_stats(download_state: &DownloadManagerState) -> [(DownloadStat
     ]
 }
 
-/// 创建单个统计项（"标签: 数字"）
-fn spawn_stat_item(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    stat_type: DownloadStatType,
-    value: usize,
-) {
-    parent
-        .spawn((Node {
+/// 单个统计项场景（"标签: 数字"）
+fn stat_item(stat_type: DownloadStatType, value: usize) -> impl Scene {
+    let label = format!("{}: ", stat_label(stat_type));
+    let value_text = format!("{value}");
+    let value_color = stat_value_color(stat_type);
+
+    bsn! {
+        Node {
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             column_gap: Val::Px(2.0),
             margin: UiRect::right(Val::Px(16.0)),
-            ..default()
-        },))
-        .with_children(|item| {
-            // 标签文本
-            item.spawn((
-                Text::new(format!("{}: ", stat_label(stat_type))),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            // 数字文本（带颜色 + 标记组件，用于动态更新）
-            item.spawn((
-                DownloadStatText { stat_type },
-                Text::new(format!("{value}")),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(stat_value_color(stat_type)),
-            ));
-        });
+        }
+        Children [
+            (
+                // 标签文本
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 数字文本（带颜色 + 标记组件，用于动态更新）
+                DownloadStatText { stat_type: {stat_type} }
+                Text({value_text})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(value_color)
+            ),
+        ]
+    }
 }
 
-/// 创建下载统计面板
-fn spawn_download_stats_panel(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    download_state: &DownloadManagerState,
-) {
+/// 下载统计面板场景
+fn download_stats_panel(download_state: &DownloadManagerState) -> impl Scene + use<> {
     let stats = count_download_stats(download_state);
+    let items: Vec<_> = stats
+        .iter()
+        .map(|(stat_type, value)| stat_item(*stat_type, *value))
+        .collect();
 
-    parent
-        .spawn((
-            DownloadStatsPanel,
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(8.0), Val::Px(8.0)),
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(4.0),
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.12, 0.12, 0.16)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|panel| {
-            for (stat_type, value) in &stats {
-                spawn_stat_item(panel, font, *stat_type, *value);
-            }
-        });
+    bsn! {
+        DownloadStatsPanel
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            flex_wrap: FlexWrap::Wrap,
+            padding: UiRect::new(Val::Px(20.0), Val::Px(20.0), Val::Px(8.0), Val::Px(8.0)),
+            align_items: AlignItems::Center,
+            row_gap: Val::Px(4.0),
+            border: UiRect::bottom(Val::Px(1.0)),
+        }
+        BackgroundColor(AppColors::SURFACE_SUNKEN)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [ {items} ]
+    }
 }
 
-/// 创建下载标题栏
-/// 创建标题栏小按钮
-fn spawn_header_button(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    marker: impl Component,
-    label: &str,
+/// 标题栏小按钮场景
+fn header_button<T: Component + Default + Clone + Unpin>(
+    marker: T,
+    label: String,
     color: Color,
-) {
-    parent
-        .spawn((
-            marker,
-            Button,
-            Interaction::default(),
-            Node {
-                padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(color),
-            BorderColor::all(color),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-        });
+) -> impl Scene + use<T> {
+    bsn! {
+        template_value(marker)
+        Button
+        Node {
+            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(color)
+        template_value(BorderColor::all(color))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(Color::WHITE)
+            )
+        ]
+    }
 }
 
-fn spawn_downloads_header(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(50.0),
-                padding: UiRect::horizontal(Val::Px(20.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::SpaceBetween,
-                border: UiRect::bottom(Val::Px(1.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|header| {
-            // 标题
-            header.spawn((
-                Text::new(format!("{ICON_DOWNLOAD} 下载管理")),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+/// 标题栏按钮场景（交互态交给全局 `apply_button_interaction`）
+///
+/// `rest_bg` 只是静止色的初值，避免建好到首次配色之间闪一帧。
+fn styled_header_button<T: Component + Default + Clone + Unpin>(
+    marker: T,
+    label: String,
+    style: ButtonStyle,
+    rest_bg: Color,
+    border: Color,
+) -> impl Scene + use<T> {
+    bsn! {
+        template_value(marker)
+        Button
+        template_value(style)
+        Node {
+            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(rest_bg)
+        template_value(BorderColor::all(border))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
+}
 
-            // 按钮组容器
-            header
-                .spawn((Node {
+/// 下载标题栏场景
+fn downloads_header() -> impl Scene {
+    let title = format!("{ICON_DOWNLOAD} 下载管理");
+    let update_all_label = format!("{ICON_REFRESH} 全部更新");
+    let start_all_label = format!("{ICON_PLAY} 全部开始");
+    let pause_all_label = format!("{ICON_PAUSE} 全部暂停");
+    let open_images_label = format!("{ICON_FOLDER_OPEN} 原图");
+    let open_cbz_label = format!("{ICON_FOLDER_OPEN} CBZ");
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(50.0),
+            padding: UiRect::horizontal(Val::Px(20.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+            border: UiRect::bottom(Val::Px(1.0)),
+        }
+        BackgroundColor(AppColors::HEADER_BG)
+        template_value(BorderColor::all(AppColors::BORDER))
+        Children [
+            (
+                // 标题
+                Text({title})
+                TextFont { font_size: FontSize::Px(20.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                // 按钮组容器
+                Node {
                     flex_direction: FlexDirection::Row,
                     column_gap: Val::Px(8.0),
-                    ..default()
-                },))
-                .with_children(|btn_group| {
+                }
+                Children [
                     // 全部更新按钮
-                    btn_group
-                        .spawn((
-                            UpdateAllDownloadsButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(12.0),
-                                    Val::Px(12.0),
-                                    Val::Px(6.0),
-                                    Val::Px(6.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(AppColors::PRIMARY),
-                            BorderColor::all(AppColors::PRIMARY),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(format!("{ICON_REFRESH} 全部更新")),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-
+                    styled_header_button(
+                        UpdateAllDownloadsButton,
+                        update_all_label,
+                        ButtonStyle::primary(),
+                        AppColors::PRIMARY,
+                        AppColors::PRIMARY,
+                    ),
                     // 全部开始按钮
-                    spawn_header_button(
-                        btn_group,
-                        font,
-                        StartAllHeaderButton,
-                        &format!("{ICON_PLAY} 全部开始"),
-                        Color::srgb(0.2, 0.5, 0.3),
-                    );
-
+                    header_button(StartAllHeaderButton, start_all_label, START_ALL_COLOR),
                     // 全部暂停按钮
-                    spawn_header_button(
-                        btn_group,
-                        font,
-                        PauseAllHeaderButton,
-                        &format!("{ICON_PAUSE} 全部暂停"),
-                        Color::srgb(0.7, 0.5, 0.2),
-                    );
-
+                    header_button(PauseAllHeaderButton, pause_all_label, RETRY_COLOR),
                     // 打开原图文件夹按钮
-                    btn_group
-                        .spawn((
-                            OpenDownloadFolderButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(12.0),
-                                    Val::Px(12.0),
-                                    Val::Px(6.0),
-                                    Val::Px(6.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(format!("{ICON_FOLDER_OPEN} 原图")),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-
+                    styled_header_button(
+                        OpenDownloadFolderButton,
+                        open_images_label,
+                        ButtonStyle::card(),
+                        AppColors::SURFACE,
+                        AppColors::BORDER,
+                    ),
                     // 打开 CBZ 文件夹按钮
-                    btn_group
-                        .spawn((
-                            OpenCbzFolderButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(12.0),
-                                    Val::Px(12.0),
-                                    Val::Px(6.0),
-                                    Val::Px(6.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(format!("{ICON_FOLDER_OPEN} CBZ")),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 13.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                });
-        });
+                    styled_header_button(
+                        OpenCbzFolderButton,
+                        open_cbz_label,
+                        ButtonStyle::card(),
+                        AppColors::SURFACE,
+                        AppColors::BORDER,
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
-/// 创建空状态提示
-fn spawn_empty_state(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((Node {
+/// 空状态提示场景
+fn empty_state() -> impl Scene {
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             height: Val::Px(200.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
-            ..default()
-        },))
-        .with_children(|empty| {
-            empty.spawn((
-                Text::new(ICON_INBOX),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            empty.spawn((
-                Text::new("暂无下载任务"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            empty.spawn((
-                Text::new("在漫画详情页点击下载按钮开始下载"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        });
+        }
+        Children [
+            (
+                Text(ICON_INBOX)
+                TextFont { font_size: FontSize::Px(48.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                Text("暂无下载任务")
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                Text("在漫画详情页点击下载按钮开始下载")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+        ]
+    }
 }
 
-/// 创建下载任务项
-fn spawn_download_task_item(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    task: &crate::resources::ComicDownloadTask,
-) {
-    let (status_text, status_color) = match &task.status {
+// ==================== 语义色 ====================
+//
+// 状态色与操作按钮的角色色。**建卡与交互系统必须引用同一常量**——
+// 此前两边各写一份字面量，按钮一旦 hover 过就被交互系统改成另一套色，
+// 视觉上"走样"且回不去。失败/删除类统一走 `AppColors::ERROR`。
+
+/// 已暂停状态 / 暂停按钮（琥珀）
+const PAUSED_COLOR: Color = Color::srgb(0.8, 0.6, 0.2);
+/// 已完成状态（绿）
+const COMPLETED_COLOR: Color = Color::srgb(0.3, 0.8, 0.3);
+/// 继续按钮（绿）
+const RESUME_COLOR: Color = Color::srgb(0.3, 0.7, 0.3);
+/// 重试按钮 / 全部暂停按钮（橙）
+const RETRY_COLOR: Color = Color::srgb(0.7, 0.5, 0.2);
+/// 设置按钮（靛）
+const SETTINGS_COLOR: Color = Color::srgb(0.5, 0.5, 0.7);
+/// 打开文件夹按钮（灰）
+const FOLDER_COLOR: Color = Color::srgb(0.5, 0.5, 0.6);
+/// 移动按钮（蓝灰）
+const MOVE_COLOR: Color = Color::srgb(0.5, 0.6, 0.8);
+/// 更新 / 重新下载按钮（青绿）
+const REDOWNLOAD_COLOR: Color = Color::srgb(0.3, 0.7, 0.4);
+/// 全部开始按钮（深绿）
+const START_ALL_COLOR: Color = Color::srgb(0.2, 0.5, 0.3);
+
+/// 任务状态 → (显示文案, 文字颜色)
+///
+/// 建卡（`download_task_item`）与刷新（`refresh_downloads_ui`）共用，
+/// 避免两条路径的文案/配色各写一份后走样。
+fn task_status_label(task: &crate::resources::ComicDownloadTask) -> (String, Color) {
+    match &task.status {
         ComicDownloadStatus::Waiting => ("等待中".to_string(), AppColors::TEXT_SECONDARY),
         ComicDownloadStatus::Downloading => (
             format!(
@@ -1554,22 +1263,39 @@ fn spawn_download_task_item(
             ),
             AppColors::PRIMARY,
         ),
-        ComicDownloadStatus::Paused => ("已暂停".to_string(), Color::srgb(0.8, 0.6, 0.2)),
-        ComicDownloadStatus::Completed => ("已完成".to_string(), Color::srgb(0.3, 0.8, 0.3)),
-        ComicDownloadStatus::Failed(err) => (format!("失败: {}", err), Color::srgb(0.8, 0.3, 0.3)),
-    };
+        ComicDownloadStatus::Paused => ("已暂停".to_string(), PAUSED_COLOR),
+        ComicDownloadStatus::Completed => ("已完成".to_string(), COMPLETED_COLOR),
+        ComicDownloadStatus::Failed(err) => (format!("失败: {}", err), AppColors::ERROR),
+    }
+}
 
-    // 计算进度百分比
-    let progress = if task.total_episodes > 0 {
-        let episode_progress = (task.current_episode - 1) as f32 / task.total_episodes as f32;
-        let page_progress = if task.total_pages > 0 {
-            task.current_page as f32 / task.total_pages as f32 / task.total_episodes as f32
-        } else {
-            0.0
-        };
-        (episode_progress + page_progress).clamp(0.0, 1.0)
+/// 任务整体进度（0.0 ~ 1.0）：已完成章节占比 + 当前章节内页占比
+fn task_progress(task: &crate::resources::ComicDownloadTask) -> f32 {
+    if task.total_episodes == 0 {
+        return 0.0;
+    }
+    let episode_progress = (task.current_episode - 1) as f32 / task.total_episodes as f32;
+    let page_progress = if task.total_pages > 0 {
+        task.current_page as f32 / task.total_pages as f32 / task.total_episodes as f32
     } else {
         0.0
+    };
+    (episode_progress + page_progress).clamp(0.0, 1.0)
+}
+
+/// 下载任务项场景
+///
+/// 页面初建（各区域列表）与动态新增任务（`add_new_task_ui`）共用同一实现，
+/// 任何样式改动自动对两条路径同时生效。
+fn download_task_item(task: &crate::resources::ComicDownloadTask) -> impl Scene + use<> {
+    let (status_text, status_color) = task_status_label(task);
+
+    let progress_width = Val::Percent(task_progress(task) * 100.0);
+    let progress_color = match &task.status {
+        ComicDownloadStatus::Completed => COMPLETED_COLOR,
+        ComicDownloadStatus::Failed(_) => AppColors::ERROR,
+        ComicDownloadStatus::Paused => PAUSED_COLOR,
+        _ => AppColors::PRIMARY,
     };
 
     // 判断是否可以暂停/继续/重试
@@ -1582,613 +1308,410 @@ fn spawn_download_task_item(
     // 删除按钮始终可见（下载中时作为"取消"功能）
     let can_delete = true;
 
-    parent
-        .spawn((
-            DownloadTaskItem {
-                comic_id: task.comic_id.clone(),
-            },
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(15.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                row_gap: Val::Px(10.0),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|item| {
-            // 标题行
-            item.spawn((Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 漫画标题（可点击跳转详情）
-                    row.spawn((
-                        DownloadTitleButton {
-                            comic_id: task.comic_id.clone(),
-                        },
-                        Button,
-                        Interaction::default(),
-                        Node::default(),
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(task.comic_title.clone()),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
+    let comic_title = task.comic_title.clone();
+    let path_label = format!("{ICON_FOLDER} {}", task.save_path);
+    // 组件字段值在 bsn! 内是延迟求值的 move 闭包，只能引用 owned 局部变量
+    let item_comic_id = task.comic_id.clone();
+    let title_comic_id = task.comic_id.clone();
+    let status_comic_id = task.comic_id.clone();
+    let bar_comic_id = task.comic_id.clone();
 
-                    // 状态标签
-                    row.spawn((
-                        DownloadStatusText {
-                            comic_id: task.comic_id.clone(),
-                        },
-                        Text::new(status_text),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(status_color),
-                    ));
-                });
+    // 分类和标签行（容器始终存在：分类/标签常在建卡后才由 API 返回，
+    // update_download_task_tags 靠这个 marker 回填）
+    let tags_comic_id = task.comic_id.clone();
+    let badges: Vec<_> = task
+        .categories
+        .iter()
+        .map(|category| tag_badge(category, TagColor::Category))
+        .chain(task.tags.iter().map(|tag| tag_badge(tag, TagColor::Tag)))
+        .collect();
 
-            // 分类和标签行（如果有的话）
-            let has_categories = !task.categories.is_empty();
-            let has_tags = !task.tags.is_empty();
-            if has_categories || has_tags {
-                item.spawn((Node {
+    // 独立设置标注（如果有自定义设置）
+    let settings_note: Box<dyn SceneList> =
+        if task.custom_download_path.is_some() || task.custom_auto_pack_cbz.is_some() {
+            let mut settings_parts = Vec::new();
+            if let Some(ref path) = task.custom_download_path {
+                settings_parts.push(format!("路径: {}", path));
+            }
+            if let Some(cbz) = task.custom_auto_pack_cbz {
+                settings_parts.push(format!("CBZ: {}", if cbz { "开" } else { "关" }));
+            }
+            let note = format!("{ICON_COG} {}", settings_parts.join(" | "));
+            Box::new(bsn_list![(
+                Text({note})
+                TextFont { font_size: FontSize::Px(10.0) }
+                TextColor(Color::srgba(0.5, 0.5, 0.7, 0.8))
+            )])
+        } else {
+            Box::new(bsn_list![])
+        };
+
+    bsn! {
+        DownloadTaskItem { comic_id: {item_comic_id} }
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(Scale::SP_MD)),
+            row_gap: Val::Px(Scale::SP_SM),
+            border_radius: BorderRadius::all(Val::Px(Scale::R_MD)),
+        }
+        BackgroundColor(AppColors::SURFACE)
+        Children [
+            (
+                // 标题行
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        // 漫画标题（可点击跳转详情）
+                        DownloadTitleButton { comic_id: {title_comic_id} }
+                        Button
+                        Node
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text({comic_title})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        // 状态标签
+                        DownloadStatusText { comic_id: {status_comic_id} }
+                        Text({status_text})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(status_color)
+                    ),
+                ]
+            ),
+            (
+                // 分类和标签容器（初始可能为空，API 返回后由
+                // update_download_task_tags 补齐）
+                DownloadTaskTagsContainer { comic_id: {tags_comic_id} }
+                Node {
                     width: Val::Percent(100.0),
                     flex_direction: FlexDirection::Row,
                     flex_wrap: FlexWrap::Wrap,
                     column_gap: Val::Px(4.0),
                     row_gap: Val::Px(4.0),
-                    ..default()
-                },))
-                    .with_children(|tags_row| {
-                        // 显示所有分类
-                        for category in task.categories.iter() {
-                            spawn_tag_badge(tags_row, category, font, TagColor::Category);
-                        }
-                        // 显示所有标签
-                        for tag in task.tags.iter() {
-                            spawn_tag_badge(tags_row, tag, font, TagColor::Tag);
-                        }
-                    });
-            }
-
-            // 进度条
-            item.spawn((
+                }
+                Children [ {badges} ]
+            ),
+            (
+                // 进度条
                 Node {
                     width: Val::Percent(100.0),
-                    height: Val::Px(6.0),
-                    border_radius: BorderRadius::all(Val::Px(3.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-            ))
-            .with_children(|track| {
-                track.spawn((
-                    DownloadProgressBar {
-                        comic_id: task.comic_id.clone(),
-                    },
-                    Node {
-                        width: Val::Percent(progress * 100.0),
-                        height: Val::Percent(100.0),
-                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                        ..default()
-                    },
-                    BackgroundColor(match &task.status {
-                        ComicDownloadStatus::Completed => Color::srgb(0.3, 0.8, 0.3),
-                        ComicDownloadStatus::Failed(_) => Color::srgb(0.8, 0.3, 0.3),
-                        ComicDownloadStatus::Paused => Color::srgb(0.8, 0.6, 0.2),
-                        _ => AppColors::PRIMARY,
-                    }),
-                ));
-            });
-
-            // 路径和控制按钮行
-            item.spawn((Node {
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|row| {
-                    // 保存路径
-                    row.spawn((
-                        Text::new(format!("{ICON_FOLDER} {}", task.save_path)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-
-                    // 控制按钮组
-                    row.spawn((Node {
-                        flex_direction: FlexDirection::Row,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    },))
-                        .with_children(|btns| {
+                    height: Val::Px(4.0),
+                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                }
+                BackgroundColor(AppColors::SURFACE_HOVER)
+                Children [
+                    (
+                        DownloadProgressBar { comic_id: {bar_comic_id} }
+                        Node {
+                            width: {progress_width},
+                            height: Val::Percent(100.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                        }
+                        BackgroundColor(progress_color)
+                    )
+                ]
+            ),
+            (
+                // 路径和控制按钮行
+                Node {
+                    width: Val::Percent(100.0),
+                    justify_content: JustifyContent::SpaceBetween,
+                    align_items: AlignItems::Center,
+                }
+                Children [
+                    (
+                        // 保存路径
+                        Text({path_label})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        // 控制按钮组
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            column_gap: Val::Px(8.0),
+                        }
+                        Children [
                             // 暂停按钮（始终创建，通过 display 控制可见性）
-                            spawn_labeled_button_with_visibility(
-                                btns,
-                                font,
-                                &format!("{ICON_PAUSE} 暂停"),
-                                PauseDownloadButton {
-                                    comic_id: task.comic_id.clone(),
-                                },
-                                Color::srgb(0.8, 0.6, 0.2),
+                            labeled_button_with_visibility(
+                                format!("{ICON_PAUSE} 暂停"),
+                                PauseDownloadButton { comic_id: task.comic_id.clone() },
+                                PAUSED_COLOR,
                                 can_pause,
-                            );
-
+                            ),
                             // 继续按钮（暂停状态显示）
-                            spawn_labeled_button_with_visibility(
-                                btns,
-                                font,
-                                &format!("{ICON_PLAY} 继续"),
-                                ResumeDownloadButton {
-                                    comic_id: task.comic_id.clone(),
-                                },
-                                Color::srgb(0.3, 0.7, 0.3),
+                            labeled_button_with_visibility(
+                                format!("{ICON_PLAY} 继续"),
+                                ResumeDownloadButton { comic_id: task.comic_id.clone() },
+                                RESUME_COLOR,
                                 can_resume,
-                            );
-
+                            ),
                             // 重试按钮（失败状态显示）
-                            spawn_labeled_button_with_visibility(
-                                btns,
-                                font,
-                                &format!("{ICON_REFRESH} 重试"),
-                                RetryDownloadButton {
-                                    comic_id: task.comic_id.clone(),
-                                },
-                                Color::srgb(0.7, 0.5, 0.2),
+                            labeled_button_with_visibility(
+                                format!("{ICON_REFRESH} 重试"),
+                                RetryDownloadButton { comic_id: task.comic_id.clone() },
+                                RETRY_COLOR,
                                 can_retry,
-                            );
-
+                            ),
                             // 删除按钮（始终可见）
-                            spawn_labeled_button_with_visibility(
-                                btns,
-                                font,
-                                &format!("{ICON_DELETE} 删除"),
-                                DeleteDownloadButton {
-                                    comic_id: task.comic_id.clone(),
-                                },
-                                Color::srgb(0.8, 0.3, 0.3),
+                            labeled_button_with_visibility(
+                                format!("{ICON_DELETE} 删除"),
+                                DeleteDownloadButton { comic_id: task.comic_id.clone() },
+                                AppColors::ERROR,
                                 can_delete,
-                            );
-
+                            ),
                             // 设置按钮（独立下载设置）
-                            spawn_labeled_button_with_visibility(
-                                btns,
-                                font,
-                                &format!("{ICON_COG} 设置"),
-                                DownloadTaskSettingsButton {
-                                    comic_id: task.comic_id.clone(),
-                                },
-                                Color::srgb(0.5, 0.5, 0.7),
+                            labeled_button_with_visibility(
+                                format!("{ICON_COG} 设置"),
+                                DownloadTaskSettingsButton { comic_id: task.comic_id.clone() },
+                                SETTINGS_COLOR,
                                 true,
-                            );
-                        });
-                });
-
-            // 独立设置标注（如果有自定义设置）
-            if task.custom_download_path.is_some() || task.custom_auto_pack_cbz.is_some() {
-                let mut settings_parts = Vec::new();
-                if let Some(ref path) = task.custom_download_path {
-                    settings_parts.push(format!("路径: {}", path));
-                }
-                if let Some(cbz) = task.custom_auto_pack_cbz {
-                    settings_parts.push(format!("CBZ: {}", if cbz { "开" } else { "关" }));
-                }
-                item.spawn((
-                    Text::new(format!("{ICON_COG} {}", settings_parts.join(" | "))),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 10.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgba(0.5, 0.5, 0.7, 0.8)),
-                ));
-            }
-        });
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            {settings_note},
+        ]
+    }
 }
 
-/// 创建带标签的按钮（已下载列表使用）
-fn spawn_labeled_button<T: Component>(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
+/// 带标签的按钮场景（已下载列表使用）
+fn labeled_button<T: Component + Default + Clone + Unpin>(
+    label: String,
     marker: T,
     color: Color,
-) {
-    parent
-        .spawn((
-            marker,
-            Button,
-            Node {
-                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(color.with_alpha(0.2)),
-            BorderColor::all(color),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(color),
-            ));
-        });
+) -> impl Scene + use<T> {
+    let bg_color = color.with_alpha(0.2);
+
+    bsn! {
+        template_value(marker)
+        Button
+        Node {
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(bg_color)
+        template_value(BorderColor::all(color))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(color)
+            )
+        ]
+    }
 }
 
-/// 创建下载任务操作按钮（下载中列表使用，带可见性控制）
-fn spawn_task_action_button<T: Component>(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
-    marker: T,
-    bg_color: Color,
-    display: Display,
-) {
-    parent
-        .spawn((
-            marker,
-            Button,
-            Node {
-                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(3.0), Val::Px(3.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                display,
-                border_radius: BorderRadius::all(Val::Px(3.0)),
-                ..default()
-            },
-            BackgroundColor(bg_color),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
-}
-
-/// 创建带标签的按钮（等待/已停止区域使用，带可见性控制）
-fn spawn_labeled_button_with_visibility<T: Component>(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
+/// 带标签的按钮场景（等待/已停止区域使用，带可见性控制）
+fn labeled_button_with_visibility<T: Component + Default + Clone + Unpin>(
+    label: String,
     marker: T,
     color: Color,
     visible: bool,
-) {
-    parent
-        .spawn((
-            marker,
-            Button,
-            Node {
-                padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                display: if visible {
-                    Display::Flex
-                } else {
-                    Display::None
-                },
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(color.with_alpha(0.2)),
-            BorderColor::all(color),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 12.0,
-                    ..default()
-                },
-                TextColor(color),
-            ));
-        });
+) -> impl Scene + use<T> {
+    let bg_color = color.with_alpha(0.2);
+    let display = if visible {
+        Display::Flex
+    } else {
+        Display::None
+    };
+
+    bsn! {
+        template_value(marker)
+        Button
+        Node {
+            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            display: {display},
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(bg_color)
+        template_value(BorderColor::all(color))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(color)
+            )
+        ]
+    }
 }
 
-/// 创建已下载漫画项
-fn spawn_completed_download_item(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    download: &CompletedDownload,
-) {
+/// 已下载漫画项场景
+fn completed_download_item(download: &CompletedDownload) -> impl Scene + use<> {
     let path = download.path.clone();
     let has_comic_id = !download.comic_id.is_empty();
+    let folder_name = download.folder_name.clone();
+    let episode_label = format!("{} 章节 • {}", download.episode_count, path);
 
-    parent
-        .spawn((
-            CompletedDownloadItem {
+    // 分类和标签
+    let has_categories = !download.categories.is_empty();
+    let has_tags = !download.tags.is_empty();
+    let tags_row: Box<dyn SceneList> = if has_categories || has_tags {
+        // 显示所有分类 + 所有标签
+        let badges: Vec<_> = download
+            .categories
+            .iter()
+            .map(|category| tag_badge(category, TagColor::Category))
+            .chain(
+                download
+                    .tags
+                    .iter()
+                    .map(|tag| tag_badge(tag, TagColor::Tag)),
+            )
+            .collect();
+        Box::new(bsn_list![(
+            Node {
+                flex_direction: FlexDirection::Row,
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(4.0),
+                row_gap: Val::Px(2.0),
+                margin: UiRect::top(Val::Px(2.0)),
+            }
+            Children [ {badges} ]
+        )])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    // 按钮组
+    let mut buttons: Vec<Box<dyn Scene>> = Vec::new();
+    // 重新下载/更新按钮（只有有 comic_id 的才能重新下载）
+    if has_comic_id {
+        buttons.push(Box::new(labeled_button(
+            format!("{ICON_REFRESH} 更新"),
+            RedownloadButton {
                 comic_id: download.comic_id.clone(),
-                path: download.path.clone(),
             },
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Row,
-                padding: UiRect::all(Val::Px(12.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
+            REDOWNLOAD_COLOR,
+        )));
+    }
+    // 设置按钮（独立下载设置）
+    if has_comic_id {
+        buttons.push(Box::new(labeled_button(
+            format!("{ICON_COG} 设置"),
+            DownloadTaskSettingsButton {
+                comic_id: download.comic_id.clone(),
             },
-            BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
-            BorderColor::all(AppColors::BORDER),
-        ))
-        .with_children(|item| {
-            // 图标
-            item.spawn((
-                Text::new(ICON_BOOK),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 24.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
+            SETTINGS_COLOR,
+        )));
+    }
+    // 打开文件夹按钮
+    buttons.push(Box::new(labeled_button(
+        format!("{ICON_FOLDER_OPEN} 打开"),
+        OpenCompletedFolderButton {
+            path: download.path.clone(),
+        },
+        FOLDER_COLOR,
+    )));
+    // 移动按钮
+    buttons.push(Box::new(labeled_button(
+        format!("{ICON_FILE_MOVE} 移动"),
+        MoveCompletedButton {
+            comic_id: download.comic_id.clone(),
+            comic_title: download.folder_name.clone(),
+            path: download.path.clone(),
+        },
+        MOVE_COLOR,
+    )));
+    // 删除按钮
+    buttons.push(Box::new(labeled_button(
+        format!("{ICON_DELETE} 删除"),
+        DeleteCompletedDownloadButton {
+            comic_id: download.comic_id.clone(),
+            path: download.path.clone(),
+        },
+        AppColors::ERROR,
+    )));
 
-            // 信息列
-            item.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                flex_grow: 1.0,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|info| {
-                    // 漫画名称（可点击跳转详情）
-                    info.spawn((
-                        DownloadTitleButton {
-                            comic_id: download.comic_id.clone(),
-                        },
-                        Button,
-                        Interaction::default(),
-                        Node::default(),
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(download.folder_name.clone()),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                        ));
-                    });
+    let item_marker = CompletedDownloadItem {
+        comic_id: download.comic_id.clone(),
+        path: download.path.clone(),
+    };
+    let title_marker = DownloadTitleButton {
+        comic_id: download.comic_id.clone(),
+    };
 
-                    // 章节数和路径
-                    info.spawn((
-                        Text::new(format!("{} 章节 • {}", download.episode_count, path)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-
-                    // 分类和标签
-                    let has_categories = !download.categories.is_empty();
-                    let has_tags = !download.tags.is_empty();
-                    if has_categories || has_tags {
-                        info.spawn((Node {
-                            flex_direction: FlexDirection::Row,
-                            flex_wrap: FlexWrap::Wrap,
-                            column_gap: Val::Px(4.0),
-                            row_gap: Val::Px(2.0),
-                            margin: UiRect::top(Val::Px(2.0)),
-                            ..default()
-                        },))
-                            .with_children(|tags_row| {
-                                // 显示所有分类
-                                for category in download.categories.iter() {
-                                    spawn_tag_badge(tags_row, category, font, TagColor::Category);
-                                }
-                                // 显示所有标签
-                                for tag in download.tags.iter() {
-                                    spawn_tag_badge(tags_row, tag, font, TagColor::Tag);
-                                }
-                            });
-                    }
-                });
-
-            // 按钮组
-            item.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                column_gap: Val::Px(8.0),
-                align_items: AlignItems::Center,
-                ..default()
-            },))
-                .with_children(|btns| {
-                    // 重新下载/更新按钮（只有有 comic_id 的才能重新下载）
-                    if has_comic_id {
-                        btns.spawn((
-                            RedownloadButton {
-                                comic_id: download.comic_id.clone(),
-                            },
-                            Button,
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(8.0),
-                                    Val::Px(8.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
-                                justify_content: JustifyContent::Center,
-                                align_items: AlignItems::Center,
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.2, 0.5, 0.3).with_alpha(0.2)),
-                            BorderColor::all(Color::srgb(0.3, 0.7, 0.4)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(format!("{ICON_REFRESH} 更新")),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 12.0,
-                                    ..default()
-                                },
-                                TextColor(Color::srgb(0.3, 0.8, 0.4)),
-                            ));
-                        });
-                    }
-
-                    // 设置按钮（独立下载设置）
-                    if has_comic_id {
-                        spawn_labeled_button(
-                            btns,
-                            font,
-                            &format!("{ICON_COG} 设置"),
-                            DownloadTaskSettingsButton {
-                                comic_id: download.comic_id.clone(),
-                            },
-                            Color::srgb(0.5, 0.5, 0.7),
-                        );
-                    }
-
-                    // 打开文件夹按钮
-                    spawn_labeled_button(
-                        btns,
-                        font,
-                        &format!("{ICON_FOLDER_OPEN} 打开"),
-                        OpenCompletedFolderButton {
-                            path: download.path.clone(),
-                        },
-                        Color::srgb(0.5, 0.5, 0.6),
-                    );
-
-                    // 移动按钮
-                    spawn_labeled_button(
-                        btns,
-                        font,
-                        &format!("{ICON_FILE_MOVE} 移动"),
-                        MoveCompletedButton {
-                            comic_id: download.comic_id.clone(),
-                            comic_title: download.folder_name.clone(),
-                            path: download.path.clone(),
-                        },
-                        Color::srgb(0.5, 0.6, 0.8),
-                    );
-
-                    // 删除按钮
-                    spawn_labeled_button(
-                        btns,
-                        font,
-                        &format!("{ICON_DELETE} 删除"),
-                        DeleteCompletedDownloadButton {
-                            comic_id: download.comic_id.clone(),
-                            path: download.path.clone(),
-                        },
-                        Color::srgb(0.8, 0.3, 0.3),
-                    );
-                });
-        });
-}
-
-/// 创建下载页面滚动条
-///
-/// 布局结构（与其他页面保持一致）：
-/// ScrollbarContainer (Absolute, right=0)
-///   ├── ScrollbarTrack (Absolute, fills 100%, ZIndex=0)
-///   └── ScrollbarThumb (Absolute, ZIndex=1)
-///
-/// 滑块和轨道作为兄弟节点，避免父子节点交互事件冲突
-fn spawn_downloads_scrollbar(parent: &mut ChildSpawnerCommands, scroll_container: Entity) {
-    const SCROLLBAR_WIDTH: f32 = 12.0;
-
-    parent
-        .spawn((
-            ScrollbarContainer { scroll_container },
-            Node {
-                width: Val::Px(SCROLLBAR_WIDTH),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
-                top: Val::Px(0.0),
-                ..default()
-            },
-            BackgroundColor(Color::NONE),
-            ZIndex(10),
-        ))
-        .with_children(|scrollbar| {
-            // 滚动条轨道（与滑块同级，ZIndex 较低）
-            scrollbar.spawn((
-                ScrollbarTrack { scroll_container },
-                Button,
-                Interaction::default(),
+    bsn! {
+        template_value(item_marker)
+        // 行卡本身可点击（打开所在文件夹）——
+        // completed_download_item_interaction 一直在等这个 Interaction
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            padding: UiRect::all(Val::Px(Scale::SP_MD)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(Scale::SP_MD),
+            border_radius: BorderRadius::all(Val::Px(Scale::R_MD)),
+        }
+        BackgroundColor(AppColors::SURFACE)
+        Children [
+            (
+                // 图标
+                Text(ICON_BOOK)
+                TextFont { font_size: FontSize::Px(24.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                // 信息列
                 Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.15, 0.15, 0.15, 0.3)),
-                ZIndex(0),
-                RelativeCursorPosition::default(),
-            ));
-
-            // 滚动条滑块（与轨道同级，ZIndex 较高以覆盖轨道）
-            // 使用 FocusPolicy::Block 阻止事件穿透到轨道
-            scrollbar.spawn((
-                ScrollbarThumb { scroll_container },
-                Button,
-                Interaction::default(),
-                FocusPolicy::Block,
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    row_gap: Val::Px(4.0),
+                }
+                Children [
+                    (
+                        // 漫画名称（可点击跳转详情）
+                        template_value(title_marker)
+                        Button
+                        Node
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text({folder_name})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        // 章节数和路径
+                        Text({episode_label})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    {tags_row},
+                ]
+            ),
+            (
+                // 按钮组
                 Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Px(30.0),
-                    position_type: PositionType::Absolute,
-                    top: Val::Px(0.0),
-                    left: Val::Px(0.0),
-                    border_radius: BorderRadius::all(Val::Px(SCROLLBAR_WIDTH / 2.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.6)),
-                ZIndex(1),
-            ));
-        });
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(8.0),
+                    align_items: AlignItems::Center,
+                }
+                Children [ {buttons} ]
+            ),
+        ]
+    }
 }
 
 /// 清理下载页面（隐藏而非销毁）
@@ -2200,96 +1723,74 @@ pub fn cleanup_downloads_ui(mut commands: Commands, query: Query<Entity, With<Do
 
 /// 打开下载文件夹按钮交互
 pub fn open_download_folder_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<OpenDownloadFolderButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<OpenDownloadFolderButton>)>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-
-                // 打开下载文件夹
-                let download_path = get_download_base_path();
-
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("explorer")
-                        .arg(&download_path)
-                        .spawn();
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = std::process::Command::new("open")
-                        .arg(&download_path)
-                        .spawn();
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    let _ = std::process::Command::new("xdg-open")
-                        .arg(&download_path)
-                        .spawn();
-                }
-
-                tracing::info!("打开下载文件夹: {:?}", download_path);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-            }
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+
+        // 打开下载文件夹
+        let download_path = get_download_base_path();
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer")
+                .arg(&download_path)
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open")
+                .arg(&download_path)
+                .spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&download_path)
+                .spawn();
+        }
+
+        tracing::info!("打开下载文件夹: {:?}", download_path);
     }
 }
 
 /// 打开 CBZ 文件夹按钮交互
 pub fn open_cbz_folder_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<OpenCbzFolderButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<OpenCbzFolderButton>)>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-
-                // 打开 CBZ 文件夹
-                let cbz_path = get_download_base_path().join("cbz");
-
-                // 如果目录不存在则创建
-                if !cbz_path.exists() {
-                    let _ = std::fs::create_dir_all(&cbz_path);
-                }
-
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = std::process::Command::new("explorer")
-                        .arg(&cbz_path)
-                        .spawn();
-                }
-                #[cfg(target_os = "macos")]
-                {
-                    let _ = std::process::Command::new("open").arg(&cbz_path).spawn();
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    let _ = std::process::Command::new("xdg-open")
-                        .arg(&cbz_path)
-                        .spawn();
-                }
-
-                tracing::info!("打开 CBZ 文件夹: {:?}", cbz_path);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-            }
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+
+        // 打开 CBZ 文件夹
+        let cbz_path = get_download_base_path().join("cbz");
+
+        // 如果目录不存在则创建
+        if !cbz_path.exists() {
+            let _ = std::fs::create_dir_all(&cbz_path);
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer")
+                .arg(&cbz_path)
+                .spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(&cbz_path).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&cbz_path)
+                .spawn();
+        }
+
+        tracing::info!("打开 CBZ 文件夹: {:?}", cbz_path);
     }
 }
 
@@ -2353,42 +1854,16 @@ pub fn refresh_downloads_ui(
 
     // 更新每个任务的进度条、状态文本和按钮可见性
     for task in &tasks {
-        // 计算进度百分比
-        let progress = if task.total_episodes > 0 {
-            let episode_progress = (task.current_episode - 1) as f32 / task.total_episodes as f32;
-            let page_progress = if task.total_pages > 0 {
-                task.current_page as f32 / task.total_pages as f32 / task.total_episodes as f32
-            } else {
-                0.0
-            };
-            (episode_progress + page_progress).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
         // 更新进度条宽度
+        let progress = task_progress(task);
         for (bar, mut node) in progress_bar_query.iter_mut() {
             if bar.comic_id == task.comic_id {
                 node.width = Val::Percent(progress * 100.0);
             }
         }
 
-        // 更新状态文本
-        let (status_text, status_color) = match &task.status {
-            ComicDownloadStatus::Waiting => ("等待中".to_string(), AppColors::TEXT_SECONDARY),
-            ComicDownloadStatus::Downloading => (
-                format!(
-                    "下载中 第{}/{}章 {}/{}",
-                    task.current_episode, task.total_episodes, task.current_page, task.total_pages
-                ),
-                AppColors::PRIMARY,
-            ),
-            ComicDownloadStatus::Paused => ("已暂停".to_string(), Color::srgb(0.8, 0.6, 0.2)),
-            ComicDownloadStatus::Completed => ("已完成".to_string(), Color::srgb(0.3, 0.8, 0.3)),
-            ComicDownloadStatus::Failed(err) => {
-                (format!("失败: {}", err), Color::srgb(0.8, 0.3, 0.3))
-            }
-        };
+        // 更新状态文本（与建卡共用同一映射）
+        let (status_text, status_color) = task_status_label(task);
 
         for (text_marker, mut text, mut color) in status_text_query.iter_mut() {
             if text_marker.comic_id == task.comic_id {
@@ -2501,180 +1976,12 @@ pub fn add_new_task_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
-
     // 为每个新任务添加 UI
     for task in new_tasks {
         tracing::info!("动态添加下载任务 UI: {}", task.comic_title);
 
-        let task_entity = commands
-            .spawn((
-                DownloadTaskItem {
-                    comic_id: task.comic_id.clone(),
-                },
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(12.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|item| {
-                // 标题和按钮行
-                item.spawn((Node {
-                    width: Val::Percent(100.0),
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },))
-                    .with_children(|row| {
-                        // 标题（可点击跳转详情）
-                        row.spawn((
-                            DownloadTitleButton {
-                                comic_id: task.comic_id.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node::default(),
-                            BackgroundColor(Color::NONE),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(&task.comic_title),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-
-                        // 按钮容器
-                        row.spawn((Node {
-                            column_gap: Val::Px(8.0),
-                            ..default()
-                        },))
-                            .with_children(|btns| {
-                                // 暂停按钮
-                                spawn_task_action_button(
-                                    btns,
-                                    &font,
-                                    &format!("{ICON_PAUSE} 暂停"),
-                                    PauseDownloadButton {
-                                        comic_id: task.comic_id.clone(),
-                                    },
-                                    Color::srgb(0.6, 0.5, 0.2),
-                                    Display::Flex,
-                                );
-
-                                // 继续按钮（暂停状态）
-                                spawn_task_action_button(
-                                    btns,
-                                    &font,
-                                    &format!("{ICON_PLAY} 继续"),
-                                    ResumeDownloadButton {
-                                        comic_id: task.comic_id.clone(),
-                                    },
-                                    Color::srgb(0.3, 0.6, 0.3),
-                                    Display::None,
-                                );
-
-                                // 重试按钮（失败状态）
-                                spawn_task_action_button(
-                                    btns,
-                                    &font,
-                                    &format!("{ICON_REFRESH} 重试"),
-                                    RetryDownloadButton {
-                                        comic_id: task.comic_id.clone(),
-                                    },
-                                    Color::srgb(0.7, 0.5, 0.2),
-                                    Display::None,
-                                );
-
-                                // 删除按钮（始终可见）
-                                spawn_task_action_button(
-                                    btns,
-                                    &font,
-                                    &format!("{ICON_DELETE} 删除"),
-                                    DeleteDownloadButton {
-                                        comic_id: task.comic_id.clone(),
-                                    },
-                                    Color::srgb(0.6, 0.2, 0.2),
-                                    Display::Flex,
-                                );
-                            });
-                    });
-
-                // 进度条容器
-                item.spawn((
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(4.0),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ))
-                .with_children(|bar_bg| {
-                    bar_bg.spawn((
-                        DownloadProgressBar {
-                            comic_id: task.comic_id.clone(),
-                        },
-                        Node {
-                            width: Val::Percent(0.0),
-                            height: Val::Percent(100.0),
-                            border_radius: BorderRadius::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(AppColors::PRIMARY),
-                    ));
-                });
-
-                // 分类和标签容器（初始可能为空，API 返回后会更新）
-                item.spawn((
-                    DownloadTaskTagsContainer {
-                        comic_id: task.comic_id.clone(),
-                    },
-                    Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        column_gap: Val::Px(4.0),
-                        row_gap: Val::Px(2.0),
-                        ..default()
-                    },
-                ))
-                .with_children(|tags_row| {
-                    // 显示所有分类
-                    for category in task.categories.iter() {
-                        spawn_tag_badge(tags_row, category, &font, TagColor::Category);
-                    }
-                    // 显示所有标签
-                    for tag in task.tags.iter() {
-                        spawn_tag_badge(tags_row, tag, &font, TagColor::Tag);
-                    }
-                });
-
-                // 状态文本
-                item.spawn((
-                    DownloadStatusText {
-                        comic_id: task.comic_id.clone(),
-                    },
-                    Text::new("准备中..."),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            })
-            .id();
+        // 与页面初建走同一个场景函数，样式不会因入口不同而分叉
+        let task_entity = commands.spawn_scene(download_task_item(task)).id();
 
         // 根据任务状态选择正确的列表容器
         let list_entity = match &task.status {
@@ -2844,6 +2151,10 @@ pub fn update_download_titles(
         ),
     >,
 ) {
+    // 下载状态未变化时零开销（此前每帧深拷贝全部任务 + 4 次 format!）
+    if !download_state.is_changed() {
+        return;
+    }
     // 从下载状态中统计各类型任务数量
     let tasks = download_state.tasks();
     let downloading_count = tasks
@@ -2938,92 +2249,34 @@ pub fn update_download_titles(
     }
 }
 
-/// 处理下载页面滚动
-pub fn handle_downloads_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<DownloadsScrollContainer>,
-    >,
-    mut _mouse_wheel_events: MessageReader<bevy::input::mouse::MouseWheel>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新下载页面内容尺寸
-pub fn update_downloads_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<DownloadsScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    // 滚动容器的上下 padding（各 20px）
-    const SCROLL_PADDING_VERTICAL: f32 = 40.0;
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        // 加上容器的上下 padding
-        content_height += SCROLL_PADDING_VERTICAL;
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
 /// 已下载项点击交互（点击打开文件夹）
 pub fn completed_download_item_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &CompletedDownloadItem),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &CompletedDownloadItem), Changed<Interaction>>,
 ) {
-    for (interaction, mut bg_color, item) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.08, 0.08, 0.12));
-
-                // 打开文件夹
-                let path = std::path::Path::new(&item.path);
-                if path.exists() {
-                    #[cfg(target_os = "windows")]
-                    {
-                        let _ = std::process::Command::new("explorer").arg(path).spawn();
-                    }
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = std::process::Command::new("open").arg(path).spawn();
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        let _ = std::process::Command::new("xdg-open").arg(path).spawn();
-                    }
-                    tracing::info!("打开已下载漫画文件夹: {:?}", path);
-                } else {
-                    tracing::warn!("文件夹不存在: {:?}", path);
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.14));
-            }
+    for (interaction, item) in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+
+        // 打开文件夹
+        let path = std::path::Path::new(&item.path);
+        if !path.exists() {
+            tracing::warn!("文件夹不存在: {:?}", path);
+            continue;
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("explorer").arg(path).spawn();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(path).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(path).spawn();
+        }
+        tracing::info!("打开已下载漫画文件夹: {:?}", path);
     }
 }
 
@@ -3094,6 +2347,8 @@ pub fn section_header_collapse_interaction(
 /// 当某个区域的标题滚出视口顶部时，显示浮动标题
 pub fn update_floating_header(
     scroll_query: Query<&ScrollPosition, With<DownloadsScrollContainer>>,
+    scroll_changed: Query<(), (With<DownloadsScrollContainer>, Changed<ScrollPosition>)>,
+    download_state_probe: Res<DownloadManagerState>,
     section_query: Query<(
         &ComputedNode,
         Option<&DownloadingSection>,
@@ -3112,6 +2367,13 @@ pub fn update_floating_header(
     window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
     download_state: Res<DownloadManagerState>,
 ) {
+    // 只在滚动/下载状态/折叠状态变化时工作（此前每帧深拷贝全部任务）
+    if scroll_changed.is_empty()
+        && !download_state_probe.is_changed()
+        && !collapse_state.is_changed()
+    {
+        return;
+    }
     let Ok(scroll_pos) = scroll_query.single() else {
         return;
     };
@@ -3131,28 +2393,29 @@ pub fn update_floating_header(
     let mut section_positions: Vec<(SectionType, f32, f32, bool)> = Vec::new(); // (type, start, end, is_collapsed)
     let mut current_y: f32 = 0.0;
 
-    // 获取任务数量用于标题显示
-    let all_tasks: Vec<_> = download_state
-        .active_tasks()
-        .into_iter()
-        .map(|fsm| fsm.to_ui_task())
-        .collect();
+    // 获取任务数量用于标题显示（直接在 FSM 状态上计数，不做 UI 深拷贝）
+    let all_tasks = download_state.active_tasks();
 
     let downloading_count = all_tasks
         .iter()
-        .filter(|t| matches!(t.status, crate::resources::ComicDownloadStatus::Downloading))
+        .filter(|fsm| {
+            matches!(
+                fsm.meta.state,
+                crate::resources::DownloadState::Downloading { .. }
+            )
+        })
         .count();
     let waiting_count = all_tasks
         .iter()
-        .filter(|t| matches!(t.status, crate::resources::ComicDownloadStatus::Waiting))
+        .filter(|fsm| matches!(fsm.meta.state, crate::resources::DownloadState::Queued))
         .count();
     let stopped_count = all_tasks
         .iter()
-        .filter(|t| {
+        .filter(|fsm| {
             matches!(
-                t.status,
-                crate::resources::ComicDownloadStatus::Paused
-                    | crate::resources::ComicDownloadStatus::Failed(_)
+                fsm.meta.state,
+                crate::resources::DownloadState::Paused { .. }
+                    | crate::resources::DownloadState::Failed(_)
             )
         })
         .count();
@@ -3285,12 +2548,17 @@ pub fn update_floating_header(
             };
 
             if let Ok(mut text_component) = floating_text_query.single_mut() {
-                *text_component = Text::new(format!("{} {} (点击跳转)", icon, text));
+                let label = format!("{} {} (点击跳转)", icon, text);
+                if **text_component != label {
+                    **text_component = label;
+                }
             }
 
-            // 图标始终显示向下箭头（点击跳转到该区域）
-            if let Ok(mut icon_component) = floating_icon_query.single_mut() {
-                *icon_component = Text::new(ICON_CHEVRON_DOWN);
+            // 图标始终显示向下箭头（点击跳转到该区域；比较后写避免每次触发文字整形）
+            if let Ok(mut icon_component) = floating_icon_query.single_mut()
+                && **icon_component != ICON_CHEVRON_DOWN
+            {
+                **icon_component = ICON_CHEVRON_DOWN.to_string();
             }
         } else {
             floating_node.display = Display::None;
@@ -3392,7 +2660,7 @@ pub fn pause_download_button_interaction(
     download_state: Res<DownloadManagerState>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let pause_color = Color::srgb(0.8, 0.6, 0.2);
+        let pause_color = PAUSED_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(pause_color.with_alpha(0.4));
@@ -3422,7 +2690,7 @@ pub fn resume_download_button_interaction(
     mut resume_messages: MessageWriter<ResumeDownloadRequest>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let resume_color = Color::srgb(0.3, 0.7, 0.3);
+        let resume_color = RESUME_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(resume_color.with_alpha(0.4));
@@ -3454,7 +2722,7 @@ pub fn delete_download_button_interaction(
     mut download_state: ResMut<DownloadManagerState>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let delete_color = Color::srgb(0.8, 0.3, 0.3);
+        let delete_color = AppColors::ERROR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.4));
@@ -3498,7 +2766,7 @@ pub fn retry_download_button_interaction(
     mut resume_messages: MessageWriter<ResumeDownloadRequest>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let retry_color = Color::srgb(0.7, 0.5, 0.2);
+        let retry_color = RETRY_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(retry_color.with_alpha(0.4));
@@ -3537,7 +2805,7 @@ pub fn redownload_button_interaction(
     use crate::resources::DownloadTaskMeta;
 
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let redownload_color = Color::srgb(0.3, 0.7, 0.4);
+        let redownload_color = REDOWNLOAD_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(redownload_color.with_alpha(0.4));
@@ -3614,7 +2882,7 @@ pub fn open_completed_folder_button_interaction(
     >,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let folder_color = Color::srgb(0.5, 0.5, 0.6);
+        let folder_color = FOLDER_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(folder_color.with_alpha(0.4));
@@ -3662,7 +2930,7 @@ pub fn move_completed_button_interaction(
     runtime: ResMut<TokioTasksRuntime>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let move_color = Color::srgb(0.5, 0.6, 0.8);
+        let move_color = MOVE_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(move_color.with_alpha(0.4));
@@ -3767,7 +3035,6 @@ pub fn handle_download_completed_ui(
 
         // 4. 添加到已下载列表
         if let Ok(list_entity) = completed_list_query.single() {
-            let font: Handle<Font> = get_font();
             let download = CompletedDownload {
                 comic_id: comic_id.clone(),
                 folder_name: comic_title,
@@ -3777,9 +3044,9 @@ pub fn handle_download_completed_ui(
                 tags,
             };
 
-            commands.entity(list_entity).with_children(|parent| {
-                spawn_completed_download_item(parent, &font, &download);
-            });
+            commands
+                .spawn_scene(completed_download_item(&download))
+                .insert(ChildOf(list_entity));
 
             tracing::info!("已添加到已下载列表: {}", comic_id);
         } else {
@@ -3799,7 +3066,7 @@ pub fn start_all_downloads_button_interaction(
     mut resume_messages: MessageWriter<ResumeDownloadRequest>,
 ) {
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        let btn_color = Color::srgb(0.2, 0.5, 0.3);
+        let btn_color = START_ALL_COLOR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(btn_color.lighter(0.1));
@@ -3850,8 +3117,6 @@ pub fn update_download_task_tags(
         return;
     }
 
-    let font: Handle<Font> = get_font();
-
     for (container_entity, tags_container, children) in tags_container_query.iter() {
         // 查找对应的任务
         let Some(fsm) = download_state.find_task(&tags_container.comic_id) else {
@@ -3869,16 +3134,18 @@ pub fn update_download_task_tags(
 
         // 如果任务有数据但容器为空，则添加标签
         if has_data && !has_children {
-            commands.entity(container_entity).with_children(|tags_row| {
-                // 显示所有分类
-                for category in task_categories.iter() {
-                    spawn_tag_badge(tags_row, category, &font, TagColor::Category);
-                }
-                // 显示所有标签
-                for tag in task_tags.iter() {
-                    spawn_tag_badge(tags_row, tag, &font, TagColor::Tag);
-                }
-            });
+            // 显示所有分类
+            for category in task_categories.iter() {
+                commands
+                    .spawn_scene(tag_badge(category, TagColor::Category))
+                    .insert(ChildOf(container_entity));
+            }
+            // 显示所有标签
+            for tag in task_tags.iter() {
+                commands
+                    .spawn_scene(tag_badge(tag, TagColor::Tag))
+                    .insert(ChildOf(container_entity));
+            }
             tracing::debug!(
                 "更新下载任务标签: {} - {} 分类, {} 标签",
                 tags_container.comic_id,
@@ -4051,171 +3318,137 @@ pub fn task_settings_button_interaction(
         let custom_path = task.and_then(|t| t.meta.custom_download_path.clone());
         let custom_cbz = task.and_then(|t| t.meta.custom_auto_pack_cbz);
 
-        let font: Handle<Font> = get_font();
-
         // 创建设置面板
         let panel_entity = commands
-            .spawn((
-                DownloadTaskSettingsPanel {
-                    comic_id: comic_id.clone(),
-                },
-                Node {
-                    width: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    padding: UiRect::all(Val::Px(10.0)),
-                    row_gap: Val::Px(8.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.08, 0.08, 0.12)),
-                BorderColor::all(Color::srgba(0.3, 0.3, 0.5, 0.5)),
-            ))
-            .with_children(|panel| {
-                // 标题
-                panel.spawn((
-                    Text::new("独立设置"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 12.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.5, 0.5, 0.7)),
-                ));
-
-                // 下载路径行
-                panel
-                    .spawn((Node {
-                        width: Val::Percent(100.0),
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    },))
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new("路径:"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-
-                        let path_text = custom_path.as_deref().unwrap_or("(使用全局设置)");
-                        row.spawn((
-                            Text::new(path_text),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT),
-                            Node {
-                                flex_grow: 1.0,
-                                ..default()
-                            },
-                        ));
-
-                        // 选择路径按钮
-                        row.spawn((
-                            TaskPathSelectButton {
-                                comic_id: comic_id.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(8.0),
-                                    Val::Px(8.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgb(0.15, 0.15, 0.2)),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(format!("{ICON_FOLDER_OPEN} 选择")),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 11.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                    });
-
-                // CBZ 打包开关行
-                panel
-                    .spawn((Node {
-                        width: Val::Percent(100.0),
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    },))
-                    .with_children(|row| {
-                        row.spawn((
-                            Text::new("CBZ 打包:"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 11.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::TEXT_SECONDARY),
-                        ));
-
-                        let cbz_text = match custom_cbz {
-                            Some(true) => "开启",
-                            Some(false) => "关闭",
-                            None => "(使用全局设置)",
-                        };
-
-                        // 三态切换按钮：全局 → 开启 → 关闭 → 全局
-                        row.spawn((
-                            TaskCbzToggle {
-                                comic_id: comic_id.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::new(
-                                    Val::Px(12.0),
-                                    Val::Px(12.0),
-                                    Val::Px(4.0),
-                                    Val::Px(4.0),
-                                ),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(match custom_cbz {
-                                Some(true) => Color::srgb(0.2, 0.5, 0.3).with_alpha(0.3),
-                                Some(false) => Color::srgb(0.5, 0.2, 0.2).with_alpha(0.3),
-                                None => Color::srgb(0.15, 0.15, 0.2),
-                            }),
-                            BorderColor::all(AppColors::BORDER),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(cbz_text),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 11.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT),
-                            ));
-                        });
-                    });
-            })
+            .spawn_scene(task_settings_panel(comic_id, custom_path, custom_cbz))
             .id();
 
         commands.entity(parent_entity).add_child(panel_entity);
+    }
+}
+
+/// 下载任务独立设置面板场景（路径选择 + CBZ 三态开关）
+fn task_settings_panel(
+    comic_id: &str,
+    custom_path: Option<String>,
+    custom_cbz: Option<bool>,
+) -> impl Scene + use<> {
+    let panel_marker = DownloadTaskSettingsPanel {
+        comic_id: comic_id.to_string(),
+    };
+    let path_select_marker = TaskPathSelectButton {
+        comic_id: comic_id.to_string(),
+    };
+    let cbz_toggle_marker = TaskCbzToggle {
+        comic_id: comic_id.to_string(),
+    };
+    let path_text = custom_path.unwrap_or_else(|| "(使用全局设置)".to_string());
+    let select_label = format!("{ICON_FOLDER_OPEN} 选择");
+    let cbz_text = match custom_cbz {
+        Some(true) => "开启",
+        Some(false) => "关闭",
+        None => "(使用全局设置)",
+    };
+    let cbz_bg = match custom_cbz {
+        Some(true) => Color::srgb(0.2, 0.5, 0.3).with_alpha(0.3),
+        Some(false) => Color::srgb(0.5, 0.2, 0.2).with_alpha(0.3),
+        None => AppColors::SURFACE,
+    };
+
+    bsn! {
+        template_value(panel_marker)
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(10.0)),
+            row_gap: Val::Px(8.0),
+            border: UiRect::top(Val::Px(1.0)),
+        }
+        BackgroundColor(AppColors::HEADER_BG)
+        template_value(BorderColor::all(Color::srgba(0.3, 0.3, 0.5, 0.5)))
+        Children [
+            (
+                // 标题
+                Text("独立设置")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(Color::srgb(0.5, 0.5, 0.7))
+            ),
+            (
+                // 下载路径行
+                Node {
+                    width: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        Text("路径:")
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        Text({path_text})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(AppColors::TEXT)
+                        Node { flex_grow: 1.0 }
+                    ),
+                    (
+                        // 选择路径按钮
+                        template_value(path_select_marker)
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            padding: UiRect::new(Val::Px(8.0), Val::Px(8.0), Val::Px(4.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SURFACE)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text({select_label})
+                                TextFont { font_size: FontSize::Px(11.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // CBZ 打包开关行
+                Node {
+                    width: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                }
+                Children [
+                    (
+                        Text("CBZ 打包:")
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        // 三态切换按钮：全局 → 开启 → 关闭 → 全局
+                        template_value(cbz_toggle_marker)
+                        Button
+                        Node {
+                            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(4.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(cbz_bg)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text({cbz_text})
+                                TextFont { font_size: FontSize::Px(11.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
     }
 }
 
@@ -4446,7 +3679,7 @@ pub fn delete_completed_download_interaction(
     _asset_server: Res<AssetServer>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let delete_color = Color::srgb(0.8, 0.3, 0.3);
+        let delete_color = AppColors::ERROR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.4));
@@ -4469,167 +3702,9 @@ pub fn delete_completed_download_interaction(
                     continue;
                 };
 
-                let font: Handle<Font> = get_font();
-
                 // 创建确认面板
                 let panel_entity = commands
-                    .spawn((
-                        DeleteConfirmPanel {
-                            comic_id: comic_id.clone(),
-                            path: btn.path.clone(),
-                        },
-                        Node {
-                            width: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect::all(Val::Px(10.0)),
-                            row_gap: Val::Px(8.0),
-                            border: UiRect::top(Val::Px(1.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.12, 0.06, 0.06)),
-                        BorderColor::all(Color::srgba(0.5, 0.2, 0.2, 0.5)),
-                    ))
-                    .with_children(|panel| {
-                        // 警告文本
-                        panel.spawn((
-                            Text::new("确认删除此下载记录？"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 12.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.9, 0.5, 0.5)),
-                        ));
-
-                        // 勾选框行：同时删除磁盘文件
-                        panel
-                            .spawn((Node {
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(6.0),
-                                ..default()
-                            },))
-                            .with_children(|row| {
-                                // 勾选框按钮
-                                row.spawn((
-                                    DeleteFilesCheckbox {
-                                        comic_id: comic_id.clone(),
-                                        checked: false,
-                                    },
-                                    Button,
-                                    Interaction::default(),
-                                    Node {
-                                        width: Val::Px(18.0),
-                                        height: Val::Px(18.0),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        border: UiRect::all(Val::Px(1.5)),
-                                        border_radius: BorderRadius::all(Val::Px(3.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgb(0.1, 0.1, 0.14)),
-                                    BorderColor::all(Color::srgb(0.5, 0.3, 0.3)),
-                                ))
-                                .with_children(|cb| {
-                                    // 初始状态：空（未勾选）
-                                    cb.spawn((
-                                        Text::new(" "),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 13.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::srgb(0.9, 0.4, 0.4)),
-                                    ));
-                                });
-
-                                row.spawn((
-                                    Text::new("同时删除磁盘文件"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 11.0,
-                                        ..default()
-                                    },
-                                    TextColor(Color::srgb(0.9, 0.6, 0.6)),
-                                ));
-                            });
-
-                        // 按钮行
-                        panel
-                            .spawn((Node {
-                                column_gap: Val::Px(8.0),
-                                margin: UiRect::top(Val::Px(4.0)),
-                                ..default()
-                            },))
-                            .with_children(|row| {
-                                // 确认删除按钮
-                                let confirm_color = Color::srgb(0.8, 0.3, 0.3);
-                                row.spawn((
-                                    ConfirmDeleteButton {
-                                        comic_id: comic_id.clone(),
-                                        path: btn.path.clone(),
-                                    },
-                                    Button,
-                                    Interaction::default(),
-                                    Node {
-                                        padding: UiRect::new(
-                                            Val::Px(12.0),
-                                            Val::Px(12.0),
-                                            Val::Px(4.0),
-                                            Val::Px(4.0),
-                                        ),
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(confirm_color.with_alpha(0.3)),
-                                    BorderColor::all(confirm_color),
-                                ))
-                                .with_children(|btn| {
-                                    btn.spawn((
-                                        Text::new(format!("{ICON_DELETE} 确认删除")),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 11.0,
-                                            ..default()
-                                        },
-                                        TextColor(Color::srgb(0.9, 0.4, 0.4)),
-                                    ));
-                                });
-
-                                // 取消按钮
-                                row.spawn((
-                                    CancelDeleteButton {
-                                        comic_id: comic_id.clone(),
-                                    },
-                                    Button,
-                                    Interaction::default(),
-                                    Node {
-                                        padding: UiRect::new(
-                                            Val::Px(12.0),
-                                            Val::Px(12.0),
-                                            Val::Px(4.0),
-                                            Val::Px(4.0),
-                                        ),
-                                        border: UiRect::all(Val::Px(1.0)),
-                                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                                    BorderColor::all(AppColors::BORDER),
-                                ))
-                                .with_children(|btn| {
-                                    btn.spawn((
-                                        Text::new("取消"),
-                                        TextFont {
-                                            font: font.clone(),
-                                            font_size: 11.0,
-                                            ..default()
-                                        },
-                                        TextColor(AppColors::TEXT_SECONDARY),
-                                    ));
-                                });
-                            });
-                    })
+                    .spawn_scene(delete_confirm_panel(comic_id, &btn.path))
                     .id();
 
                 commands.entity(parent_entity).add_child(panel_entity);
@@ -4641,6 +3716,134 @@ pub fn delete_completed_download_interaction(
                 *bg_color = BackgroundColor(delete_color.with_alpha(0.2));
             }
         }
+    }
+}
+
+/// 删除已下载漫画的确认面板场景
+fn delete_confirm_panel(comic_id: &str, path: &str) -> impl Scene + use<> {
+    let panel_marker = DeleteConfirmPanel {
+        comic_id: comic_id.to_string(),
+        path: path.to_string(),
+    };
+    let checkbox_marker = DeleteFilesCheckbox {
+        comic_id: comic_id.to_string(),
+        checked: false,
+    };
+    let confirm_marker = ConfirmDeleteButton {
+        comic_id: comic_id.to_string(),
+        path: path.to_string(),
+    };
+    let cancel_marker = CancelDeleteButton {
+        comic_id: comic_id.to_string(),
+    };
+    let confirm_color = AppColors::ERROR;
+    let confirm_bg = confirm_color.with_alpha(0.3);
+    let confirm_label = format!("{ICON_DELETE} 确认删除");
+
+    bsn! {
+        template_value(panel_marker)
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(10.0)),
+            row_gap: Val::Px(8.0),
+            border: UiRect::top(Val::Px(1.0)),
+        }
+        BackgroundColor(Color::srgb(0.12, 0.06, 0.06))
+        template_value(BorderColor::all(Color::srgba(0.5, 0.2, 0.2, 0.5)))
+        Children [
+            (
+                // 警告文本
+                Text("确认删除此下载记录？")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(Color::srgb(0.9, 0.5, 0.5))
+            ),
+            (
+                // 勾选框行：同时删除磁盘文件
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(6.0),
+                }
+                Children [
+                    (
+                        // 勾选框按钮
+                        template_value(checkbox_marker)
+                        Button
+                        Node {
+                            width: Val::Px(18.0),
+                            height: Val::Px(18.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.5)),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                        }
+                        BackgroundColor(Color::srgb(0.1, 0.1, 0.14))
+                        template_value(BorderColor::all(Color::srgb(0.5, 0.3, 0.3)))
+                        Children [
+                            (
+                                // 初始状态：空（未勾选）
+                                Text(" ")
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::srgb(0.9, 0.4, 0.4))
+                            )
+                        ]
+                    ),
+                    (
+                        Text("同时删除磁盘文件")
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(Color::srgb(0.9, 0.6, 0.6))
+                    ),
+                ]
+            ),
+            (
+                // 按钮行
+                Node {
+                    column_gap: Val::Px(8.0),
+                    margin: UiRect::top(Val::Px(4.0)),
+                }
+                Children [
+                    (
+                        // 确认删除按钮
+                        template_value(confirm_marker)
+                        Button
+                        Node {
+                            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(4.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(confirm_bg)
+                        template_value(BorderColor::all(confirm_color))
+                        Children [
+                            (
+                                Text({confirm_label})
+                                TextFont { font_size: FontSize::Px(11.0) }
+                                TextColor(Color::srgb(0.9, 0.4, 0.4))
+                            )
+                        ]
+                    ),
+                    (
+                        // 取消按钮
+                        template_value(cancel_marker)
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            padding: UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(4.0), Val::Px(4.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SURFACE)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text("取消")
+                                TextFont { font_size: FontSize::Px(11.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
     }
 }
 
@@ -4683,7 +3886,7 @@ pub fn confirm_delete_button_interaction(
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let confirm_color = Color::srgb(0.8, 0.3, 0.3);
+        let confirm_color = AppColors::ERROR;
         match *interaction {
             Interaction::Pressed => {
                 *bg_color = BackgroundColor(confirm_color.with_alpha(0.5));
@@ -4772,41 +3975,29 @@ pub fn cancel_delete_button_interaction(
 
 /// "全部更新"按钮交互：对所有已下载漫画发送重新下载请求（检查新章节）
 pub fn update_all_downloads_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<UpdateAllDownloadsButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<UpdateAllDownloadsButton>)>,
     download_state: Res<DownloadManagerState>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.7));
-
-                // 从数据库获取所有已完成下载（不依赖 UI 实体）
-                let active_ids: std::collections::HashSet<String> =
-                    download_state.downloading_ids.clone();
-                let completed = scan_completed_downloads(&active_ids);
-
-                for dl in &completed {
-                    redownload_messages.write(RedownloadRequest {
-                        comic_id: dl.comic_id.clone(),
-                        new_base_path: None,
-                    });
-                }
-                tracing::info!(
-                    "全部更新：已对 {} 个已下载漫画发送检查更新请求",
-                    completed.len()
-                );
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY.with_alpha(0.8));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-            }
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+
+        // 从数据库获取所有已完成下载（不依赖 UI 实体）
+        let active_ids: std::collections::HashSet<String> = download_state.downloading_ids.clone();
+        let completed = scan_completed_downloads(&active_ids);
+
+        for dl in &completed {
+            redownload_messages.write(RedownloadRequest {
+                comic_id: dl.comic_id.clone(),
+                new_base_path: None,
+            });
+        }
+        tracing::info!(
+            "全部更新：已对 {} 个已下载漫画发送检查更新请求",
+            completed.len()
+        );
     }
 }
 
@@ -4819,7 +4010,7 @@ pub fn start_all_header_button_interaction(
     download_state: Res<DownloadManagerState>,
     mut resume_messages: MessageWriter<ResumeDownloadRequest>,
 ) {
-    let btn_color = Color::srgb(0.2, 0.5, 0.3);
+    let btn_color = START_ALL_COLOR;
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
@@ -4853,7 +4044,7 @@ pub fn pause_all_header_button_interaction(
     >,
     mut download_state: ResMut<DownloadManagerState>,
 ) {
-    let btn_color = Color::srgb(0.7, 0.5, 0.2);
+    let btn_color = RETRY_COLOR;
     for (interaction, mut bg_color) in interaction_query.iter_mut() {
         match *interaction {
             Interaction::Pressed => {
@@ -4886,128 +4077,114 @@ pub fn pause_all_header_button_interaction(
 
 /// "迁移全部"按钮交互：暂停活跃任务，弹出目录选择，后台串行迁移
 pub fn move_all_downloads_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor),
-        (Changed<Interaction>, With<MoveAllDownloadsButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<MoveAllDownloadsButton>)>,
     mut download_state: ResMut<DownloadManagerState>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
-    for (interaction, mut bg_color) in interaction_query.iter_mut() {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.3, 0.3, 0.4));
+    for interaction in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            // 1. 暂停所有正在下载的任务，收集 control 句柄
+            let mut controls = Vec::new();
+            let active_ids: Vec<String> = download_state
+                .active_tasks()
+                .iter()
+                .filter(|t| t.meta.state.is_downloading())
+                .map(|t| t.meta.comic_id.clone())
+                .collect();
+            for id in &active_ids {
+                if let Some(fsm) = download_state.find_task_mut(id) {
+                    fsm.request_pause(); // 通知后台线程停止
+                    let _ = fsm.pause(); // 更新状态为 Paused
+                    controls.push(fsm.get_control());
+                }
+            }
 
-                // 1. 暂停所有正在下载的任务，收集 control 句柄
-                let mut controls = Vec::new();
-                let active_ids: Vec<String> = download_state
-                    .active_tasks()
-                    .iter()
-                    .filter(|t| t.meta.state.is_downloading())
-                    .map(|t| t.meta.comic_id.clone())
-                    .collect();
-                for id in &active_ids {
-                    if let Some(fsm) = download_state.find_task_mut(id) {
-                        fsm.request_pause(); // 通知后台线程停止
-                        let _ = fsm.pause(); // 更新状态为 Paused
-                        controls.push(fsm.get_control());
-                    }
+            // 记住需要恢复的任务 ID
+            let paused_ids = active_ids.clone();
+
+            // 2. 全部放到后台：等待停止 + 数据库查询 + 目录选择 + 文件迁移
+            runtime.spawn_background_task(move |mut ctx| async move {
+                // 等待下载线程响应暂停（每张图片下载后会检查 pause_requested）
+                if !controls.is_empty() {
+                    tracing::info!("等待 {} 个下载任务停止...", controls.len());
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    tracing::info!("下载任务已停止");
+                }
+                // 从数据库获取所有任务
+                let all_tasks = {
+                    use picacg_db::{get_all_download_tasks_async, get_pool};
+                    let pool = get_pool();
+                    let db_tasks = get_all_download_tasks_async(&pool)
+                        .await
+                        .unwrap_or_default();
+                    let tasks: Vec<(String, String, String)> = db_tasks
+                        .into_iter()
+                        .filter_map(|t| {
+                            // 使用 save_path（完整图片路径，如 /base/image/漫画名）
+                            // 不用 custom_download_path（只是基础目录）
+                            if t.save_path.is_empty() {
+                                None
+                            } else {
+                                Some((t.comic_id, t.comic_title, t.save_path))
+                            }
+                        })
+                        .collect();
+                    tasks
+                };
+
+                if all_tasks.is_empty() {
+                    tracing::info!("没有下载任务可迁移");
+                    return;
                 }
 
-                // 记住需要恢复的任务 ID
-                let paused_ids = active_ids.clone();
+                // 使用设置中已配置的下载路径
+                let new_base = AppSettings::global().read().download_path.clone();
+                if new_base.is_empty() {
+                    tracing::warn!("下载路径未设置，请先在上方选择目录");
+                    return;
+                }
 
-                // 2. 全部放到后台：等待停止 + 数据库查询 + 目录选择 + 文件迁移
-                runtime.spawn_background_task(move |mut ctx| async move {
-                    // 等待下载线程响应暂停（每张图片下载后会检查 pause_requested）
-                    if !controls.is_empty() {
-                        tracing::info!("等待 {} 个下载任务停止...", controls.len());
-                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-                        tracing::info!("下载任务已停止");
-                    }
-                    // 从数据库获取所有任务
-                    let all_tasks = {
-                        use picacg_db::{get_all_download_tasks_async, get_pool};
-                        let pool = get_pool();
-                        let db_tasks = get_all_download_tasks_async(&pool)
-                            .await
-                            .unwrap_or_default();
-                        let tasks: Vec<(String, String, String)> = db_tasks
-                            .into_iter()
-                            .filter_map(|t| {
-                                // 使用 save_path（完整图片路径，如 /base/image/漫画名）
-                                // 不用 custom_download_path（只是基础目录）
-                                if t.save_path.is_empty() {
-                                    None
-                                } else {
-                                    Some((t.comic_id, t.comic_title, t.save_path))
-                                }
-                            })
-                            .collect();
-                        tasks
-                    };
+                // 串行迁移
+                let total = all_tasks.len();
+                tracing::info!("开始迁移 {} 个漫画到 {}", total, new_base);
+                for (i, (comic_id, comic_title, old_path)) in all_tasks.into_iter().enumerate() {
+                    tracing::info!("迁移 [{}/{}]: {}", i + 1, total, comic_title);
+                    move_comic_files_async(&comic_id, &comic_title, &old_path, &new_base).await;
+                }
+                tracing::info!("迁移全部完成：共 {} 个", total);
 
-                    if all_tasks.is_empty() {
-                        tracing::info!("没有下载任务可迁移");
-                        return;
+                // 更新内存中 FSM 的 save_path + 恢复下载
+                let nb2 = new_base.clone();
+                let paused = paused_ids;
+                ctx.run_on_main_thread(move |ctx| {
+                    // 更新所有 FSM 任务的 save_path
+                    let mut state = ctx
+                        .world
+                        .get_resource_mut::<DownloadManagerState>()
+                        .unwrap();
+                    for fsm in &mut state.fsm_tasks {
+                        let new_save = std::path::Path::new(&nb2)
+                            .join("image")
+                            .join(crate::utils::sanitize_filename(&fsm.meta.comic_title))
+                            .to_string_lossy()
+                            .to_string();
+                        fsm.meta.save_path = new_save;
+                        fsm.meta.custom_download_path = Some(nb2.clone());
                     }
 
-                    // 使用设置中已配置的下载路径
-                    let new_base = AppSettings::global().read().download_path.clone();
-                    if new_base.is_empty() {
-                        tracing::warn!("下载路径未设置，请先在上方选择目录");
-                        return;
-                    }
-
-                    // 串行迁移
-                    let total = all_tasks.len();
-                    tracing::info!("开始迁移 {} 个漫画到 {}", total, new_base);
-                    for (i, (comic_id, comic_title, old_path)) in all_tasks.into_iter().enumerate()
-                    {
-                        tracing::info!("迁移 [{}/{}]: {}", i + 1, total, comic_title);
-                        move_comic_files_async(&comic_id, &comic_title, &old_path, &new_base).await;
-                    }
-                    tracing::info!("迁移全部完成：共 {} 个", total);
-
-                    // 更新内存中 FSM 的 save_path + 恢复下载
-                    let nb2 = new_base.clone();
-                    let paused = paused_ids;
-                    ctx.run_on_main_thread(move |ctx| {
-                        // 更新所有 FSM 任务的 save_path
-                        let mut state = ctx
-                            .world
-                            .get_resource_mut::<DownloadManagerState>()
-                            .unwrap();
-                        for fsm in &mut state.fsm_tasks {
-                            let new_save = std::path::Path::new(&nb2)
-                                .join("image")
-                                .join(crate::utils::sanitize_filename(&fsm.meta.comic_title))
-                                .to_string_lossy()
-                                .to_string();
-                            fsm.meta.save_path = new_save;
-                            fsm.meta.custom_download_path = Some(nb2.clone());
+                    // 恢复之前暂停的下载任务
+                    if !paused.is_empty() {
+                        tracing::info!("恢复 {} 个之前暂停的下载任务", paused.len());
+                        for id in paused {
+                            ctx.world
+                                .write_message(crate::events::ResumeDownloadRequest {
+                                    comic_id: id,
+                                });
                         }
-
-                        // 恢复之前暂停的下载任务
-                        if !paused.is_empty() {
-                            tracing::info!("恢复 {} 个之前暂停的下载任务", paused.len());
-                            for id in paused {
-                                ctx.world
-                                    .write_message(crate::events::ResumeDownloadRequest {
-                                        comic_id: id,
-                                    });
-                            }
-                        }
-                    })
-                    .await;
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.28));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-            }
+                    }
+                })
+                .await;
+            });
         }
     }
 }

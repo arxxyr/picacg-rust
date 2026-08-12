@@ -34,7 +34,9 @@
 //! ```
 
 mod components;
+mod scenes;
 mod systems;
 
 pub use components::*;
+pub use scenes::*;
 pub use systems::*;

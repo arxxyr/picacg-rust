@@ -40,12 +40,19 @@ impl Plugin for UiPlugin {
             .init_resource::<GlobalMessageState>()
             .init_resource::<ImageCache>()
             .init_resource::<NavigationHistory>()
-            .init_resource::<ScrollbarDragState>()
+            .add_systems(
+                Update,
+                (
+                    crate::systems::pagination::refresh_pagination_widgets,
+                    crate::systems::scrollbar::update_scrollbar_thumb_colors,
+                    crate::systems::widgets::apply_button_interaction,
+                ),
+            )
             .init_resource::<SearchState>()
             .init_resource::<RankingsState>()
             .init_resource::<RankingsCardCreationState>()
             .init_resource::<CategoriesCardCreationState>()
-            .init_resource::<ComicsCardCreationState>()
+            .init_resource::<crate::systems::ComicsVirtualState>()
             .init_resource::<SearchCardCreationState>()
             .init_resource::<FavoritesState>()
             .init_resource::<FavoritesCardCreationState>()
@@ -101,7 +108,9 @@ impl Plugin for UiPlugin {
                 (
                     text_input::text_input_keyboard,
                     text_input::text_input_ime,
-                    text_input::text_input_click_position,
+                    text_input::text_input_click_focus,
+                    text_input::text_input_blur,
+                    text_input::text_input_focus_visuals,
                     text_input::text_input_cursor_blink,
                 ),
             )
@@ -116,8 +125,6 @@ impl Plugin for UiPlugin {
                 (
                     login_button_interaction,
                     proxy_settings_button_interaction,
-                    login_input_interaction,
-                    login_sync_focus,
                     login_sync_text_values,
                     login_keyboard_input,
                     login_checkbox_interaction,
@@ -125,6 +132,7 @@ impl Plugin for UiPlugin {
                     show_password_toggle_interaction,
                     update_login_error,
                     forgot_password_link_interaction,
+                    login_focus_ring,
                 )
                     .run_if(in_state(AppRoute::Login)),
             )
@@ -138,8 +146,6 @@ impl Plugin for UiPlugin {
                     save_button_interaction,
                     proxy_toggle_interaction,
                     proxy_type_interaction,
-                    proxy_input_interaction,
-                    proxy_sync_focus,
                     proxy_sync_text_values,
                 )
                     .run_if(in_state(AppRoute::ProxySettings)),
@@ -150,15 +156,12 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    register_input_interaction,
-                    register_sync_focus,
                     register_sync_text_values,
                     register_keyboard_input,
                     register_gender_interaction,
                     back_to_login_interaction,
                     register_submit_interaction,
                     handle_register_response,
-                    unfocus_register_input,
                 )
                     .run_if(in_state(AppRoute::Register)),
             )
@@ -168,8 +171,6 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    forgot_password_input_interaction,
-                    forgot_password_sync_focus,
                     forgot_password_sync_text_values,
                     forgot_password_keyboard_input,
                     forgot_password_submit_interaction,
@@ -178,7 +179,6 @@ impl Plugin for UiPlugin {
                     handle_forgot_password_response,
                     handle_reset_password_response,
                     rebuild_forgot_password_ui,
-                    unfocus_forgot_password_input,
                 )
                     .run_if(in_state(AppRoute::ForgotPassword)),
             )
@@ -200,21 +200,9 @@ impl Plugin for UiPlugin {
                     refresh_categories_ui,
                     waterfall_create_category_cards,
                     update_categories_images,
-                    handle_categories_scroll,
-                    clamp_categories_scroll,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Categories)),
-            )
-            // 分类页面内容尺寸更新
-            .add_systems(
-                Update,
-                update_categories_content_size.run_if(in_state(AppRoute::Categories)),
             )
             // 漫画列表页面
             .add_systems(
@@ -234,23 +222,11 @@ impl Plugin for UiPlugin {
                     breadcrumb_back_to_categories,
                     auto_load_more_comics,
                     refresh_comics_list_ui,
-                    waterfall_create_comic_cards,
+                    comics_virtual_scroll,
                     update_comics_images,
-                    handle_comics_scroll,
-                    clamp_comics_scroll,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::ComicsList)),
-            )
-            // 漫画列表内容尺寸更新
-            .add_systems(
-                Update,
-                update_comics_content_size.run_if(in_state(AppRoute::ComicsList)),
             )
             // 漫画详情页面
             .add_systems(
@@ -277,15 +253,7 @@ impl Plugin for UiPlugin {
                     tag_button_interaction,
                     refresh_detail_ui,
                     update_cover_image,
-                    handle_detail_scroll,
-                    clamp_detail_scroll,
-                    update_detail_content_size,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::ComicDetail)),
             )
@@ -334,7 +302,6 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    download_path_input_interaction,
                     download_path_keyboard_input,
                     sync_download_path_value,
                     download_path_picker_interaction,
@@ -343,9 +310,6 @@ impl Plugin for UiPlugin {
                     clear_cache_button_interaction,
                     auto_save_settings,
                     update_settings_save_status,
-                    handle_settings_scroll,
-                    clamp_settings_scroll,
-                    update_settings_content_size,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
@@ -355,8 +319,6 @@ impl Plugin for UiPlugin {
                     // 代理设置交互
                     proxy_enabled_checkbox_interaction,
                     proxy_type_button_interaction,
-                    proxy_host_input_interaction,
-                    proxy_port_input_interaction,
                     proxy_input_keyboard,
                     sync_proxy_input_values,
                 )
@@ -380,30 +342,22 @@ impl Plugin for UiPlugin {
                     filter_by_tag_checkbox_interaction,
                     filter_by_title_checkbox_interaction,
                     remove_keyword_interaction,
-                    new_keyword_input_interaction,
                     new_keyword_keyboard_input,
                     sync_keyword_input_value,
                     add_keyword_button_interaction,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )
             .add_systems(
                 Update,
                 (
-                    unfocus_keyword_input,
                     refresh_blocked_keywords_ui,
                     keyword_suggestion_toggle_interaction,
                     keyword_suggestion_item_interaction,
                     // 分流设置交互
                     api_channel_button_interaction,
                     image_channel_button_interaction,
-                    custom_cdn_ip_input_interaction,
                     custom_cdn_ip_keyboard_input,
                     sync_cdn_ip_input_values,
                     // 网络诊断交互
@@ -418,8 +372,6 @@ impl Plugin for UiPlugin {
                 (
                     // 高级设置交互
                     ui_scale_button_interaction,
-                    custom_font_path_input_interaction,
-                    custom_font_path_keyboard_input,
                     sync_custom_font_path_value,
                     custom_font_path_picker_interaction,
                     handle_custom_font_path_picker_result,
@@ -494,17 +446,10 @@ impl Plugin for UiPlugin {
                     delete_files_checkbox_interaction,
                     confirm_delete_button_interaction,
                     cancel_delete_button_interaction,
-                    handle_downloads_scroll,
-                    update_downloads_content_size,
                     // 浮动标题系统
                     update_floating_header,
                     floating_header_click_interaction,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Downloads)),
             )
@@ -519,20 +464,13 @@ impl Plugin for UiPlugin {
                 (
                     home_card_interaction,
                     home_refresh_button_interaction,
-                    handle_home_scroll,
                     waterfall_create_home_cards,
-                    update_home_content_size,
                     update_home_images,
                     handle_recommendations_loaded,
                     handle_recommendations_load_failed,
                     display_punch_in_toast,
                     auto_hide_punch_in_toast,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Home)),
             )
@@ -545,18 +483,14 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    search_input_interaction,
                     handle_search_keyboard_input,
                     search_button_interaction,
                     search_reset_button_interaction,
                     search_result_card_interaction,
-                    search_pagination_interaction,
-                    handle_search_scroll,
-                    update_search_content_size,
+                    search_pagination_changed.before(refresh_search_ui),
                     update_search_images,
                     refresh_search_ui,
                     waterfall_create_search_cards,
-                    unfocus_search_input,
                     hot_keyword_tag_interaction,
                 )
                     .run_if(in_state(AppRoute::Search)),
@@ -571,11 +505,6 @@ impl Plugin for UiPlugin {
                     select_all_categories_interaction,
                     clear_all_categories_interaction,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Search)),
             )
@@ -594,14 +523,7 @@ impl Plugin for UiPlugin {
                     refresh_knight_rankings_ui,
                     waterfall_create_cards,
                     update_rankings_images,
-                    handle_rankings_scroll,
-                    update_rankings_content_size,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Rankings)),
             )
@@ -615,19 +537,12 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     game_card_interaction,
-                    games_pagination_interaction,
-                    handle_games_scroll,
-                    update_games_content_size,
+                    games_pagination_changed.before(refresh_games_ui),
                     update_games_images,
                     refresh_games_ui,
                     handle_games_loaded,
                     handle_games_load_failed,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Games)),
             )
@@ -642,17 +557,10 @@ impl Plugin for UiPlugin {
                 (
                     game_detail_back_interaction,
                     refresh_game_detail_ui,
-                    handle_game_detail_scroll,
-                    update_game_detail_content_size,
                     update_game_detail_images,
                     handle_game_detail_loaded,
                     handle_game_detail_load_failed,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::GameDetail)),
             )
@@ -666,20 +574,13 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     fried_refresh_interaction,
-                    fried_pagination_interaction,
-                    handle_fried_scroll,
-                    update_fried_content_size,
+                    fried_pagination_changed.before(refresh_fried_ui),
                     refresh_fried_ui,
                     handle_apps_loaded,
                     handle_apps_load_failed,
                     handle_fried_posts_loaded,
                     handle_fried_posts_load_failed,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Fried)),
             )
@@ -693,19 +594,12 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     favorite_card_interaction,
-                    favorites_pagination_interaction,
-                    handle_favorites_scroll,
+                    favorites_pagination_changed.before(refresh_favorites_ui),
                     waterfall_create_favorite_cards,
-                    update_favorites_content_size,
                     update_favorites_images,
                     refresh_favorites_ui,
                     handle_favorites_loaded,
                     handle_favorites_load_failed,
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Favorites)),
             )
@@ -721,18 +615,11 @@ impl Plugin for UiPlugin {
                     history_card_interaction,
                     history_delete_interaction,
                     clear_all_history_interaction,
-                    handle_history_scroll,
-                    update_history_content_size,
                     update_history_images,
                     refresh_history_ui,
                     handle_history_loaded,
                     handle_history_load_failed,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::History)),
             )
@@ -747,18 +634,11 @@ impl Plugin for UiPlugin {
                 (
                     like_record_card_interaction,
                     like_record_delete_interaction,
-                    handle_like_records_scroll,
-                    update_like_records_content_size,
                     update_like_records_images,
                     refresh_like_records_ui,
                     handle_like_records_loaded,
                     handle_like_records_load_failed,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::LikeRecords)),
             )
@@ -775,14 +655,7 @@ impl Plugin for UiPlugin {
                     profile_punch_in_interaction,
                     refresh_profile_ui,
                     update_profile_avatar,
-                    handle_profile_scroll,
-                    update_profile_content_size,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Profile)),
             )
@@ -802,11 +675,9 @@ impl Plugin for UiPlugin {
                     expand_children_interaction,
                     load_more_children_interaction,
                     comment_send_interaction,
-                    comment_input_interaction,
-                    unfocus_comment_input,
-                    comment_keyboard_input,
-                    comment_ime_input,
-                    comments_pagination_interaction,
+                    comment_input_action_keys,
+                    update_comment_send_enabled,
+                    comments_pagination_changed.before(refresh_comments_ui),
                 )
                     .run_if(in_state(AppRoute::Comments)),
             )
@@ -818,14 +689,7 @@ impl Plugin for UiPlugin {
                     handle_child_comments_loaded,
                     handle_post_comment_response,
                     handle_like_comment_response,
-                    handle_comments_scroll,
-                    update_comments_content_size,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Comments)),
             )
@@ -839,21 +703,13 @@ impl Plugin for UiPlugin {
                 Update,
                 (
                     local_read_scan_button_interaction,
-                    local_comic_card_interaction,
                     open_local_folder_interaction,
                     handle_scan_local_comics,
                     handle_scan_completed,
                     handle_scan_failed,
                     refresh_local_read_ui,
-                    handle_local_read_scroll,
-                    update_local_read_content_size,
                     update_local_cover_images,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::LocalRead)),
             )
@@ -930,14 +786,7 @@ impl Plugin for UiPlugin {
                     handle_nas_browse_response,
                     handle_nas_browse_failed,
                     refresh_nas_status_ui,
-                    handle_nas_scroll,
-                    update_nas_content_size,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Nas)),
             )
@@ -953,16 +802,9 @@ impl Plugin for UiPlugin {
                     chat_room_card_interaction,
                     chat_refresh_interaction,
                     refresh_chat_ui,
-                    handle_chat_scroll,
-                    update_chat_content_size,
                     handle_chat_rooms_loaded,
                     update_chat_room_icons,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::Chat)),
             )
@@ -981,17 +823,9 @@ impl Plugin for UiPlugin {
                     auto_scroll_chat,
                     chat_room_back_interaction,
                     chat_room_send_interaction,
-                    chat_room_keyboard_input,
-                    chat_room_ime_input,
-                    handle_chat_room_scroll,
-                    update_chat_room_content_size,
+                    chat_room_input_action_keys,
                     handle_send_chat_message_response,
                     // 滚动条系统
-                    update_all_scrollbar_thumbs,
-                    scrollbar_thumb_interaction,
-                    scrollbar_track_click,
-                    scrollbar_thumb_drag,
-                    reset_drag_state_on_release,
                 )
                     .run_if(in_state(AppRoute::ChatRoom)),
             )
@@ -1020,20 +854,39 @@ impl Plugin for UiPlugin {
                     .run_if(any_with_component::<MainLayoutRoot>),
             )
             // 全局滚轮分发（根据鼠标悬停位置分发滚动事件到对应容器）
-            .add_systems(Update, global_scroll_dispatch)
             // 全局导航（handle_back_navigation 处理键盘输入，handle_navigation_messages
             // 处理导航消息，track_route_changes 追踪路由变化）
             .add_systems(
                 Update,
                 (
                     handle_back_navigation,
-                    handle_navigation_messages,
+                    // 有导航消息才运行：该系统独占 4 个大状态资源（漫画列表/详情/
+                    // 阅读器/游戏详情），空闲帧不启动即不阻塞这些资源的并行读取
+                    handle_navigation_messages.run_if(
+                        on_message::<NavigateToCategoriesEvent>
+                            .or_else(on_message::<NavigateToComicsListEvent>)
+                            .or_else(on_message::<NavigateToComicDetailEvent>)
+                            .or_else(on_message::<NavigateToReaderEvent>)
+                            .or_else(on_message::<NavigateToProxySettingsEvent>)
+                            .or_else(on_message::<NavigateBackEvent>)
+                            .or_else(on_message::<NavigateForwardEvent>)
+                            .or_else(on_message::<NavigateToLoginEvent>)
+                            .or_else(on_message::<NavigateToGameDetailEvent>),
+                    ),
                     track_route_changes,
                 ),
             )
             // 全局窗口管理系统
             .init_resource::<WindowPositionSaveTimer>()
-            .add_systems(Update, (handle_window_close, save_window_position));
+            .init_resource::<ExplicitWindowClose>()
+            .add_systems(
+                Update,
+                (
+                    handle_window_close,
+                    save_window_position,
+                    ensure_primary_window,
+                ),
+            );
     }
 }
 

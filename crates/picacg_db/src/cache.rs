@@ -1,15 +1,17 @@
 //! 缓存管理器
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, LazyLock},
+    time::Duration,
+};
 
 use moka::future::Cache;
-use once_cell::sync::Lazy;
 use picacg_api::models::{Comic, User};
 
 use crate::models::DbBook;
 
 // 全局缓存实例
-pub static CACHE_MANAGER: Lazy<CacheManager> = Lazy::new(CacheManager::new);
+pub static CACHE_MANAGER: LazyLock<CacheManager> = LazyLock::new(CacheManager::new);
 
 /// 缓存管理器
 pub struct CacheManager {

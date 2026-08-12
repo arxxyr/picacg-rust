@@ -1,6 +1,6 @@
 //! 分类浏览系统
 
-use bevy::{input::mouse::MouseWheel, prelude::*};
+use bevy::prelude::*;
 
 use super::font_loader::get_font;
 use crate::{
@@ -9,19 +9,15 @@ use crate::{
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{GridLayoutParams, Scrollable, measure_grid_content_height, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
         waterfall::CategoriesCardCreationState,
+        widgets::ButtonStyle,
     },
-    utils::content_filter::{
-        FilterConfig, filter_category_indices, load_filter_flags, load_filter_keywords,
-    },
+    utils::content_filter::CompiledFilter,
 };
 
 /// 分类卡片布局常量
 mod category_layout {
-    /// 卡片宽度
-    pub const CARD_WIDTH: f32 = 150.0;
     /// 列间距
     pub const COLUMN_GAP: f32 = 15.0;
     /// 行间距
@@ -51,8 +47,6 @@ pub fn setup_categories_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
-
     // 清空之前的创建状态
     creation_state.clear();
 
@@ -61,109 +55,7 @@ pub fn setup_categories_ui(
 
     // 创建分类内容
     let categories_root = commands
-        .spawn((
-            CategoriesRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 页面标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                header.spawn((
-                    Text::new("分类浏览"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-            });
-
-            // 滚动区域包装器（用于放置滚动条）
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 分类网格容器（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            CategoriesScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                justify_content: JustifyContent::FlexStart,
-                                align_content: AlignContent::FlexStart,
-                                padding: UiRect {
-                                    left: Val::Px(category_layout::PADDING_LEFT),
-                                    right: Val::Px(category_layout::PADDING_RIGHT),
-                                    top: Val::Px(category_layout::PADDING_TOP),
-                                    bottom: Val::Px(category_layout::PADDING_BOTTOM),
-                                },
-                                column_gap: Val::Px(category_layout::COLUMN_GAP),
-                                row_gap: Val::Px(category_layout::ROW_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|grid| {
-                            if let Some(ref error) = categories_state.error {
-                                // 错误信息
-                                grid.spawn((
-                                    ErrorMessage,
-                                    Text::new(error.clone()),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 14.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::ERROR),
-                                ));
-                            } else if categories_state.categories.is_empty() {
-                                // 加载中（categories 为空时显示）
-                                grid.spawn((
-                                    LoadingIndicator,
-                                    Text::new("加载中..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            }
-                            // 卡片通过瀑布式创建系统添加
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
-        })
+        .spawn_scene(categories_page(&categories_state))
         .id();
 
     // 如果有 ContentArea，将分类内容作为其子实体
@@ -175,79 +67,175 @@ pub fn setup_categories_ui(
     // 不在这里启动，避免与延迟执行的 commands 冲突
 }
 
-/// 创建分类卡片（返回 Entity，可选隐藏）
-fn spawn_category_card(
-    parent: &mut ChildSpawnerCommands,
+/// 分类页面场景
+fn categories_page(state: &CategoriesState) -> impl Scene + use<> {
+    // 网格内边距（右侧额外让出滚动条宽度）
+    let grid_padding = UiRect {
+        left: Val::Px(category_layout::PADDING_LEFT),
+        right: Val::Px(category_layout::PADDING_RIGHT),
+        top: Val::Px(category_layout::PADDING_TOP),
+        bottom: Val::Px(category_layout::PADDING_BOTTOM),
+    };
+
+    // 卡片通过瀑布式创建系统添加，这里只放错误信息 / 加载中占位
+    let placeholder: Box<dyn SceneList> = match state.error.as_ref() {
+        // 错误信息
+        Some(error) => {
+            let error_text = error.clone();
+            Box::new(bsn_list![(
+                ErrorMessage
+                Text({error_text})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::ERROR)
+            )])
+        }
+        // 加载中（categories 为空时显示）
+        None if state.categories.is_empty() => Box::new(bsn_list![(
+            LoadingIndicator
+            Text("加载中...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT)
+        )]),
+        None => Box::new(bsn_list![]),
+    };
+
+    bsn! {
+        CategoriesRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 页面标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        Text("分类浏览")
+                        TextFont { font_size: FontSize::Px(20.0) }
+                        TextColor(AppColors::TEXT)
+                    )
+                ]
+            ),
+            (
+                // 滚动区域包装器（用于放置滚动条）
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 分类网格容器（可滚动）
+                        #CategoriesScroll
+                        CategoriesScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_wrap: FlexWrap::Wrap,
+                            justify_content: JustifyContent::FlexStart,
+                            align_content: AlignContent::FlexStart,
+                            padding: {grid_padding},
+                            column_gap: Val::Px(category_layout::COLUMN_GAP),
+                            row_gap: Val::Px(category_layout::ROW_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        ScrollPosition
+                        Children [ {placeholder} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#CategoriesScroll),
+                ]
+            ),
+        ]
+    }
+}
+
+/// 分类缩略图场景（图片已缓存时使用）
+fn category_image(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+    bsn! {
+        CategoryImage { url: {url} }
+        ImageNode { image: {handle} }
+        Node {
+            width: Val::Px(134.0),
+            height: Val::Px(134.0),
+        }
+    }
+}
+
+/// 分类卡片场景（`hidden` 用于瀑布式预创建，先隐藏后分批显示）
+fn category_card(
     category: &picacg_api::models::Category,
-    font: &Handle<Font>,
     image_cache: &ImageCache,
     hidden: bool,
-) -> Entity {
-    parent
-        .spawn((
-            CategoryCard {
-                title: category.title.clone(),
-            },
-            Button,
-            Node {
-                width: Val::Px(150.0),
-                height: Val::Px(180.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(AppColors::SURFACE),
-            if hidden {
-                Visibility::Hidden
-            } else {
-                Visibility::Inherited
-            },
-        ))
-        .with_children(|card| {
-            // 图片区域
-            let thumb_url = category.thumb.url();
-            if let Some(handle) = image_cache.get(&thumb_url) {
-                card.spawn((
-                    CategoryImage { url: thumb_url },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(134.0),
-                        height: Val::Px(134.0),
-                        ..default()
-                    },
-                ));
-            } else {
-                // 占位符
-                card.spawn((
-                    PlaceholderImage,
-                    Node {
-                        width: Val::Px(134.0),
-                        height: Val::Px(134.0),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ));
-            }
+) -> impl Scene + use<> {
+    let card_title = category.title.clone();
+    let title = category.title.clone();
 
-            // 标题
-            card.spawn((
-                Text::new(&category.title),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
+    let visibility = if hidden {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+
+    // 图片区域（已缓存直接显示，否则先放占位符）
+    let thumb_url = category.thumb.url();
+    let cover: Box<dyn SceneList> = match image_cache.get(&thumb_url) {
+        Some(handle) => Box::new(bsn_list![category_image(thumb_url.clone(), handle.clone())]),
+        // 占位符自带 URL，图片替换系统据此直接取缓存，无需反查分类列表
+        None => {
+            let placeholder_url = thumb_url.clone();
+            Box::new(bsn_list![(
+                PlaceholderImage
+                CategoryImage { url: {placeholder_url} }
                 Node {
-                    margin: UiRect::top(Val::Px(8.0)),
-                    ..default()
-                },
-            ));
-        })
-        .id()
+                    width: Val::Px(134.0),
+                    height: Val::Px(134.0),
+                }
+                BackgroundColor(AppColors::SURFACE_HOVER)
+            )])
+        }
+    };
+
+    bsn! {
+        CategoryCard { title: {card_title} }
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Px(150.0),
+            height: Val::Px(180.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        // 静息底色与 ButtonStyle::card() 的 None 态一致，避免首帧闪烁
+        BackgroundColor(AppColors::SURFACE)
+        template_value(visibility)
+        Children [
+            // 图片区域
+            {cover},
+            (
+                // 标题
+                Text({title})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::top(Val::Px(8.0)) }
+            ),
+        ]
+    }
 }
 
 /// 清理分类界面（用 Display::None 隐藏，保留 UI 结构）
@@ -285,20 +273,15 @@ pub fn refresh_categories_ui(
         if error_query.is_empty()
             && let Ok((container_entity, _)) = scroll_container_query.single()
         {
-            let font: Handle<Font> = get_font();
-            let error_entity = commands
-                .spawn((
-                    ErrorMessage,
-                    Text::new(error.clone()),
-                    TextFont {
-                        font,
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::ERROR),
-                ))
-                .id();
-            commands.entity(container_entity).add_child(error_entity);
+            let error_text = error.clone();
+            commands
+                .spawn_scene(bsn! {
+                    ErrorMessage
+                    Text({error_text})
+                    TextFont { font_size: FontSize::Px(14.0) }
+                    TextColor(AppColors::ERROR)
+                })
+                .insert(ChildOf(container_entity));
         }
     }
 
@@ -319,19 +302,6 @@ pub fn waterfall_create_category_cards(
     _time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
-    // 构建屏蔽过滤配置
-    let blocked_keywords = load_filter_keywords();
-    let (filter_by_category, filter_by_tag, filter_by_title) = load_filter_flags();
-    let filter_config = FilterConfig {
-        blocked_keywords: &blocked_keywords,
-        filter_by_category,
-        filter_by_tag,
-        filter_by_title,
-    };
-
-    // 计算过滤后的分类索引
-    let filtered_indices = filter_category_indices(&categories_state.categories, &filter_config);
-
     // 如果数据已加载但 creation_state 未启动，主动启动预创建
     // （解决系统执行顺序导致 is_changed() 检测失败的问题）
     if !creation_state.is_creating
@@ -345,19 +315,25 @@ pub fn waterfall_create_category_cards(
                 .map(|c| c.iter().any(|child| card_query.get(child).is_ok()))
                 .unwrap_or(false);
 
-            if !has_cards && !filtered_indices.is_empty() {
-                // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
-                for entity in loading_query.iter() {
-                    if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                        entity_commands.despawn();
+            if !has_cards {
+                // 惰性过滤：仅启动预创建时才用得上，避免每帧全量扫描
+                let filtered_indices = CompiledFilter::from_settings()
+                    .filter_category_indices(&categories_state.categories);
+
+                if !filtered_indices.is_empty() {
+                    // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
+                    for entity in loading_query.iter() {
+                        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                            entity_commands.despawn();
+                        }
                     }
+                    let font: Handle<Font> = get_font();
+                    creation_state.start_precreate(filtered_indices.len(), font);
+                    tracing::debug!(
+                        "自动启动分类卡片预创建: {} 个（过滤后）",
+                        filtered_indices.len()
+                    );
                 }
-                let font: Handle<Font> = get_font();
-                creation_state.start_precreate(filtered_indices.len(), font);
-                tracing::debug!(
-                    "自动启动分类卡片预创建: {} 个（过滤后）",
-                    filtered_indices.len()
-                );
             }
             let _ = container_entity; // suppress warning
         }
@@ -369,12 +345,16 @@ pub fn waterfall_create_category_cards(
             return;
         };
 
-        let Some(font) = creation_state.font_handle.clone() else {
+        // 字体句柄只作为"预创建已启动"的门闸，BSN 场景统一走默认字体句柄
+        if creation_state.font_handle.is_none() {
             return;
-        };
+        }
 
         let categories = &categories_state.categories;
         let count = creation_state.get_precreate_count();
+
+        // 惰性过滤：预创建是单帧一次性事件，与上面的启动检测各算各的
+        let filtered_indices = CompiledFilter::from_settings().filter_category_indices(categories);
 
         if filtered_indices.is_empty() || count == 0 {
             creation_state.clear();
@@ -382,180 +362,85 @@ pub fn waterfall_create_category_cards(
         }
 
         // 分类数量少（~30个），直接全部创建为可见（不用瀑布流动画）
-        commands.entity(container_entity).with_children(|parent| {
-            for i in 0..count {
-                if let Some(&original_index) = filtered_indices.get(i)
-                    && let Some(category) = categories.get(original_index)
-                {
-                    spawn_category_card(parent, category, &font, &image_cache, false);
-                }
+        for i in 0..count {
+            if let Some(&original_index) = filtered_indices.get(i)
+                && let Some(category) = categories.get(original_index)
+            {
+                commands
+                    .spawn_scene(category_card(category, &image_cache, false))
+                    .insert(ChildOf(container_entity));
             }
-        });
+        }
 
         creation_state.clear();
         tracing::debug!("分类卡片直接创建完成: {} 个（过滤后）", count);
     }
 }
 
-/// 分类卡片交互系统
+/// 分类卡片交互系统（配色由全局 `apply_button_interaction` 统一处理）
 pub fn category_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &CategoryCard),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &CategoryCard), Changed<Interaction>>,
     mut comics_list_state: ResMut<ComicsListState>,
     mut next_route: ResMut<NextState<AppRoute>>,
     mut load_comics_messages: MessageWriter<LoadComicsRequest>,
 ) {
-    for (interaction, mut bg_color, card) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-
-                // 设置当前分类并导航
-                comics_list_state.category = card.title.clone();
-                comics_list_state.page = 1;
-                comics_list_state.comics.clear();
-
-                next_route.set(AppRoute::ComicsList);
-
-                // 触发加载漫画列表
-                load_comics_messages.write(LoadComicsRequest {
-                    category: card.title.clone(),
-                    page: 1,
-                    sort: comics_list_state.sort.clone(),
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SURFACE);
-            }
-        }
-    }
-}
-
-/// 分类页面滚动处理系统
-pub fn handle_categories_scroll(
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<CategoriesScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 限制分类页面滚动范围（防止越界）
-pub fn clamp_categories_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<CategoriesScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动范围限制
-}
-
-/// 更新分类页面内容尺寸信息
-pub fn update_categories_content_size(
-    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, Option<&Children>),
-        With<CategoriesScrollContainer>,
-    >,
-    child_computed_query: Query<&ComputedNode>,
-) {
-    use category_layout::*;
-
-    let scale_factor = windows
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    let layout_params = GridLayoutParams {
-        card_width: CARD_WIDTH,
-        column_gap: COLUMN_GAP,
-        row_gap: ROW_GAP,
-        padding_left: PADDING_LEFT,
-        padding_right: PADDING_RIGHT,
-        padding_top: PADDING_TOP,
-        padding_bottom: PADDING_BOTTOM,
-    };
-
-    for (scroll_computed, mut content_size_info, children) in &mut scroll_query {
-        let viewport_size = scroll_computed.size();
-        let viewport_width = viewport_size.x / scale_factor;
-        let viewport_height = viewport_size.y / scale_factor;
-
-        if viewport_height <= 0.0 || viewport_width <= 0.0 {
+    for (interaction, card) in &interaction_query {
+        if *interaction != Interaction::Pressed {
             continue;
         }
 
-        content_size_info.viewport_height = viewport_height;
-        content_size_info.content_height = measure_grid_content_height(
-            children,
-            &child_computed_query,
-            scale_factor,
-            viewport_width,
-            &layout_params,
-        );
+        // 设置当前分类并导航
+        comics_list_state.category = card.title.clone();
+        comics_list_state.page = 1;
+        comics_list_state.comics.clear();
+
+        next_route.set(AppRoute::ComicsList);
+
+        // 触发加载漫画列表
+        load_comics_messages.write(LoadComicsRequest {
+            category: card.title.clone(),
+            page: 1,
+            sort: comics_list_state.sort.clone(),
+        });
     }
 }
 
 /// 更新分类页面图片（当图片加载完成时）
+///
+/// 不使用 `is_changed()` 检查，因为系统执行顺序可能导致检测失败。已换成图片
+/// 的实体不带 `PlaceholderImage`，加载失败的实体会被摘掉该标记，两者都自然
+/// 退出扫描集。
 pub fn update_categories_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    categories_state: Res<CategoriesState>,
-    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
-    card_query: Query<&CategoryCard>,
+    placeholder_query: Query<
+        (Entity, &ChildOf, &CategoryImage),
+        (With<PlaceholderImage>, Without<ImageNode>),
+    >,
 ) {
-    // 注意：不使用 is_changed() 检查，因为系统执行顺序可能导致检测失败
-    // 一旦占位符被替换就不在 query 中了，性能影响不大
-
-    for (placeholder_entity, child_of) in placeholder_query.iter() {
-        // 找到父卡片
-        let parent_entity: Entity = child_of.parent();
-        let Ok(card) = card_query.get(parent_entity) else {
+    for (placeholder_entity, child_of, image) in placeholder_query.iter() {
+        // 加载失败：摘掉占位标记，保留灰底方块，但不再每帧重扫
+        if image_cache.is_failed(&image.url) {
+            commands
+                .entity(placeholder_entity)
+                .remove::<PlaceholderImage>();
             continue;
-        };
-
-        // 找到对应的分类
-        let Some(category) = categories_state
-            .categories
-            .iter()
-            .find(|c| c.title == card.title)
-        else {
-            continue;
-        };
-
-        let thumb_url = category.thumb.url();
+        }
 
         // 检查图片是否已加载
-        if let Some(handle) = image_cache.get(&thumb_url) {
-            // 删除占位符，添加实际图片
-            commands.entity(placeholder_entity).despawn();
-            // 创建新的图片实体并插入到父卡片的第一个位置
-            let image_entity = commands
-                .spawn((
-                    CategoryImage {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(134.0),
-                        height: Val::Px(134.0),
-                        ..default()
-                    },
-                ))
-                .id();
+        let Some(handle) = image_cache.get(&image.url) else {
+            continue;
+        };
 
-            // 插入到第一个位置（在标题之前）
-            commands
-                .entity(parent_entity)
-                .insert_children(0, &[image_entity]);
-        }
+        // 删除占位符，添加实际图片
+        let parent_entity: Entity = child_of.parent();
+        commands.entity(placeholder_entity).despawn();
+        // 创建新的图片实体并插入到父卡片的第一个位置（在标题之前）
+        let image_entity = commands
+            .spawn_scene(category_image(image.url.clone(), handle.clone()))
+            .id();
+        commands
+            .entity(parent_entity)
+            .insert_children(0, &[image_entity]);
     }
 }

@@ -2,17 +2,16 @@
 //!
 //! 扫描下载目录，列出所有已下载漫画文件夹，支持离线浏览
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        widgets::ButtonStyle,
     },
     utils::icons::*,
 };
@@ -20,15 +19,15 @@ use crate::{
 // ==================== 组件定义 ====================
 
 /// 本地阅读页面根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalReadRoot;
 
 /// 本地阅读滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalReadScrollContainer;
 
 /// 本地漫画卡片
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalComicCard {
     /// 漫画文件夹路径
     #[allow(dead_code)]
@@ -36,11 +35,11 @@ pub struct LocalComicCard {
 }
 
 /// 扫描按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalReadScanButton;
 
 /// 本地漫画封面图片
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalComicCoverImage {
     /// 封面图片路径
     pub path: String,
@@ -49,11 +48,11 @@ pub struct LocalComicCoverImage {
 }
 
 /// 空状态提示
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct LocalReadEmptyHint;
 
 /// 打开文件夹按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct OpenLocalFolderButton {
     pub path: String,
 }
@@ -99,148 +98,10 @@ pub fn setup_local_read_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
     let local_read_root = commands
-        .spawn((
-            LocalReadRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 左侧标题
-                header.spawn((
-                    Text::new("本地阅读"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 右侧扫描按钮
-                header
-                    .spawn((
-                        LocalReadScanButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(12.0),
-                                Val::Px(12.0),
-                                Val::Px(6.0),
-                                Val::Px(6.0),
-                            ),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        },
-                        BorderColor::all(AppColors::PRIMARY),
-                        BackgroundColor(AppColors::PRIMARY),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(ICON_REFRESH),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                        btn.spawn((
-                            Text::new("扫描"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::WHITE),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 漫画列表（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            LocalReadScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect {
-                                    left: Val::Px(local_read_layout::PADDING_LEFT),
-                                    right: Val::Px(local_read_layout::PADDING_RIGHT),
-                                    top: Val::Px(local_read_layout::PADDING_TOP),
-                                    bottom: Val::Px(local_read_layout::PADDING_BOTTOM),
-                                },
-                                row_gap: Val::Px(local_read_layout::CARD_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|list| {
-                            if local_read_state.is_scanning {
-                                // 扫描中提示
-                                list.spawn((
-                                    LoadingIndicator,
-                                    Text::new("正在扫描本地漫画..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            } else if local_read_state.entries.is_empty()
-                                && local_read_state.error.is_none()
-                            {
-                                // 空状态提示
-                                spawn_empty_hint(list, &font);
-                            }
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
-        })
+        .spawn_scene(local_read_page(&local_read_state))
         .id();
 
     // 如果有 ContentArea，将本地阅读页面作为其子实体
@@ -256,6 +117,123 @@ pub fn setup_local_read_ui(
     tracing::info!("本地阅读页面 UI 已创建");
 }
 
+/// 本地阅读页面场景
+fn local_read_page(local_read_state: &LocalReadState) -> impl Scene + use<> {
+    // 列表初始占位内容：扫描中提示 / 空状态提示 / 两者皆无
+    let list_placeholder: Box<dyn SceneList> = if local_read_state.is_scanning {
+        // 扫描中提示
+        Box::new(bsn_list![(
+            LoadingIndicator
+            Text("正在扫描本地漫画...")
+            TextFont { font_size: FontSize::Px(16.0) }
+            TextColor(AppColors::TEXT)
+        )])
+    } else if local_read_state.entries.is_empty() && local_read_state.error.is_none() {
+        // 空状态提示
+        Box::new(bsn_list![empty_hint()])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    bsn! {
+        LocalReadRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 左侧标题
+                        Text("本地阅读")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 右侧扫描按钮
+                        LocalReadScanButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(12.0),
+                                Val::Px(12.0),
+                                Val::Px(6.0),
+                                Val::Px(6.0),
+                            ),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        BackgroundColor(AppColors::PRIMARY)
+                        Children [
+                            (
+                                Text(ICON_REFRESH)
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(Color::WHITE)
+                            ),
+                            (
+                                Text("扫描")
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 漫画列表（可滚动）
+                        #LocalReadScroll
+                        LocalReadScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: UiRect::new(
+                                Val::Px(local_read_layout::PADDING_LEFT),
+                                Val::Px(local_read_layout::PADDING_RIGHT),
+                                Val::Px(local_read_layout::PADDING_TOP),
+                                Val::Px(local_read_layout::PADDING_BOTTOM),
+                            ),
+                            row_gap: Val::Px(local_read_layout::CARD_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {list_placeholder} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#LocalReadScroll),
+                ]
+            ),
+        ]
+    }
+}
+
 /// 清理本地阅读页面（用 Display::None 隐藏，保留 UI 结构）
 pub fn cleanup_local_read_ui(mut query: Query<&mut Node, With<LocalReadRoot>>) {
     for mut node in query.iter_mut() {
@@ -263,84 +241,91 @@ pub fn cleanup_local_read_ui(mut query: Query<&mut Node, With<LocalReadRoot>>) {
     }
 }
 
-/// 创建空状态提示
-fn spawn_empty_hint(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            LocalReadEmptyHint,
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                padding: UiRect::vertical(Val::Px(60.0)),
-                row_gap: Val::Px(15.0),
-                ..default()
-            },
-        ))
-        .with_children(|hint| {
-            // 图标
-            hint.spawn((
-                Text::new(ICON_INBOX),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 48.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            // 主提示
-            hint.spawn((
-                Text::new("暂无本地漫画"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-            // 副提示
-            hint.spawn((
-                Text::new("下载漫画后，在此处离线浏览"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(Color::srgba(0.5, 0.5, 0.5, 0.7)),
-            ));
-        });
+/// 空状态提示场景
+fn empty_hint() -> impl Scene {
+    bsn! {
+        LocalReadEmptyHint
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            padding: UiRect::vertical(Val::Px(60.0)),
+            row_gap: Val::Px(15.0),
+        }
+        Children [
+            (
+                // 图标
+                Text(ICON_INBOX)
+                TextFont { font_size: FontSize::Px(48.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 主提示
+                Text("暂无本地漫画")
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            (
+                // 副提示
+                Text("下载漫画后，在此处离线浏览")
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(Color::srgba(0.5, 0.5, 0.5, 0.7))
+            ),
+        ]
+    }
 }
 
-/// 创建单个本地漫画卡片
-fn spawn_local_comic_card(
-    parent: &mut ChildSpawnerCommands,
-    entry: &LocalComicEntry,
-    font: &Handle<Font>,
-) {
-    parent
-        .spawn((
-            LocalComicCard {
-                path: entry.path.clone(),
-            },
-            Button,
-            Interaction::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(local_read_layout::CARD_HEIGHT),
-                padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(Color::srgba(0.12, 0.12, 0.16, 1.0)),
-        ))
-        .with_children(|card| {
-            // 封面占位/图片
-            card.spawn((
+/// 单个本地漫画卡片场景
+fn local_comic_card(entry: &LocalComicEntry) -> impl Scene + use<> {
+    let card_path = entry.path.clone();
+    let open_path = entry.path.clone();
+    let name = entry.name.clone();
+    let chapter_label = format!("{} 个章节", entry.chapter_count);
+    // 路径（缩略显示）
+    let display_path = truncate_path(&entry.path, 50);
+
+    // 封面区内容：有封面路径时放占位节点，否则显示图标
+    let cover: Box<dyn SceneList> = match &entry.cover_path {
+        Some(cover_path) => {
+            let cover_path = cover_path.clone();
+            // 带封面图片的占位（图片加载由 update 系统处理）
+            Box::new(bsn_list![(
+                LocalComicCoverImage { path: {cover_path}, loaded: false }
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                }
+                BackgroundColor(AppColors::HEADER_BG)
+            )])
+        }
+        // 无封面时显示图标
+        None => Box::new(bsn_list![(
+            Text(ICON_BOOK)
+            TextFont { font_size: FontSize::Px(24.0) }
+            TextColor(AppColors::TEXT_SECONDARY)
+        )]),
+    };
+
+    bsn! {
+        LocalComicCard { path: {card_path} }
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(local_read_layout::CARD_HEIGHT),
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        // 静息底色与 ButtonStyle::card() 的 None 态一致，避免首帧闪烁
+        BackgroundColor(AppColors::SURFACE)
+        Children [
+            (
+                // 封面占位/图片
                 Node {
                     width: Val::Px(local_read_layout::COVER_WIDTH),
                     height: Val::Px(local_read_layout::COVER_HEIGHT),
@@ -349,134 +334,80 @@ fn spawn_local_comic_card(
                     align_items: AlignItems::Center,
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-                BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 1.0)),
-            ))
-            .with_children(|cover_area| {
-                if let Some(ref cover_path) = entry.cover_path {
-                    // 带封面图片的占位（图片加载由 update 系统处理）
-                    cover_area.spawn((
-                        LocalComicCoverImage {
-                            path: cover_path.clone(),
-                            loaded: false,
-                        },
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgba(0.08, 0.08, 0.12, 1.0)),
-                    ));
-                } else {
-                    // 无封面时显示图标
-                    cover_area.spawn((
-                        Text::new(ICON_BOOK),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 24.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
                 }
-            });
-
-            // 右侧信息区域
-            card.spawn((Node {
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(6.0),
-                overflow: Overflow::clip(),
-                ..default()
-            },))
-                .with_children(|info| {
-                    // 漫画名称
-                    info.spawn((
-                        Text::new(&entry.name),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 15.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
-                    ));
-
-                    // 章节数
-                    info.spawn((
-                        Text::new(format!("{} 个章节", entry.chapter_count)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-
-                    // 路径（缩略显示）
-                    let display_path = truncate_path(&entry.path, 50);
-                    info.spawn((
-                        Text::new(display_path),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgba(0.4, 0.4, 0.5, 0.8)),
-                    ));
-                });
-
-            // 右侧操作区域
-            card.spawn((Node {
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(4.0),
-                ..default()
-            },))
-                .with_children(|actions| {
-                    // 打开文件夹按钮
-                    actions
-                        .spawn((
-                            OpenLocalFolderButton {
-                                path: entry.path.clone(),
-                            },
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::all(Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                align_items: AlignItems::Center,
-                                column_gap: Val::Px(4.0),
-                                ..default()
-                            },
-                            BorderColor::all(AppColors::BORDER),
-                            BackgroundColor(Color::NONE),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(ICON_FOLDER_OPEN),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::PRIMARY),
-                            ));
-                            btn.spawn((
-                                Text::new("打开"),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 11.0,
-                                    ..default()
-                                },
-                                TextColor(AppColors::TEXT_SECONDARY),
-                            ));
-                        });
-                });
-        });
+                template_value(BorderColor::all(AppColors::BORDER))
+                BackgroundColor(AppColors::HEADER_BG)
+                Children [ {cover} ]
+            ),
+            (
+                // 右侧信息区域
+                Node {
+                    flex_grow: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(6.0),
+                    overflow: Overflow::clip(),
+                }
+                Children [
+                    (
+                        // 漫画名称
+                        Text({name})
+                        TextFont { font_size: FontSize::Px(15.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 章节数
+                        Text({chapter_label})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        // 路径（缩略显示）
+                        Text({display_path})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(Color::srgba(0.4, 0.4, 0.5, 0.8))
+                    ),
+                ]
+            ),
+            (
+                // 右侧操作区域
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(4.0),
+                }
+                Children [
+                    (
+                        // 打开文件夹按钮
+                        OpenLocalFolderButton { path: {open_path} }
+                        Button
+                        template_value(ButtonStyle::ghost())
+                        Node {
+                            padding: UiRect::all(Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text(ICON_FOLDER_OPEN)
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::PRIMARY)
+                            ),
+                            (
+                                Text("打开")
+                                TextFont { font_size: FontSize::Px(11.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            ),
+                        ]
+                    )
+                ]
+            ),
+        ]
+    }
 }
 
 /// 刷新本地阅读列表 UI（响应数据变化）
@@ -506,19 +437,15 @@ pub fn refresh_local_read_ui(
             commands.entity(entity).despawn();
         }
 
-        let font: Handle<Font> = get_font();
-        commands.entity(scroll_entity).with_children(|parent| {
-            parent.spawn((
-                ErrorMessage,
-                Text::new(format!("扫描失败: {}", error)),
-                TextFont {
-                    font,
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.3, 0.3)),
-            ));
-        });
+        let error_text = format!("扫描失败: {}", error);
+        commands
+            .spawn_scene(bsn! {
+                ErrorMessage
+                Text({error_text})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::ERROR)
+            })
+            .insert(ChildOf(scroll_entity));
         return;
     }
 
@@ -539,10 +466,9 @@ pub fn refresh_local_read_ui(
             for entity in loading_query.iter() {
                 commands.entity(entity).despawn();
             }
-            let font: Handle<Font> = get_font();
-            commands.entity(scroll_entity).with_children(|parent| {
-                spawn_empty_hint(parent, &font);
-            });
+            commands
+                .spawn_scene(empty_hint())
+                .insert(ChildOf(scroll_entity));
         }
         return;
     }
@@ -561,101 +487,40 @@ pub fn refresh_local_read_ui(
     }
 
     // 创建所有漫画卡片
-    let font: Handle<Font> = get_font();
-    commands.entity(scroll_entity).with_children(|parent| {
-        for entry in local_read_state.entries.iter() {
-            spawn_local_comic_card(parent, entry, &font);
-        }
-    });
+    for entry in local_read_state.entries.iter() {
+        commands
+            .spawn_scene(local_comic_card(entry))
+            .insert(ChildOf(scroll_entity));
+    }
 }
 
-/// 扫描按钮交互
+/// 扫描按钮交互（配色由 `apply_button_interaction` 统一接管）
 pub fn local_read_scan_button_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
-        (Changed<Interaction>, With<LocalReadScanButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<LocalReadScanButton>)>,
     local_read_state: Res<LocalReadState>,
     mut scan_messages: MessageWriter<ScanLocalComicsRequest>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-
-                // 如果未在扫描中，发送扫描请求
-                if !local_read_state.is_scanning {
-                    scan_messages.write(ScanLocalComicsRequest);
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_HOVER);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
+    for interaction in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 如果未在扫描中，发送扫描请求
+        if !local_read_state.is_scanning {
+            scan_messages.write(ScanLocalComicsRequest);
         }
     }
 }
 
-/// 漫画卡片悬停交互（视觉反馈）
-pub fn local_comic_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
-        (Changed<Interaction>, With<LocalComicCard>),
-    >,
-) {
-    for (interaction, mut bg_color, mut border_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgba(0.18, 0.18, 0.24, 1.0));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 1.0));
-                *border_color = BorderColor::all(Color::srgba(0.4, 0.4, 0.5, 0.6));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::srgba(0.12, 0.12, 0.16, 1.0));
-                *border_color = BorderColor::all(AppColors::BORDER);
-            }
-        }
-    }
-}
-
-/// 打开文件夹按钮交互
+/// 打开文件夹按钮交互（配色由 `apply_button_interaction` 统一接管）
 pub fn open_local_folder_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &mut BackgroundColor,
-            &mut BorderColor,
-            &OpenLocalFolderButton,
-        ),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &OpenLocalFolderButton), Changed<Interaction>>,
 ) {
-    for (interaction, mut bg_color, mut border_color, btn) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgba(0.2, 0.2, 0.28, 1.0));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-
-                // 用系统文件管理器打开目录
-                open_directory(&btn.path);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.15, 0.15, 0.2, 1.0));
-                *border_color = BorderColor::all(Color::srgba(0.4, 0.4, 0.5, 0.6));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::NONE);
-                *border_color = BorderColor::all(AppColors::BORDER);
-            }
+    for (interaction, btn) in &interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
         }
+        // 用系统文件管理器打开目录
+        open_directory(&btn.path);
     }
 }
 
@@ -733,55 +598,11 @@ pub fn handle_scan_failed(
     }
 }
 
-/// 处理滚动事件
-pub fn handle_local_read_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<LocalReadScrollContainer>,
-    >,
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新内容尺寸信息
-pub fn update_local_read_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<LocalReadScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        // 加上间距
-        let gap_count = children.len().saturating_sub(1);
-        content_height += gap_count as f32 * local_read_layout::CARD_GAP;
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
 /// 加载本地封面图片
 pub fn update_local_cover_images(
     mut commands: Commands,
-    mut cover_query: Query<(Entity, &mut LocalComicCoverImage)>,
+    // 已插入 ImageNode 的封面不再进入每帧扫描集
+    mut cover_query: Query<(Entity, &mut LocalComicCoverImage), Without<ImageNode>>,
     asset_server: Res<AssetServer>,
 ) {
     for (entity, mut cover) in cover_query.iter_mut() {
@@ -936,12 +757,17 @@ async fn has_any_content(dir: &std::path::Path) -> bool {
 }
 
 /// 截断路径显示（保留末尾部分）
-fn truncate_path(path: &str, max_len: usize) -> String {
-    if path.len() <= max_len {
-        path.to_string()
-    } else {
-        format!("...{}", &path[path.len() - max_len + 3..])
+///
+/// 按字符计数：路径含中文漫画名时按字节切片会落在非字符边界上，直接 panic。
+fn truncate_path(path: &str, max_chars: usize) -> String {
+    let total = path.chars().count();
+    if total <= max_chars {
+        return path.to_string();
     }
+    // 省略号占 3 个字符，余下额度留给路径末尾
+    let tail_len = max_chars.saturating_sub(3);
+    let tail: String = path.chars().skip(total - tail_len).collect();
+    format!("...{}", tail)
 }
 
 /// 用系统文件管理器打开目录

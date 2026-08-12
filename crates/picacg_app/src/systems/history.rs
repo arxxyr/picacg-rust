@@ -2,17 +2,17 @@
 //!
 //! 实现阅读历史页面，展示用户的漫画阅读记录
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        ui_common::format_timestamp,
+        widgets::ButtonStyle,
     },
     utils::icons::*,
 };
@@ -20,38 +20,38 @@ use crate::{
 // ==================== 组件定义 ====================
 
 /// 历史页面根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HistoryRoot;
 
 /// 历史记录滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HistoryScrollContainer;
 
 /// 历史记录卡片
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HistoryItemCard {
     pub comic_id: String,
 }
 
 /// 历史记录删除按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HistoryDeleteButton {
     pub comic_id: String,
 }
 
 /// 清空所有历史按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ClearAllHistoryButton;
 
-/// 历史记录封面缩略图
-#[derive(Component)]
+/// 历史记录封面缩略图（占位符与实际图片共用，`url` 供替换系统直接取用）
+#[derive(Component, Default, Clone)]
 pub struct HistoryThumbnail {
-    #[allow(dead_code)]
+    /// 图片 URL
     pub url: String,
 }
 
 /// 历史空状态提示
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct HistoryEmptyHint;
 
 // ==================== 布局常量 ====================
@@ -96,156 +96,9 @@ pub fn setup_history_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
-    let history_root = commands
-        .spawn((
-            HistoryRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // 标题栏
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                // 左侧标题
-                header.spawn((
-                    Text::new("阅读历史"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 右侧清空按钮
-                header
-                    .spawn((
-                        ClearAllHistoryButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(12.0),
-                                Val::Px(12.0),
-                                Val::Px(6.0),
-                                Val::Px(6.0),
-                            ),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        },
-                        BorderColor::all(AppColors::BORDER),
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new(ICON_DELETE),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.9, 0.3, 0.3)),
-                        ));
-                        btn.spawn((
-                            Text::new("清空"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(Color::srgb(0.9, 0.3, 0.3)),
-                        ));
-                    });
-            });
-
-            // 滚动区域包装器
-            root.spawn((Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },))
-                .with_children(|wrapper| {
-                    // 历史列表（可滚动）
-                    let scroll_container_id = wrapper
-                        .spawn((
-                            HistoryScrollContainer,
-                            Node {
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
-                                flex_direction: FlexDirection::Column,
-                                padding: UiRect {
-                                    left: Val::Px(history_layout::PADDING_LEFT),
-                                    right: Val::Px(history_layout::PADDING_RIGHT),
-                                    top: Val::Px(history_layout::PADDING_TOP),
-                                    bottom: Val::Px(history_layout::PADDING_BOTTOM),
-                                },
-                                row_gap: Val::Px(history_layout::CARD_GAP),
-                                overflow: Overflow::scroll_y(),
-                                ..default()
-                            },
-                            Scrollable,
-                            ScrollPosition::default(),
-                            ContentSizeInfo::default(),
-                        ))
-                        .with_children(|list| {
-                            if history_state.is_loading {
-                                list.spawn((
-                                    LoadingIndicator,
-                                    Text::new("加载中..."),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT),
-                                ));
-                            } else if history_state.records.is_empty()
-                                && history_state.error.is_none()
-                            {
-                                list.spawn((
-                                    HistoryEmptyHint,
-                                    Text::new("暂无阅读记录"),
-                                    TextFont {
-                                        font: font.clone(),
-                                        font_size: 16.0,
-                                        ..default()
-                                    },
-                                    TextColor(AppColors::TEXT_SECONDARY),
-                                ));
-                            }
-                        })
-                        .id();
-
-                    // 创建滚动条
-                    spawn_scrollbar(wrapper, scroll_container_id);
-                });
-        })
-        .id();
+    let history_root = commands.spawn_scene(history_page(&history_state)).id();
 
     // 如果有 ContentArea，将历史列表作为其子实体
     if let Some(content_entity) = content_area {
@@ -258,6 +111,150 @@ pub fn setup_history_ui(
     }
 
     tracing::info!("阅读历史页面 UI 已创建");
+}
+
+/// 历史页面场景
+fn history_page(history_state: &HistoryState) -> impl Scene + use<> {
+    let list_padding = UiRect {
+        left: Val::Px(history_layout::PADDING_LEFT),
+        right: Val::Px(history_layout::PADDING_RIGHT),
+        top: Val::Px(history_layout::PADDING_TOP),
+        bottom: Val::Px(history_layout::PADDING_BOTTOM),
+    };
+
+    // 列表初始内容：加载中 / 空状态提示（两者都不满足时为空列表）
+    let list_hint: Box<dyn SceneList> = if history_state.is_loading {
+        Box::new(bsn_list![loading_indicator()])
+    } else if history_state.records.is_empty() && history_state.error.is_none() {
+        Box::new(bsn_list![empty_hint()])
+    } else {
+        Box::new(bsn_list![])
+    };
+
+    bsn! {
+        HistoryRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // 标题栏
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        // 左侧标题
+                        Text("阅读历史")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 右侧清空按钮
+                        ClearAllHistoryButton
+                        Button
+                        template_value(ButtonStyle::ghost())
+                        Node {
+                            padding: UiRect::new(
+                                Val::Px(12.0),
+                                Val::Px(12.0),
+                                Val::Px(6.0),
+                                Val::Px(6.0),
+                            ),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text(ICON_DELETE)
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::ERROR)
+                            ),
+                            (
+                                Text("清空")
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::ERROR)
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 滚动区域包装器
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        // 历史列表（可滚动）
+                        #HistoryScroll
+                        HistoryScrollContainer
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: {list_padding},
+                            row_gap: Val::Px(history_layout::CARD_GAP),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [ {list_hint} ]
+                    ),
+                    // 创建滚动条
+                    scrollbar(#HistoryScroll),
+                ]
+            ),
+        ]
+    }
+}
+
+/// 加载指示器场景
+fn loading_indicator() -> impl Scene {
+    bsn! {
+        LoadingIndicator
+        Text("加载中...")
+        TextFont { font_size: FontSize::Px(16.0) }
+        TextColor(AppColors::TEXT)
+    }
+}
+
+/// 空状态提示场景
+fn empty_hint() -> impl Scene {
+    bsn! {
+        HistoryEmptyHint
+        Text("暂无阅读记录")
+        TextFont { font_size: FontSize::Px(16.0) }
+        TextColor(AppColors::TEXT_SECONDARY)
+    }
+}
+
+/// 加载失败提示场景
+fn error_message(error: &str) -> impl Scene + use<> {
+    let label = format!("加载失败: {}", error);
+
+    bsn! {
+        ErrorMessage
+        Text({label})
+        TextFont { font_size: FontSize::Px(14.0) }
+        TextColor(AppColors::ERROR)
+    }
 }
 
 /// 清理历史页面（用 Display::None 隐藏，保留 UI 结构）
@@ -295,19 +292,9 @@ pub fn refresh_history_ui(
             commands.entity(entity).despawn();
         }
 
-        let font: Handle<Font> = get_font();
-        commands.entity(scroll_entity).with_children(|parent| {
-            parent.spawn((
-                ErrorMessage,
-                Text::new(format!("加载失败: {}", error)),
-                TextFont {
-                    font,
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.9, 0.3, 0.3)),
-            ));
-        });
+        commands
+            .spawn_scene(error_message(error))
+            .insert(ChildOf(scroll_entity));
         return;
     }
 
@@ -325,19 +312,9 @@ pub fn refresh_history_ui(
             && empty_hint_query.is_empty()
             && loading_query.is_empty()
         {
-            let font: Handle<Font> = get_font();
-            commands.entity(scroll_entity).with_children(|parent| {
-                parent.spawn((
-                    HistoryEmptyHint,
-                    Text::new("暂无阅读记录"),
-                    TextFont {
-                        font,
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            });
+            commands
+                .spawn_scene(empty_hint())
+                .insert(ChildOf(scroll_entity));
         }
         return;
     }
@@ -351,167 +328,133 @@ pub fn refresh_history_ui(
     }
 
     // 创建所有历史卡片
-    let font: Handle<Font> = get_font();
-    commands.entity(scroll_entity).with_children(|parent| {
-        for record in history_state.records.iter() {
-            spawn_history_card(parent, record, &font, &image_cache);
-        }
-    });
+    for record in history_state.records.iter() {
+        commands
+            .spawn_scene(history_card(record, &image_cache))
+            .insert(ChildOf(scroll_entity));
+    }
 }
 
-/// 创建单个历史记录卡片
-fn spawn_history_card(
-    parent: &mut ChildSpawnerCommands,
-    record: &picacg_db::DbHistory,
-    font: &Handle<Font>,
-    image_cache: &ImageCache,
-) {
+/// 单个历史记录卡片场景
+fn history_card(record: &picacg_db::DbHistory, image_cache: &ImageCache) -> impl Scene + use<> {
     let comic_title = record.comic_title.as_deref().unwrap_or("未知漫画");
     let eps_fallback = format!("第{}章", record.last_eps);
     let eps_title = record.last_eps_title.as_deref().unwrap_or(&eps_fallback);
     let time_str = format_timestamp(record.last_read);
 
-    parent
-        .spawn((
-            HistoryItemCard {
-                comic_id: record.book_id.clone(),
-            },
-            ContextMenuTarget {
-                comic_id: record.book_id.clone(),
-                comic_title: comic_title.to_string(),
-            },
-            Button,
-            Interaction::default(),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Px(history_layout::CARD_HEIGHT),
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                column_gap: Val::Px(12.0),
-                ..default()
-            },
-            BorderColor::all(AppColors::BORDER),
-            BackgroundColor(AppColors::SURFACE),
-        ))
-        .with_children(|card| {
-            // 封面缩略图
-            let thumb_url = record.thumb_url.as_deref().unwrap_or("");
-            if !thumb_url.is_empty() {
-                if let Some(handle) = image_cache.get(thumb_url) {
-                    card.spawn((
-                        HistoryThumbnail {
-                            url: thumb_url.to_string(),
-                        },
-                        ImageNode::new(handle.clone()),
-                        Node {
-                            width: Val::Px(history_layout::THUMB_WIDTH),
-                            height: Val::Px(history_layout::THUMB_HEIGHT),
-                            flex_shrink: 0.0,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                    ));
-                } else {
-                    // 占位符
-                    card.spawn((
-                        PlaceholderImage,
-                        Node {
-                            width: Val::Px(history_layout::THUMB_WIDTH),
-                            height: Val::Px(history_layout::THUMB_HEIGHT),
-                            flex_shrink: 0.0,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                    ));
-                }
-            } else {
-                // 无封面占位符
-                card.spawn((
-                    Node {
-                        width: Val::Px(history_layout::THUMB_WIDTH),
-                        height: Val::Px(history_layout::THUMB_HEIGHT),
-                        flex_shrink: 0.0,
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.25)),
-                ))
-                .with_children(|ph| {
-                    ph.spawn((
-                        Text::new(ICON_BOOK),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 20.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-                });
-            }
+    let card = HistoryItemCard {
+        comic_id: record.book_id.clone(),
+    };
+    let menu_target = ContextMenuTarget {
+        comic_id: record.book_id.clone(),
+        comic_title: comic_title.to_string(),
+    };
+    let delete_button = HistoryDeleteButton {
+        comic_id: record.book_id.clone(),
+    };
+    let title = comic_title.to_string();
+    let progress = format!("上次看到：{} 第{}页", eps_title, record.last_page);
 
-            // 中间信息区域
-            card.spawn((Node {
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_direction: FlexDirection::Column,
+    // 封面缩略图
+    let thumb_url = record.thumb_url.as_deref().unwrap_or("");
+    let thumbnail: Box<dyn SceneList> = match (thumb_url.is_empty(), image_cache.get(thumb_url)) {
+        (false, Some(handle)) => Box::new(bsn_list![history_thumbnail(thumb_url, handle.clone())]),
+        // 占位符
+        (false, None) => {
+            // 占位符自带 URL：图片就绪时无需回查 HistoryState
+            let placeholder_url = thumb_url.to_string();
+            Box::new(bsn_list![(
+                PlaceholderImage
+                HistoryThumbnail { url: {placeholder_url} }
+                Node {
+                    width: Val::Px(history_layout::THUMB_WIDTH),
+                    height: Val::Px(history_layout::THUMB_HEIGHT),
+                    flex_shrink: 0.0,
+                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                }
+                BackgroundColor(AppColors::SURFACE_HOVER)
+            )])
+        }
+        // 无封面占位符
+        (true, _) => Box::new(bsn_list![(
+            Node {
+                width: Val::Px(history_layout::THUMB_WIDTH),
+                height: Val::Px(history_layout::THUMB_HEIGHT),
+                flex_shrink: 0.0,
+                border_radius: BorderRadius::all(Val::Px(4.0)),
                 justify_content: JustifyContent::Center,
-                row_gap: Val::Px(4.0),
-                overflow: Overflow::clip(),
-                ..default()
-            },))
-                .with_children(|info| {
-                    // 漫画标题
-                    info.spawn((
-                        Text::new(comic_title),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 15.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT),
+                align_items: AlignItems::Center,
+            }
+            BackgroundColor(AppColors::SURFACE_HOVER)
+            Children [
+                (
+                    Text(ICON_BOOK)
+                    TextFont { font_size: FontSize::Px(20.0) }
+                    TextColor(AppColors::TEXT_SECONDARY)
+                )
+            ]
+        )]),
+    };
+
+    bsn! {
+        template_value(card)
+        template_value(menu_target)
+        Button
+        template_value(ButtonStyle::card())
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Px(history_layout::CARD_HEIGHT),
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(10.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            column_gap: Val::Px(12.0),
+        }
+        template_value(BorderColor::all(AppColors::BORDER))
+        BackgroundColor(AppColors::SURFACE)
+        Children [
+            {thumbnail},
+            (
+                // 中间信息区域
+                Node {
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    row_gap: Val::Px(4.0),
+                    overflow: Overflow::clip(),
+                }
+                Children [
+                    (
+                        // 漫画标题
+                        Text({title})
+                        TextFont { font_size: FontSize::Px(15.0) }
+                        TextColor(AppColors::TEXT)
                         Node {
                             max_width: Val::Percent(100.0),
                             overflow: Overflow::clip(),
-                            ..default()
-                        },
-                    ));
-
-                    // 上次阅读进度
-                    info.spawn((
-                        Text::new(format!("上次看到：{} 第{}页", eps_title, record.last_page)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 12.0,
-                            ..default()
-                        },
-                        TextColor(AppColors::TEXT_SECONDARY),
-                    ));
-
-                    // 时间
-                    info.spawn((
-                        Text::new(time_str),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 11.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.4, 0.4, 0.45)),
-                    ));
-                });
-
-            // 右侧删除按钮
-            card.spawn((
-                HistoryDeleteButton {
-                    comic_id: record.book_id.clone(),
-                },
-                Button,
-                Interaction::default(),
+                        }
+                    ),
+                    (
+                        // 上次阅读进度
+                        Text({progress})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                    (
+                        // 时间
+                        Text({time_str})
+                        TextFont { font_size: FontSize::Px(11.0) }
+                        TextColor(Color::srgb(0.4, 0.4, 0.45))
+                    ),
+                ]
+            ),
+            (
+                // 右侧删除按钮
+                template_value(delete_button)
+                Button
+                template_value(ButtonStyle::ghost())
                 Node {
                     width: Val::Px(32.0),
                     height: Val::Px(32.0),
@@ -519,87 +462,69 @@ fn spawn_history_card(
                     justify_content: JustifyContent::Center,
                     align_items: AlignItems::Center,
                     border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(ICON_CLOSE),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(0.5, 0.5, 0.55)),
-                ));
-            });
-        });
-}
-
-/// 格式化时间戳为可读字符串
-fn format_timestamp(timestamp: i64) -> String {
-    use chrono::{Local, TimeZone};
-
-    if timestamp == 0 {
-        return "未知时间".to_string();
-    }
-
-    match Local.timestamp_opt(timestamp, 0) {
-        chrono::LocalResult::Single(dt) => dt.format("%Y-%m-%d %H:%M").to_string(),
-        _ => "未知时间".to_string(),
+                }
+                BackgroundColor(Color::NONE)
+                Children [
+                    (
+                        Text(ICON_CLOSE)
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::srgb(0.5, 0.5, 0.55))
+                    )
+                ]
+            ),
+        ]
     }
 }
 
-/// 历史卡片点击交互（跳转到漫画详情）
-pub fn history_card_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &HistoryItemCard),
-        (Changed<Interaction>, Without<HistoryDeleteButton>),
-    >,
-    mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
-) {
-    for (interaction, mut bg_color, card) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgb(0.1, 0.1, 0.15));
-                detail_messages.write(NavigateToComicDetailEvent {
-                    comic_id: card.comic_id.clone(),
-                });
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.2, 0.2, 0.25));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(AppColors::SURFACE);
-            }
+/// 封面缩略图场景（卡片创建与图片加载完成后的替换共用）
+fn history_thumbnail(url: &str, image: Handle<Image>) -> impl Scene + use<> {
+    let thumbnail = HistoryThumbnail {
+        url: url.to_string(),
+    };
+
+    bsn! {
+        template_value(thumbnail)
+        // visual_box 必须显式写：补丁基于 ImageNodeTemplate 的字段级默认值
+        //（PaddingBox），而非 ImageNode::default() 的 ContentBox
+        ImageNode {
+            image: {image},
+            visual_box: VisualBox::ContentBox,
+        }
+        Node {
+            width: Val::Px(history_layout::THUMB_WIDTH),
+            height: Val::Px(history_layout::THUMB_HEIGHT),
+            flex_shrink: 0.0,
+            border_radius: BorderRadius::all(Val::Px(4.0)),
         }
     }
 }
 
-/// 历史记录删除按钮交互
+/// 历史卡片点击交互（跳转到漫画详情；配色由 `apply_button_interaction`
+/// 统一接管）
+pub fn history_card_interaction(
+    interaction_query: Query<(&Interaction, &HistoryItemCard), Changed<Interaction>>,
+    mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
+) {
+    for (interaction, card) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            detail_messages.write(NavigateToComicDetailEvent {
+                comic_id: card.comic_id.clone(),
+            });
+        }
+    }
+}
+
+/// 历史记录删除按钮交互（配色由 `apply_button_interaction` 统一接管）
 pub fn history_delete_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &HistoryDeleteButton),
-        Changed<Interaction>,
-    >,
+    interaction_query: Query<(&Interaction, &HistoryDeleteButton), Changed<Interaction>>,
     mut delete_messages: MessageWriter<DeleteHistoryRequest>,
 ) {
-    for (interaction, mut bg_color, btn) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(Color::srgba(0.9, 0.3, 0.3, 0.3));
-                delete_messages.write(DeleteHistoryRequest {
-                    comic_id: btn.comic_id.clone(),
-                });
-                tracing::info!("删除历史记录: {}", btn.comic_id);
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgba(0.5, 0.5, 0.5, 0.2));
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::NONE);
-            }
+    for (interaction, btn) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            delete_messages.write(DeleteHistoryRequest {
+                comic_id: btn.comic_id.clone(),
+            });
+            tracing::info!("删除历史记录: {}", btn.comic_id);
         }
     }
 }
@@ -617,47 +542,6 @@ pub fn clear_all_history_interaction(
     }
 }
 
-/// 历史页面滚动处理
-pub fn handle_history_scroll(
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-    _scroll_query: Query<
-        (&mut ScrollPosition, &ComputedNode, Option<&ContentSizeInfo>),
-        With<HistoryScrollContainer>,
-    >,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新历史内容尺寸信息
-pub fn update_history_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<HistoryScrollContainer>,
-    >,
-    _children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        // 计算内容高度（列表布局：每个卡片高度 + 间距）
-        let card_count = children.len();
-        let content_height = history_layout::PADDING_TOP
-            + history_layout::PADDING_BOTTOM
-            + (card_count as f32 * history_layout::CARD_HEIGHT)
-            + (card_count.saturating_sub(1) as f32 * history_layout::CARD_GAP);
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
-    }
-}
-
 /// 处理历史数据加载完成
 pub fn handle_history_loaded(
     mut history_state: ResMut<HistoryState>,
@@ -671,11 +555,11 @@ pub fn handle_history_loaded(
         history_state.is_loading = false;
         history_state.error = None;
 
-        // 预加载封面图片
+        // 预加载封面图片（已入队/加载中/失败的 URL 不重复请求）
         for record in &history_state.records {
             if let Some(ref url) = record.thumb_url
                 && !url.is_empty()
-                && image_cache.get(url).is_none()
+                && !image_cache.is_known(url)
             {
                 load_image_messages.write(LoadImageRequest { url: url.clone() });
             }
@@ -698,67 +582,43 @@ pub fn handle_history_load_failed(
 }
 
 /// 更新历史封面图片（当图片加载完成时替换占位符）
+///
+/// 扫描集只含"仍是占位符"的实体：已替换的带 `ImageNode`，加载失败的会被摘掉
+/// `PlaceholderImage` 标记，两者都不再进入每帧遍历。
 pub fn update_history_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    history_state: Res<HistoryState>,
-    placeholder_query: Query<(Entity, &ChildOf), With<PlaceholderImage>>,
-    card_query: Query<&HistoryItemCard>,
+    placeholder_query: Query<
+        (Entity, &ChildOf, &HistoryThumbnail),
+        (With<PlaceholderImage>, Without<ImageNode>),
+    >,
 ) {
-    let placeholder_count = placeholder_query.iter().count();
-    if placeholder_count == 0 {
-        return;
-    }
-
     let mut replaced_count = 0;
-    for (placeholder_entity, child_of) in placeholder_query.iter() {
-        let parent_entity: Entity = child_of.parent();
-        let Ok(card) = card_query.get(parent_entity) else {
-            continue;
-        };
-
-        // 找到对应的历史记录
-        let Some(record) = history_state
-            .records
-            .iter()
-            .find(|r| r.book_id == card.comic_id)
-        else {
-            continue;
-        };
-
-        let Some(ref thumb_url) = record.thumb_url else {
-            continue;
-        };
-
-        if thumb_url.is_empty() {
+    for (placeholder_entity, child_of, thumbnail) in placeholder_query.iter() {
+        // 加载失败：摘掉占位标记（灰底保留），让它退出扫描集
+        if image_cache.is_failed(&thumbnail.url) {
+            commands
+                .entity(placeholder_entity)
+                .remove::<PlaceholderImage>();
             continue;
         }
 
         // 检查图片是否已加载
-        if let Some(handle) = image_cache.get(thumb_url) {
-            commands.entity(placeholder_entity).despawn();
-            let image_entity = commands
-                .spawn((
-                    HistoryThumbnail {
-                        url: thumb_url.clone(),
-                    },
-                    ImageNode::new(handle.clone()),
-                    Node {
-                        width: Val::Px(history_layout::THUMB_WIDTH),
-                        height: Val::Px(history_layout::THUMB_HEIGHT),
-                        flex_shrink: 0.0,
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
-                        ..default()
-                    },
-                ))
-                .id();
+        let Some(handle) = image_cache.get(&thumbnail.url) else {
+            continue;
+        };
 
-            // 插入到第一个位置（在信息区域之前）
-            commands
-                .entity(parent_entity)
-                .insert_children(0, &[image_entity]);
-            replaced_count += 1;
-        }
+        let parent_entity: Entity = child_of.parent();
+        commands.entity(placeholder_entity).despawn();
+        let image_entity = commands
+            .spawn_scene(history_thumbnail(&thumbnail.url, handle.clone()))
+            .id();
+
+        // 插入到第一个位置（在信息区域之前）
+        commands
+            .entity(parent_entity)
+            .insert_children(0, &[image_entity]);
+        replaced_count += 1;
     }
 
     if replaced_count > 0 {

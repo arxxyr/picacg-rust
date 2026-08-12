@@ -54,16 +54,8 @@ fn load_font_asset(path: &Option<String>, label: &str) -> Option<Font> {
     match std::fs::read(path) {
         Ok(bytes) => {
             tracing::info!("{}读取成功: {} bytes", label, bytes.len());
-            match Font::try_from_bytes(bytes) {
-                Ok(font) => {
-                    tracing::info!("{}解析成功", label);
-                    Some(font)
-                }
-                Err(e) => {
-                    tracing::error!("{}解析失败: {:?}", label, e);
-                    None
-                }
-            }
+            // Bevy 0.19: Font::from_bytes 不再返回 Result，解析延迟到文本布局阶段
+            Some(Font::from_bytes(bytes))
         }
         Err(e) => {
             tracing::error!("{}读取失败: {} - {}", label, path, e);

@@ -11,30 +11,29 @@ use std::path::PathBuf;
 
 use bevy::{input::mouse::MouseWheel, prelude::*};
 
-use super::font_loader::get_font;
 use crate::{
     events::*,
     resources::{ComicDetailState, ImageCache, ReadMode, ReaderState},
-    systems::{downloads::get_download_base_path, ui_common::Scrollable},
+    systems::{downloads::get_download_base_path, login::AppColors, widgets::ButtonStyle},
     utils::icons::*,
 };
 
 // ==================== 组件定义 ====================
 
 /// 阅读器根节点
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderRoot;
 
 /// 阅读器图片容器（单页模式的三 slot 或条漫滚动容器的父级）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderImageContainer;
 
 /// 加载指示器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderLoadingIndicator;
 
 /// 错误提示
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderErrorText;
 
 /// 图片加载中指示器（通用，等待 ImageCache 回调）
@@ -46,39 +45,39 @@ pub struct ReaderImageLoading {
 // ---------- 工具栏 ----------
 
 /// 阅读器顶部工具栏
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderToolbar;
 
 /// 阅读器底部信息栏
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderBottomBar;
 
 /// 返回按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderBackButton;
 
 /// 上一页按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderPrevButton;
 
 /// 下一页按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderNextButton;
 
 /// 页码显示文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderPageText;
 
 /// 章节标题文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderEpisodeText;
 
 /// 模式切换按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderModeButton;
 
 /// 缩放显示文本
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ReaderScaleText;
 
 // ---------- 单页模式三 slot ----------
@@ -105,11 +104,11 @@ pub struct ImageSlot {
 // ---------- 条漫模式 ----------
 
 /// Webtoon 模式滚动容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct WebtoonScrollContainer;
 
 /// 条漫模式槽位（每页一个实体，图片按需懒加载）
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct WebtoonSlot {
     /// 绑定的全局页码（None = 空槽）
     pub page_index: Option<usize>,
@@ -133,7 +132,7 @@ mod consts {
     /// 条漫模式预加载范围（可见区域上下各预加载多少张）
     pub const WEBTOON_PRELOAD_RANGE: usize = 3;
     /// 条漫模式占位高度（未加载图片的默认高度）
-    pub const WEBTOON_PLACEHOLDER_HEIGHT: f32 = 600.0;
+    pub const WEBTOON_PLACEHOLDER_HEIGHT: f32 = 1000.0;
     /// 条漫模式图片间距
     pub const WEBTOON_GAP: f32 = 8.0;
 }
@@ -279,36 +278,13 @@ fn load_image_for_slot(
 
 // ==================== Setup / Cleanup ====================
 
-/// 创��阅读器 UI
+/// 创建阅读器 UI
 pub fn setup_reader_ui(
     mut commands: Commands,
     _asset_server: Res<AssetServer>,
     reader_state: Res<ReaderState>,
 ) {
-    let font: Handle<Font> = get_font();
-
-    // 根节点 - 全屏黑色背景
-    commands
-        .spawn((
-            ReaderRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                position_type: PositionType::Relative,
-                ..default()
-            },
-            BackgroundColor(Color::BLACK),
-        ))
-        .with_children(|root| {
-            // 图片显示区域（底层，全屏）
-            spawn_image_area(root, &font);
-
-            // 顶部工具栏（浮动层）
-            spawn_toolbar(root, &font, &reader_state);
-
-            // 底部信息栏（浮动层）
-            spawn_bottom_bar(root, &font, &reader_state);
-        });
+    commands.spawn_scene(reader_page(&reader_state));
 
     tracing::info!(
         "阅读器 UI 初始化: comic_id={}, episode={}",
@@ -317,242 +293,208 @@ pub fn setup_reader_ui(
     );
 }
 
-/// 创建顶部工具栏
-fn spawn_toolbar(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    reader_state: &ReaderState,
-) {
-    parent
-        .spawn((
-            ReaderToolbar,
-            Node {
-                position_type: PositionType::Absolute,
-                top: Val::Px(0.0),
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(consts::TOOLBAR_HEIGHT),
-                padding: UiRect::horizontal(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::SpaceBetween,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
-            ZIndex(10),
-        ))
-        .with_children(|toolbar| {
-            // 左侧：返回按钮
-            toolbar
-                .spawn((
-                    ReaderBackButton,
-                    Button,
-                    Interaction::default(),
-                    Node {
-                        padding: UiRect::all(Val::Px(8.0)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::NONE),
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new(ICON_CHEVRON_LEFT),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 24.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
+/// 阅读器页面场景（根节点 - 全屏黑色背景）
+fn reader_page(reader_state: &ReaderState) -> impl Scene + use<> {
+    bsn! {
+        ReaderRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            position_type: PositionType::Relative,
+        }
+        BackgroundColor(Color::BLACK)
+        Children [
+            // 图片显示区域（底层，全屏）
+            reader_image_area(),
+            // 顶部工具栏（浮动层）
+            reader_toolbar(reader_state),
+            // 底部信息栏（浮动层）
+            reader_bottom_bar(reader_state),
+        ]
+    }
+}
 
-            // 中间：章节标题
-            let episode_title = reader_state
-                .episodes
-                .get(reader_state.current_episode_idx)
-                .map(|ep| ep.title.as_str())
-                .unwrap_or("未知章节");
-            toolbar.spawn((
-                ReaderEpisodeText,
-                Text::new(format!(
-                    "第 {} 章 - {}",
-                    reader_state.episode_order, episode_title
-                )),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 16.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
+/// 顶部工具栏场景
+fn reader_toolbar(reader_state: &ReaderState) -> impl Scene + use<> {
+    // 中间：章节标题
+    let episode_title = reader_state
+        .episodes
+        .get(reader_state.current_episode_idx)
+        .map(|ep| ep.title.as_str())
+        .unwrap_or("未知章节");
+    let episode_label = format!("第 {} 章 - {}", reader_state.episode_order, episode_title);
+    // 右侧：缩放显示
+    let scale_label = format!("{}%", (reader_state.scale * 100.0) as i32);
+    // 模式切换按钮文本
+    let mode_label = match reader_state.read_mode {
+        ReadMode::SinglePage => "单页",
+        ReadMode::Webtoon => "条漫",
+    };
 
-            // 右侧：缩放显示 + 模式切换
-            toolbar
-                .spawn((Node {
+    bsn! {
+        ReaderToolbar
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            height: Val::Px(consts::TOOLBAR_HEIGHT),
+            padding: UiRect::horizontal(Val::Px(15.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+        }
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8))
+        ZIndex(10)
+        Children [
+            (
+                // 左侧：返回按钮
+                ReaderBackButton
+                Button
+                template_value(ButtonStyle::ghost())
+                Node { padding: UiRect::all(Val::Px(8.0)) }
+                BackgroundColor(Color::NONE)
+                Children [
+                    (
+                        Text(ICON_CHEVRON_LEFT)
+                        TextFont { font_size: FontSize::Px(24.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+            (
+                // 中间：章节标题
+                ReaderEpisodeText
+                Text({episode_label})
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(Color::WHITE)
+            ),
+            (
+                // 右侧：缩放显示 + 模式切换
+                Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(10.0),
-                    ..default()
-                },))
-                .with_children(|right| {
-                    // 缩放显示
-                    right.spawn((
-                        ReaderScaleText,
-                        Text::new(format!("{}%", (reader_state.scale * 100.0) as i32)),
-                        TextFont {
-                            font: font.clone(),
-                            font_size: 14.0,
-                            ..default()
-                        },
-                        TextColor(Color::srgb(0.7, 0.7, 0.7)),
-                    ));
-
-                    // 模式切换按钮
-                    let mode_label = match reader_state.read_mode {
-                        ReadMode::SinglePage => "��页",
-                        ReadMode::Webtoon => "条漫",
-                    };
-                    right
-                        .spawn((
-                            ReaderModeButton,
-                            Button,
-                            Interaction::default(),
-                            Node {
-                                padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
-                                border: UiRect::all(Val::Px(1.0)),
-                                border_radius: BorderRadius::all(Val::Px(4.0)),
-                                ..default()
-                            },
-                            BackgroundColor(Color::srgba(0.3, 0.3, 0.3, 0.8)),
-                            BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                        ))
-                        .with_children(|btn| {
-                            btn.spawn((
-                                Text::new(mode_label),
-                                TextFont {
-                                    font: font.clone(),
-                                    font_size: 14.0,
-                                    ..default()
-                                },
-                                TextColor(Color::WHITE),
-                            ));
-                        });
-                });
-        });
+                }
+                Children [
+                    (
+                        // 缩放显示
+                        ReaderScaleText
+                        Text({scale_label})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::srgb(0.7, 0.7, 0.7))
+                    ),
+                    (
+                        // 模式切换按钮（芯片状，保持有底色 → secondary）
+                        ReaderModeButton
+                        Button
+                        template_value(ButtonStyle::secondary())
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SECONDARY)
+                        template_value(BorderColor::all(Color::srgb(0.5, 0.5, 0.5)))
+                        Children [
+                            (
+                                Text({mode_label})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                ]
+            ),
+        ]
+    }
 }
 
-/// 创建图片显示区域
-fn spawn_image_area(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            ReaderImageContainer,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                overflow: Overflow::clip(),
-                ..default()
-            },
-            BackgroundColor(Color::BLACK),
-        ))
-        .with_children(|container| {
-            // 加载指示器（默认显示）
-            container.spawn((
-                ReaderLoadingIndicator,
-                Text::new("加载中..."),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 18.0,
-                    ..default()
-                },
-                TextColor(Color::srgb(0.7, 0.7, 0.7)),
-            ));
-        });
+/// 图片显示区域场景
+fn reader_image_area() -> impl Scene {
+    bsn! {
+        ReaderImageContainer
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            overflow: Overflow::clip(),
+        }
+        BackgroundColor(Color::BLACK)
+        Children [
+            (
+                // 加载指示器（默认显示）
+                ReaderLoadingIndicator
+                Text("加载中...")
+                TextFont { font_size: FontSize::Px(18.0) }
+                TextColor(Color::srgb(0.7, 0.7, 0.7))
+            )
+        ]
+    }
 }
 
-/// 创建底部信息栏
-fn spawn_bottom_bar(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    reader_state: &ReaderState,
-) {
-    parent
-        .spawn((
-            ReaderBottomBar,
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(0.0),
-                left: Val::Px(0.0),
-                right: Val::Px(0.0),
-                height: Val::Px(consts::BOTTOM_BAR_HEIGHT),
-                padding: UiRect::horizontal(Val::Px(15.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::SpaceBetween,
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8)),
-            ZIndex(10),
-        ))
-        .with_children(|bar| {
-            // 上一页按钮
-            bar.spawn((
-                ReaderPrevButton,
-                Button,
-                Interaction::default(),
-                Node {
-                    padding: UiRect::all(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(format!("{ICON_CHEVRON_LEFT} 上一页")),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
+/// 底部信息栏场景
+fn reader_bottom_bar(reader_state: &ReaderState) -> impl Scene + use<> {
+    let prev_label = format!("{ICON_CHEVRON_LEFT} 上一页");
+    let next_label = format!("下一页 {ICON_CHEVRON_RIGHT}");
+    // 页码显示（1-indexed 展示）
+    let display_page = reader_state.current_page + 1;
+    let page_label = format!("{} / {}", display_page, reader_state.total_pages);
 
-            // 页码显示（1-indexed 展示）
-            let display_page = reader_state.current_page + 1;
-            bar.spawn((
-                ReaderPageText,
-                Text::new(format!("{} / {}", display_page, reader_state.total_pages)),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 14.0,
-                    ..default()
-                },
-                TextColor(Color::WHITE),
-            ));
-
-            // 下一页按钮
-            bar.spawn((
-                ReaderNextButton,
-                Button,
-                Interaction::default(),
-                Node {
-                    padding: UiRect::all(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::NONE),
-            ))
-            .with_children(|btn| {
-                btn.spawn((
-                    Text::new(format!("下一页 {ICON_CHEVRON_RIGHT}")),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 14.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                ));
-            });
-        });
+    bsn! {
+        ReaderBottomBar
+        Node {
+            position_type: PositionType::Absolute,
+            bottom: Val::Px(0.0),
+            left: Val::Px(0.0),
+            right: Val::Px(0.0),
+            height: Val::Px(consts::BOTTOM_BAR_HEIGHT),
+            padding: UiRect::horizontal(Val::Px(15.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+        }
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8))
+        ZIndex(10)
+        Children [
+            (
+                // 上一页按钮
+                ReaderPrevButton
+                Button
+                template_value(ButtonStyle::ghost())
+                Node { padding: UiRect::all(Val::Px(8.0)) }
+                BackgroundColor(Color::NONE)
+                Children [
+                    (
+                        Text({prev_label})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+            (
+                // 页码显示
+                ReaderPageText
+                Text({page_label})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(Color::WHITE)
+            ),
+            (
+                // 下一页按钮
+                ReaderNextButton
+                Button
+                template_value(ButtonStyle::ghost())
+                Node { padding: UiRect::all(Val::Px(8.0)) }
+                BackgroundColor(Color::NONE)
+                Children [
+                    (
+                        Text({next_label})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(Color::WHITE)
+                    )
+                ]
+            ),
+        ]
+    }
 }
 
 /// 清理阅读器 UI
@@ -669,6 +611,7 @@ pub fn handle_pictures_loaded(
                     "条漫 Phase 1：当前章节 {} 张图片已就绪，创建视图",
                     reader_state.total_pages
                 );
+                reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
                 create_webtoon_view(
                     &mut commands,
                     container,
@@ -751,6 +694,7 @@ pub fn handle_all_pictures_loaded(
         };
 
         // 用完整列表重建条漫视图
+        reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
         create_webtoon_view(
             &mut commands,
             container,
@@ -784,19 +728,15 @@ pub fn handle_pictures_load_failed(
 
         // 显示错误信息
         if let Ok(container) = container_query.single() {
-            let font: Handle<Font> = get_font();
-            commands.entity(container).with_children(|parent| {
-                parent.spawn((
-                    ReaderErrorText,
-                    Text::new(format!("加载失败: {}", event.error)),
-                    TextFont {
-                        font,
-                        font_size: 16.0,
-                        ..default()
-                    },
-                    TextColor(Color::srgb(1.0, 0.4, 0.4)),
-                ));
-            });
+            let error_label = format!("加载失败: {}", event.error);
+            commands
+                .spawn_scene(bsn! {
+                    ReaderErrorText
+                    Text({error_label})
+                    TextFont { font_size: FontSize::Px(16.0) }
+                    TextColor(AppColors::ERROR)
+                })
+                .insert(ChildOf(container));
         }
     }
 }
@@ -1088,40 +1028,9 @@ fn create_webtoon_view(
     let initial_scroll_y =
         current as f32 * (consts::WEBTOON_PLACEHOLDER_HEIGHT + consts::WEBTOON_GAP);
 
-    commands.entity(container).with_children(|parent| {
-        parent
-            .spawn((
-                WebtoonScrollContainer,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    overflow: Overflow::scroll_y(),
-                    padding: UiRect::vertical(Val::Px(consts::TOOLBAR_HEIGHT + 10.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::BLACK),
-                Scrollable,
-                ScrollPosition(Vec2::new(0.0, initial_scroll_y)),
-            ))
-            .with_children(|scroll| {
-                for page in 0..total {
-                    scroll.spawn((
-                        WebtoonSlot {
-                            page_index: Some(page),
-                        },
-                        Node {
-                            width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
-                            height: Val::Px(consts::WEBTOON_PLACEHOLDER_HEIGHT),
-                            margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.05, 0.05, 0.08)),
-                    ));
-                }
-            });
-    });
+    commands
+        .spawn_scene(webtoon_view(total, initial_scroll_y))
+        .insert(ChildOf(container));
 
     // 图片加载由 update_webtoon_window 每帧自动处理（±3 范围）
 
@@ -1133,6 +1042,44 @@ fn create_webtoon_view(
     );
 }
 
+/// 条漫视图场景（滚动容器 + 每页一个占位槽位）
+fn webtoon_view(total: usize, initial_scroll_y: f32) -> impl Scene {
+    // 上下留出工具栏高度 + 10px 的余量
+    let scroll_padding = UiRect::vertical(Val::Px(consts::TOOLBAR_HEIGHT + 10.0));
+    let initial_scroll = Vec2::new(0.0, initial_scroll_y);
+    let slots: Vec<_> = (0..total).map(webtoon_slot).collect();
+
+    bsn! {
+        WebtoonScrollContainer
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            overflow: Overflow::scroll_y(),
+            padding: {scroll_padding},
+        }
+        BackgroundColor(Color::BLACK)
+        // 不加 ScrollArea：滚轮由 reader_mouse_wheel_control 模态处理
+        //（单页=翻页 / 条漫=滚动），避免上游派发与业务逻辑重复滚动
+        ScrollPosition({initial_scroll})
+        Children [ {slots} ]
+    }
+}
+
+/// 条漫单页槽位场景（占位背景，图片按需懒加载）
+fn webtoon_slot(page: usize) -> impl Scene {
+    bsn! {
+        WebtoonSlot { page_index: {Some(page)} }
+        Node {
+            width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
+            height: Val::Px(consts::WEBTOON_PLACEHOLDER_HEIGHT),
+            margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
+        }
+        BackgroundColor(Color::srgb(0.05, 0.05, 0.08))
+    }
+}
+
 /// 条漫模式：根据滚动位置懒加载当前页 ±3 范围内的图片
 ///
 /// 所有章节的图片列表已在初始化时全部获取完毕（仅 URL），
@@ -1140,8 +1087,16 @@ fn create_webtoon_view(
 pub fn update_webtoon_window(
     mut commands: Commands,
     mut reader_state: ResMut<ReaderState>,
-    slot_query: Query<(Entity, &WebtoonSlot, &ComputedNode, Option<&ImageNode>)>,
-    scroll_query: Query<(&ScrollPosition, &ComputedNode), With<WebtoonScrollContainer>>,
+    slot_query: Query<(
+        Entity,
+        &WebtoonSlot,
+        &ComputedNode,
+        Option<&ImageNode>,
+        Option<&ReaderImageLoading>,
+    )>,
+    slot_changed: Query<(), (With<WebtoonSlot>, Changed<ComputedNode>)>,
+    mut scroll_query: Query<(&mut ScrollPosition, &ComputedNode), With<WebtoonScrollContainer>>,
+    mut just_compensated: Local<bool>,
     image_cache: Res<ImageCache>,
     asset_server: Res<AssetServer>,
     mut load_image_messages: MessageWriter<LoadImageRequest>,
@@ -1151,9 +1106,22 @@ pub fn update_webtoon_window(
         return;
     }
 
-    let Ok((scroll_pos, scroll_computed)) = scroll_query.single() else {
+    let Ok((mut scroll_pos, _scroll_computed)) = scroll_query.single_mut() else {
         return;
     };
+
+    // Mut 的变更检测替代独立的 Changed 探针查询——同系统内
+    // 「Changed<ScrollPosition> 过滤 + &mut ScrollPosition」是 B0001 读写冲突
+    let scroll_is_changed = scroll_pos.is_changed();
+
+    // 只在滚动或槽位布局变化时重算窗口（此前每帧全量收集+排序全部槽位）
+    if !scroll_is_changed && slot_changed.is_empty() {
+        return;
+    }
+
+    // 本帧滚动是否来自用户（锚定补偿写入会在下帧触发变更检测，用标志消费掉）
+    let user_scrolled = scroll_is_changed && !*just_compensated;
+    *just_compensated = false;
 
     let scale_factor = window_query
         .single()
@@ -1161,36 +1129,63 @@ pub fn update_webtoon_window(
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
-    let viewport_h = scroll_computed.size().y / scale_factor;
-    let scroll_y = scroll_pos.y;
     let gap = consts::WEBTOON_GAP;
 
-    // 收集所有槽位的 (page, 实际高度)，按页码排序后累加找到视口中心所在页
+    // 收集所有槽位的 (page, 高度)，按页码排序
     // 注意：首帧 ComputedNode 可能返回 0，用占位高度兜底
     let placeholder_h = consts::WEBTOON_PLACEHOLDER_HEIGHT;
     let mut slot_infos: Vec<(usize, f32)> = slot_query
         .iter()
-        .filter_map(|(_, slot, cn, _)| {
+        .filter_map(|(_, slot, cn, _, _)| {
             slot.page_index.map(|p| {
                 let h = cn.size().y / scale_factor;
-                // ComputedNode 首帧为 0，用占位高度兜底
                 (p, if h > 1.0 { h } else { placeholder_h })
             })
         })
         .collect();
     slot_infos.sort_unstable_by_key(|(p, _)| *p);
 
-    let viewport_center = scroll_y + viewport_h / 2.0;
-    let mut cumulative = 0.0_f32;
+    // 指定页的顶边累计偏移（含间距）
+    let top_of = |target: usize| -> f32 {
+        let mut cumulative = 0.0_f32;
+        for &(page, height) in &slot_infos {
+            if page >= target {
+                break;
+            }
+            cumulative += height + gap;
+        }
+        cumulative
+    };
+
+    // 滚动锚定：图片真实高度陆续就位时，占位高度→真实高度的差会把同一滚动偏移
+    // 映射到更早的页（级联漂移回第 1 页）。非用户滚动帧按锚点补偿滚动量，
+    // 保持锚定页的视觉位置不动；恢复上次阅读页也靠它逐步校正到位。
+    if !user_scrolled && let Some((anchor_page, offset)) = reader_state.webtoon_anchor {
+        let desired = (top_of(anchor_page) + offset).max(0.0);
+        if (scroll_pos.y - desired).abs() > 0.5 {
+            scroll_pos.y = desired;
+            *just_compensated = true;
+        }
+    }
+    let scroll_y = scroll_pos.y;
+
+    // 当前页 = 视口顶边所在页（顶边规则：开屏 scroll=0 恒为第 1 页；
+    // 原「视口中心」规则在占位高度下会把页码指到中间值）
     let mut current_page = 0_usize;
+    let mut cumulative = 0.0_f32;
     for &(page, height) in &slot_infos {
         let bottom = cumulative + height;
-        if viewport_center < bottom {
+        if scroll_y + 2.0 < bottom {
             current_page = page;
             break;
         }
         cumulative += height + gap;
         current_page = page;
+    }
+
+    // 用户滚动 → 重锚到当前页（记录页内偏移）
+    if user_scrolled {
+        reader_state.webtoon_anchor = Some((current_page, scroll_y - top_of(current_page)));
     }
 
     if reader_state.current_page != current_page {
@@ -1202,14 +1197,16 @@ pub fn update_webtoon_window(
     let load_end = (current_page + consts::WEBTOON_PRELOAD_RANGE + 1).min(reader_state.total_pages);
 
     // 只遍历需要加载的槽位
-    for (entity, slot, _cn, existing_img) in slot_query.iter() {
+    for (entity, slot, _cn, existing_img, loading_marker) in slot_query.iter() {
         let Some(page) = slot.page_index else {
             continue;
         };
         if page < load_start || page >= load_end {
             continue;
         }
-        if existing_img.is_some() {
+        // 已有图片或已在等待远程加载的槽位不再重复探测本地文件
+        // （此前每帧对每个待加载槽位做两次 stat 系统调用）
+        if existing_img.is_some() || loading_marker.is_some() {
             continue;
         }
 
@@ -1263,7 +1260,7 @@ pub fn update_webtoon_images_from_cache(
     reader_state: Res<ReaderState>,
     loading_query: Query<(Entity, &WebtoonSlot, &ReaderImageLoading)>,
 ) {
-    if reader_state.read_mode != ReadMode::Webtoon {
+    if reader_state.read_mode != ReadMode::Webtoon || !image_cache.is_changed() {
         return;
     }
 
@@ -1626,7 +1623,7 @@ pub fn reader_mode_button_interaction(
 /// 处理阅读模式变化，重建图片视图
 pub fn handle_read_mode_change(
     mut commands: Commands,
-    reader_state: Res<ReaderState>,
+    mut reader_state: ResMut<ReaderState>,
     asset_server: Res<AssetServer>,
     image_cache: Res<ImageCache>,
     container_query: Query<Entity, With<ReaderImageContainer>>,
@@ -1684,6 +1681,7 @@ pub fn handle_read_mode_change(
 
             // 如果没有条漫容器，创建
             if webtoon_container_query.is_empty() {
+                reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
                 create_webtoon_view(
                     &mut commands,
                     container,

@@ -2,29 +2,32 @@
 //!
 //! 显示用户个人信息，包括头像、用户名、等级、经验值、称号、注册日期等
 
-use bevy::{input::mouse::MouseWheel, prelude::*, window::PrimaryWindow};
+use bevy::prelude::*;
 
-use super::font_loader::get_font;
 use crate::{
     components::*,
     events::*,
     resources::*,
     systems::{
         login::AppColors,
-        scrollbar::scrollbar_config::SCROLLBAR_WIDTH,
-        ui_common::{Scrollable, spawn_scrollbar},
+        scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
+        widgets::{ButtonStyle, ButtonVariant},
     },
 };
 
 // ==================== 组件定义 ====================
 
 /// 个人资料刷新按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProfileRefreshButton;
 
 /// 各字段文本标记（用枚举区分，避免 N 个 Query 冲突）
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+///
+/// `Default` 仅用于满足 BSN `template_value` 的 `Default + Clone`
+/// 约束，无业务含义。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Component)]
 pub enum ProfileField {
+    #[default]
     Name,
     Title,
     Slogan,
@@ -40,11 +43,11 @@ pub enum ProfileField {
 }
 
 /// 个人资料头像容器
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProfileAvatarContainer;
 
 /// 个人资料打卡按钮
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub struct ProfilePunchInButton;
 
 // ==================== 布局常量 ====================
@@ -88,93 +91,306 @@ fn exp_for_level(level: i32) -> i64 {
     100 * (level as i64) * (level as i64)
 }
 
-/// 生成一个信息行（label + value），返回 value entity
-fn spawn_info_row(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
-    field: ProfileField,
-) {
-    parent
-        .spawn(Node {
+// ==================== 场景函数 ====================
+
+/// 个人资料页面场景
+fn profile_page() -> impl Scene {
+    // 刷新按钮内边距（左右 12 / 上下 6）
+    let refresh_padding = UiRect::new(Val::Px(12.0), Val::Px(12.0), Val::Px(6.0), Val::Px(6.0));
+    // 滚动区内边距（右侧额外让出滚动条宽度）
+    let scroll_padding = UiRect {
+        left: Val::Px(layout::MARGIN_H),
+        right: Val::Px(layout::MARGIN_H + SCROLLBAR_WIDTH),
+        top: Val::Px(20.0),
+        bottom: Val::Px(30.0),
+    };
+
+    bsn! {
+        ProfileRoot
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        BackgroundColor(AppColors::BACKGROUND)
+        Children [
+            (
+                // ── 标题栏 ──
+                Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(15.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::SpaceBetween,
+                    border: UiRect::bottom(Val::Px(1.0)),
+                }
+                template_value(BorderColor::all(AppColors::BORDER))
+                Children [
+                    (
+                        Text("个人资料")
+                        TextFont { font_size: FontSize::Px(18.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                    (
+                        // 刷新按钮
+                        ProfileRefreshButton
+                        Button
+                        template_value(ButtonStyle::ghost())
+                        Node {
+                            padding: {refresh_padding},
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        BackgroundColor(Color::NONE)
+                        Children [
+                            (
+                                Text("↻")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::PRIMARY)
+                            ),
+                            (
+                                Text("刷新")
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::PRIMARY)
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // ── 滚动区域 ──
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_grow: 1.0,
+                    flex_shrink: 1.0,
+                    flex_basis: Val::Px(0.0),
+                    min_height: Val::Px(0.0),
+                    position_type: PositionType::Relative,
+                }
+                Children [
+                    (
+                        #ProfileScroll
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            padding: {scroll_padding},
+                            row_gap: Val::Px(16.0),
+                            overflow: Overflow::scroll_y(),
+                        }
+                        ScrollArea
+                        Children [
+                            header_card(),
+                            stats_row(),
+                            info_card(),
+                            punch_in_section(),
+                        ]
+                    ),
+                    scrollbar(#ProfileScroll),
+                ]
+            ),
+        ]
+    }
+}
+
+/// ── 头部卡片：头像 + 用户名 + 称号 + 签名 ──
+fn header_card() -> impl Scene {
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(20.0)),
+            row_gap: Val::Px(4.0),
+            border_radius: BorderRadius::all(Val::Px(layout::HEADER_CARD_RADIUS)),
+        }
+        BackgroundColor(AppColors::CARD_BG)
+        Children [
+            (
+                // 圆形头像容器
+                ProfileAvatarContainer
+                Node {
+                    width: Val::Px(layout::AVATAR_SIZE),
+                    height: Val::Px(layout::AVATAR_SIZE),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border: UiRect::all(Val::Px(3.0)),
+                    border_radius: BorderRadius::all(Val::Percent(50.0)),
+                    overflow: Overflow::clip(),
+                    margin: UiRect::bottom(Val::Px(8.0)),
+                }
+                BackgroundColor(Color::srgb(0.12, 0.12, 0.18))
+                template_value(BorderColor::all(AppColors::PRIMARY))
+                Children [
+                    (
+                        ProfileAvatarImage
+                        Text("👤")
+                        TextFont { font_size: FontSize::Px(40.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    )
+                ]
+            ),
+            (
+                // 用户名
+                template_value(ProfileField::Name)
+                Text("加载中...")
+                TextFont { font_size: FontSize::Px(20.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::top(Val::Px(4.0)) }
+            ),
+            (
+                // 称号
+                template_value(ProfileField::Title)
+                Text(" ")
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::PRIMARY)
+            ),
+            (
+                // 签名
+                template_value(ProfileField::Slogan)
+                Text(" ")
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT_MUTED)
+                Node { margin: UiRect::top(Val::Px(6.0)) }
+            ),
+        ]
+    }
+}
+
+/// ── 统计行：等级 / 经验 / 性别 ──
+fn stats_row() -> impl Scene {
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+        }
+        Children [
+            stat_card("等级", ProfileField::Level),
+            stat_card("经验", ProfileField::Exp),
+            stat_card("性别", ProfileField::Gender),
+        ]
+    }
+}
+
+/// 单个统计卡片场景
+fn stat_card(label: &str, field: ProfileField) -> impl Scene + use<> {
+    let label = label.to_string();
+
+    bsn! {
+        Node {
+            flex_grow: 1.0,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::all(Val::Px(12.0)),
+            row_gap: Val::Px(6.0),
+            border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
+        }
+        BackgroundColor(AppColors::CARD_BG)
+        Children [
+            (
+                // 标签
+                Text({label})
+                TextFont { font_size: FontSize::Px(layout::STAT_LABEL_SIZE) }
+                TextColor(AppColors::TEXT_MUTED)
+            ),
+            (
+                // 值
+                template_value(field)
+                Text("--")
+                TextFont { font_size: FontSize::Px(layout::STAT_VALUE_SIZE) }
+                TextColor(AppColors::TEXT)
+            ),
+        ]
+    }
+}
+
+/// ── 信息详情卡片 ──
+fn info_card() -> impl Scene {
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(layout::CARD_PADDING)),
+            row_gap: Val::Px(14.0),
+            border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
+        }
+        BackgroundColor(AppColors::CARD_BG)
+        Children [
+            (
+                // 标题
+                Text("个人信息")
+                TextFont { font_size: FontSize::Px(15.0) }
+                TextColor(AppColors::TEXT)
+                Node { margin: UiRect::bottom(Val::Px(2.0)) }
+            ),
+            info_row("✉  邮箱", ProfileField::Email),
+            info_row("📅 注册", ProfileField::CreatedAt),
+            info_row("🆔 ID", ProfileField::UserId),
+            info_row("✓  认证", ProfileField::Verified),
+            info_row("🏷  角色", ProfileField::Characters),
+        ]
+    }
+}
+
+/// 单个信息行场景（label + value）
+fn info_row(label: &str, field: ProfileField) -> impl Scene + use<> {
+    let label = label.to_string();
+
+    bsn! {
+        Node {
             width: Val::Percent(100.0),
             flex_direction: FlexDirection::Row,
             align_items: AlignItems::Center,
             column_gap: Val::Px(8.0),
-            ..default()
-        })
-        .with_children(|row| {
-            // 标签
-            row.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: layout::INFO_LABEL_SIZE,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_MUTED),
-                Node {
-                    min_width: Val::Px(65.0),
-                    ..default()
-                },
-            ));
-            // 值
-            row.spawn((
-                field,
-                Text::new("--"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: layout::INFO_VALUE_SIZE,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_SECONDARY),
-            ));
-        });
+        }
+        Children [
+            (
+                // 标签
+                Text({label})
+                TextFont { font_size: FontSize::Px(layout::INFO_LABEL_SIZE) }
+                TextColor(AppColors::TEXT_MUTED)
+                Node { min_width: Val::Px(65.0) }
+            ),
+            (
+                // 值
+                template_value(field)
+                Text("--")
+                TextFont { font_size: FontSize::Px(layout::INFO_VALUE_SIZE) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+        ]
+    }
 }
 
-/// 生成一个统计卡片
-fn spawn_stat_card(
-    parent: &mut ChildSpawnerCommands,
-    font: &Handle<Font>,
-    label: &str,
-    field: ProfileField,
-) {
-    parent
-        .spawn((
-            Node {
-                flex_grow: 1.0,
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(12.0)),
-                row_gap: Val::Px(6.0),
-                border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
-                ..default()
-            },
-            BackgroundColor(AppColors::CARD_BG),
-        ))
-        .with_children(|card| {
-            // 标签
-            card.spawn((
-                Text::new(label),
-                TextFont {
-                    font: font.clone(),
-                    font_size: layout::STAT_LABEL_SIZE,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_MUTED),
-            ));
-            // 值
-            card.spawn((
-                field,
-                Text::new("--"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: layout::STAT_VALUE_SIZE,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
+/// ── 签到按钮 ──
+fn punch_in_section() -> impl Scene {
+    bsn! {
+        // 已签到时 refresh_profile_ui 把变体切到 Secondary（灰）
+        ProfilePunchInButton
+        Button
+        template_value(ButtonStyle::primary())
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(14.0), Val::Px(14.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
+        }
+        BackgroundColor(AppColors::PRIMARY)
+        template_value(BorderColor::all(AppColors::PRIMARY))
+        Children [
+            (
+                template_value(ProfileField::PunchIn)
+                Text("签到")
+                TextFont { font_size: FontSize::Px(15.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
+    }
 }
 
 // ==================== 系统函数 ====================
@@ -197,132 +413,9 @@ pub fn setup_profile_ui(
         return;
     }
 
-    let font: Handle<Font> = get_font();
     let content_area = content_area_query.single().ok();
 
-    let profile_root = commands
-        .spawn((
-            ProfileRoot,
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-            BackgroundColor(AppColors::BACKGROUND),
-        ))
-        .with_children(|root| {
-            // ── 标题栏 ──
-            root.spawn((
-                Node {
-                    width: Val::Percent(100.0),
-                    padding: UiRect::all(Val::Px(15.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::SpaceBetween,
-                    border: UiRect::bottom(Val::Px(1.0)),
-                    ..default()
-                },
-                BorderColor::all(AppColors::BORDER),
-            ))
-            .with_children(|header| {
-                header.spawn((
-                    Text::new("个人资料"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 18.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT),
-                ));
-
-                // 刷新按钮
-                header
-                    .spawn((
-                        ProfileRefreshButton,
-                        Button,
-                        Interaction::default(),
-                        Node {
-                            padding: UiRect::new(
-                                Val::Px(12.0),
-                                Val::Px(12.0),
-                                Val::Px(6.0),
-                                Val::Px(6.0),
-                            ),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(4.0),
-                            ..default()
-                        },
-                        BorderColor::all(AppColors::BORDER),
-                        BackgroundColor(Color::NONE),
-                    ))
-                    .with_children(|btn| {
-                        btn.spawn((
-                            Text::new("↻"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 14.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::PRIMARY),
-                        ));
-                        btn.spawn((
-                            Text::new("刷新"),
-                            TextFont {
-                                font: font.clone(),
-                                font_size: 13.0,
-                                ..default()
-                            },
-                            TextColor(AppColors::PRIMARY),
-                        ));
-                    });
-            });
-
-            // ── 滚动区域 ──
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                flex_grow: 1.0,
-                flex_shrink: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                position_type: PositionType::Relative,
-                ..default()
-            })
-            .with_children(|wrapper| {
-                let scroll_id = wrapper
-                    .spawn((
-                        ProfileScrollContainer,
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Percent(100.0),
-                            flex_direction: FlexDirection::Column,
-                            padding: UiRect {
-                                left: Val::Px(layout::MARGIN_H),
-                                right: Val::Px(layout::MARGIN_H + SCROLLBAR_WIDTH),
-                                top: Val::Px(20.0),
-                                bottom: Val::Px(30.0),
-                            },
-                            row_gap: Val::Px(16.0),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                        Scrollable,
-                        ScrollPosition::default(),
-                        ContentSizeInfo::default(),
-                    ))
-                    .with_children(|content| {
-                        spawn_header_card(content, &font);
-                        spawn_stats_row(content, &font);
-                        spawn_info_card(content, &font);
-                        spawn_punch_in_section(content, &font);
-                    })
-                    .id();
-
-                spawn_scrollbar(wrapper, scroll_id);
-            });
-        })
-        .id();
+    let profile_root = commands.spawn_scene(profile_page()).id();
 
     if let Some(content_entity) = content_area {
         commands.entity(content_entity).add_child(profile_root);
@@ -333,185 +426,6 @@ pub fn setup_profile_ui(
     }
 
     tracing::info!("个人资料页面 UI 已创建");
-}
-
-/// ── 头部卡片：头像 + 用户名 + 称号 + 签名 ──
-fn spawn_header_card(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                padding: UiRect::all(Val::Px(20.0)),
-                row_gap: Val::Px(4.0),
-                border_radius: BorderRadius::all(Val::Px(layout::HEADER_CARD_RADIUS)),
-                ..default()
-            },
-            BackgroundColor(AppColors::CARD_BG),
-        ))
-        .with_children(|card| {
-            // 圆形头像容器
-            card.spawn((
-                ProfileAvatarContainer,
-                Node {
-                    width: Val::Px(layout::AVATAR_SIZE),
-                    height: Val::Px(layout::AVATAR_SIZE),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    border: UiRect::all(Val::Px(3.0)),
-                    border_radius: BorderRadius::all(Val::Percent(50.0)),
-                    overflow: Overflow::clip(),
-                    margin: UiRect::bottom(Val::Px(8.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgb(0.12, 0.12, 0.18)),
-                BorderColor::all(AppColors::PRIMARY),
-            ))
-            .with_children(|avatar| {
-                avatar.spawn((
-                    ProfileAvatarImage { url: String::new() },
-                    Text::new("👤"),
-                    TextFont {
-                        font: font.clone(),
-                        font_size: 40.0,
-                        ..default()
-                    },
-                    TextColor(AppColors::TEXT_SECONDARY),
-                ));
-            });
-
-            // 用户名
-            card.spawn((
-                ProfileField::Name,
-                Text::new("加载中..."),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 20.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-                Node {
-                    margin: UiRect::top(Val::Px(4.0)),
-                    ..default()
-                },
-            ));
-
-            // 称号
-            card.spawn((
-                ProfileField::Title,
-                Text::new(" "),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::PRIMARY),
-            ));
-
-            // 签名
-            card.spawn((
-                ProfileField::Slogan,
-                Text::new(" "),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 13.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT_MUTED),
-                Node {
-                    margin: UiRect::top(Val::Px(6.0)),
-                    ..default()
-                },
-            ));
-        });
-}
-
-/// ── 统计行：等级 / 经验 / 性别 ──
-fn spawn_stats_row(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            flex_direction: FlexDirection::Row,
-            column_gap: Val::Px(10.0),
-            ..default()
-        })
-        .with_children(|row| {
-            spawn_stat_card(row, font, "等级", ProfileField::Level);
-            spawn_stat_card(row, font, "经验", ProfileField::Exp);
-            spawn_stat_card(row, font, "性别", ProfileField::Gender);
-        });
-}
-
-/// ── 信息详情卡片 ──
-fn spawn_info_card(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            Node {
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(layout::CARD_PADDING)),
-                row_gap: Val::Px(14.0),
-                border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
-                ..default()
-            },
-            BackgroundColor(AppColors::CARD_BG),
-        ))
-        .with_children(|card| {
-            // 标题
-            card.spawn((
-                Text::new("个人信息"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 15.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-                Node {
-                    margin: UiRect::bottom(Val::Px(2.0)),
-                    ..default()
-                },
-            ));
-
-            spawn_info_row(card, font, "✉  邮箱", ProfileField::Email);
-            spawn_info_row(card, font, "📅 注册", ProfileField::CreatedAt);
-            spawn_info_row(card, font, "🆔 ID", ProfileField::UserId);
-            spawn_info_row(card, font, "✓  认证", ProfileField::Verified);
-            spawn_info_row(card, font, "🏷  角色", ProfileField::Characters);
-        });
-}
-
-/// ── 签到按钮 ──
-fn spawn_punch_in_section(parent: &mut ChildSpawnerCommands, font: &Handle<Font>) {
-    parent
-        .spawn((
-            ProfilePunchInButton,
-            Button,
-            Interaction::default(),
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(14.0), Val::Px(14.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(layout::CARD_RADIUS)),
-                ..default()
-            },
-            BackgroundColor(AppColors::PRIMARY),
-            BorderColor::all(AppColors::PRIMARY),
-        ))
-        .with_children(|btn| {
-            btn.spawn((
-                ProfileField::PunchIn,
-                Text::new("签到"),
-                TextFont {
-                    font: font.clone(),
-                    font_size: 15.0,
-                    ..default()
-                },
-                TextColor(AppColors::TEXT),
-            ));
-        });
 }
 
 /// 清理个人资料页面（隐藏）
@@ -527,13 +441,15 @@ pub fn refresh_profile_ui(
     punch_in_state: Res<PunchInState>,
     mut field_query: Query<(&ProfileField, &mut Text, &mut TextColor)>,
     mut avatar_query: Query<&mut ProfileAvatarImage>,
-    mut punch_btn_query: Query<
-        (&mut BackgroundColor, &mut BorderColor),
-        With<ProfilePunchInButton>,
-    >,
+    mut punch_btn_query: Query<(&mut ButtonStyle, &mut BorderColor), With<ProfilePunchInButton>>,
     mut image_messages: MessageWriter<LoadImageRequest>,
     mut last_user_name: Local<String>,
 ) {
+    // 资源未变化时零开销（此前每帧走到下方 format! 之后才比较）
+    if !profile_state.is_changed() && !punch_in_state.is_changed() {
+        return;
+    }
+
     // 正在加载
     if profile_state.is_loading {
         if last_user_name.is_empty() || *last_user_name == "__loading__" {
@@ -601,14 +517,17 @@ pub fn refresh_profile_ui(
 
     let is_punched = user.is_punched.unwrap_or(false) || punch_in_state.is_punched;
 
-    // 更新签到按钮颜色
-    for (mut bg, mut border) in punch_btn_query.iter_mut() {
-        if is_punched {
-            *bg = BackgroundColor(AppColors::SECONDARY);
-            *border = BorderColor::all(AppColors::SECONDARY);
-        } else {
-            *bg = BackgroundColor(AppColors::PRIMARY);
-            *border = BorderColor::all(AppColors::PRIMARY);
+    // 更新签到按钮配色：底色三态交给 apply_button_interaction 按变体解析，
+    // 边框不在 ButtonStyle 管辖内，随变体一并翻转
+    let (punch_variant, punch_border) = if is_punched {
+        (ButtonVariant::Secondary, AppColors::SECONDARY)
+    } else {
+        (ButtonVariant::Primary, AppColors::PRIMARY)
+    };
+    for (mut style, mut border) in punch_btn_query.iter_mut() {
+        if style.variant != punch_variant {
+            style.variant = punch_variant;
+            *border = BorderColor::all(punch_border);
         }
     }
 
@@ -722,7 +641,13 @@ pub fn update_profile_avatar(
         if avatar.url.is_empty() {
             continue;
         }
-        if let Some(handle) = image_cache.handles.get(&avatar.url) {
+        // 加载失败的头像摘掉标记，退出每帧扫描集（此前永久残留）；
+        // 占位文本保留，视觉上等同于没有头像
+        if image_cache.is_failed(&avatar.url) {
+            commands.entity(entity).remove::<ProfileAvatarImage>();
+            continue;
+        }
+        if let Some(handle) = image_cache.get(&avatar.url) {
             // 隐藏占位符文本
             if let Ok(mut node) = text_node_query.get_mut(entity) {
                 node.display = Display::None;
@@ -747,44 +672,23 @@ pub fn update_profile_avatar(
 
 /// 刷新按钮交互
 pub fn profile_refresh_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
-        (Changed<Interaction>, With<ProfileRefreshButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ProfileRefreshButton>)>,
     mut profile_state: ResMut<UserProfileState>,
     mut load_messages: MessageWriter<LoadUserProfileRequest>,
 ) {
-    for (interaction, mut bg_color, mut border_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-
-                if !profile_state.is_loading {
-                    profile_state.user = None;
-                    profile_state.is_loading = true;
-                    profile_state.error = None;
-                    load_messages.write(LoadUserProfileRequest);
-                }
-            }
-            Interaction::Hovered => {
-                *bg_color = BackgroundColor(Color::srgb(0.15, 0.15, 0.2));
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
-            Interaction::None => {
-                *bg_color = BackgroundColor(Color::NONE);
-                *border_color = BorderColor::all(AppColors::BORDER);
-            }
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed && !profile_state.is_loading {
+            profile_state.user = None;
+            profile_state.is_loading = true;
+            profile_state.error = None;
+            load_messages.write(LoadUserProfileRequest);
         }
     }
 }
 
 /// 签到按钮交互
 pub fn profile_punch_in_interaction(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &mut BorderColor),
-        (Changed<Interaction>, With<ProfilePunchInButton>),
-    >,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ProfilePunchInButton>)>,
     profile_state: Res<UserProfileState>,
     punch_in_state: Res<PunchInState>,
     mut punch_in_messages: MessageWriter<PunchInRequestEvent>,
@@ -796,33 +700,9 @@ pub fn profile_punch_in_interaction(
         .unwrap_or(false)
         || punch_in_state.is_punched;
 
-    for (interaction, mut bg_color, mut border_color) in &mut interaction_query {
-        match *interaction {
-            Interaction::Pressed => {
-                if !is_punched {
-                    punch_in_messages.write(PunchInRequestEvent);
-                }
-                *bg_color = BackgroundColor(AppColors::PRIMARY_PRESSED);
-                *border_color = BorderColor::all(AppColors::PRIMARY);
-            }
-            Interaction::Hovered => {
-                if is_punched {
-                    *bg_color = BackgroundColor(AppColors::SECONDARY_HOVER);
-                    *border_color = BorderColor::all(AppColors::SECONDARY_HOVER);
-                } else {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY_HOVER);
-                    *border_color = BorderColor::all(AppColors::PRIMARY_HOVER);
-                }
-            }
-            Interaction::None => {
-                if is_punched {
-                    *bg_color = BackgroundColor(AppColors::SECONDARY);
-                    *border_color = BorderColor::all(AppColors::SECONDARY);
-                } else {
-                    *bg_color = BackgroundColor(AppColors::PRIMARY);
-                    *border_color = BorderColor::all(AppColors::PRIMARY);
-                }
-            }
+    for interaction in &interaction_query {
+        if *interaction == Interaction::Pressed && !is_punched {
+            punch_in_messages.write(PunchInRequestEvent);
         }
     }
 }
@@ -844,46 +724,5 @@ pub fn handle_profile_loaded(
         profile_state.is_loading = false;
         profile_state.error = Some(event.error.clone());
         tracing::warn!("个人资料加载失败: {}", event.error);
-    }
-}
-
-/// 处理滚动事件
-pub fn handle_profile_scroll(
-    _scroll_query: Query<
-        (&mut ScrollPosition, Option<&ContentSizeInfo>),
-        With<ProfileScrollContainer>,
-    >,
-    mut _mouse_wheel_events: MessageReader<MouseWheel>,
-) {
-    // Bevy 内置 overflow: scroll_y() 自动处理滚动
-}
-
-/// 更新内容尺寸信息
-pub fn update_profile_content_size(
-    mut scroll_query: Query<
-        (&ComputedNode, &mut ContentSizeInfo, &Children),
-        With<ProfileScrollContainer>,
-    >,
-    children_query: Query<&ComputedNode>,
-    window_query: Query<&Window, With<PrimaryWindow>>,
-) {
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    for (scroll_computed, mut content_info, children) in scroll_query.iter_mut() {
-        let viewport_height = scroll_computed.size().y / scale_factor;
-
-        let mut content_height = 0.0;
-        for child in children.iter() {
-            if let Ok(child_computed) = children_query.get(child) {
-                content_height += child_computed.size().y / scale_factor;
-            }
-        }
-
-        content_info.viewport_height = viewport_height;
-        content_info.content_height = content_height;
     }
 }

@@ -179,8 +179,6 @@ pub struct CommentsState {
     pub is_loading: bool,
     /// 错误信息
     pub error: Option<String>,
-    /// 输入框文本
-    pub input_text: String,
     /// 正在回复的评论 ID（None = 顶层评论）
     pub reply_to: Option<String>,
     /// 正在回复的用户名（用于显示提示）
@@ -189,8 +187,6 @@ pub struct CommentsState {
     pub children_map: std::collections::HashMap<String, ChildCommentsState>,
     /// 是否需要重建 UI
     pub needs_rebuild: bool,
-    /// 输入框是否获取焦点
-    pub input_focused: bool,
 }
 
 /// 认证状态
@@ -654,6 +650,10 @@ pub struct ReaderState {
     pub scale: f32,
     /// 阅读模式
     pub read_mode: ReadMode,
+    /// 条漫滚动锚点：(锚定页, 页内偏移逻辑像素)。
+    /// 图片真实高度陆续就位时按它补偿滚动量，保持视觉位置不跳
+    /// （否则占位高度→真实高度的差会让页码级联漂移回第 1 页）。
+    pub webtoon_anchor: Option<(usize, f32)>,
     /// 是否正在加载
     pub is_loading: bool,
     /// 错误信息
@@ -669,6 +669,7 @@ pub struct ReaderState {
 impl Default for ReaderState {
     fn default() -> Self {
         Self {
+            webtoon_anchor: None,
             comic_id: String::new(),
             comic_title: String::new(),
             episodes: Vec::new(),
@@ -1754,8 +1755,6 @@ pub struct ChatRoomState {
     pub messages: Vec<picacg_api::endpoints::chat::ParsedChatMessage>,
     /// 在线人数
     pub online_count: u32,
-    /// 输入框文本
-    pub input_text: String,
     /// 是否已连接 WebSocket
     pub is_connected: bool,
     /// 是否正在连接
@@ -1783,7 +1782,6 @@ impl Default for ChatRoomState {
             room_title: String::new(),
             messages: Vec::new(),
             online_count: 0,
-            input_text: String::new(),
             is_connected: false,
             is_connecting: false,
             error: None,
