@@ -95,17 +95,30 @@ fn download(url: &str) -> Result<(Vec<u8>, String), String> {
         .unwrap_or("picacg-update")
         .to_string();
 
-    let response = ureq_get(url)?;
+    let response = http_get(url)?;
     Ok((response, file_name))
 }
 
 /// 取 URL 内容（阻塞）
 ///
 /// 复用 reqwest 的阻塞客户端——项目已依赖它，不必为此再引一个 HTTP 库。
-fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
-    let client = reqwest::blocking::Client::builder()
+///
+/// **走应用的代理设置**：产物托管在 GitHub，部分地区不可直连；
+/// 检查更新能走代理而下载不走，就会出现「提示有新版本但永远下不下来」。
+fn http_get(url: &str) -> Result<Vec<u8>, String> {
+    let proxy_url = picacg_config::AppSettings::global()
+        .read()
+        .proxy
+        .to_proxy_url();
+
+    let mut builder = reqwest::blocking::Client::builder()
         .user_agent("picacg-rust")
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_secs(300));
+    if let Some(ref url) = proxy_url {
+        let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理配置无效: {e}"))?;
+        builder = builder.proxy(proxy);
+    }
+    let client = builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
 
@@ -130,7 +143,7 @@ fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
 fn verify_checksum(bytes: &[u8], checksum_url: &str) -> Result<(), String> {
     use sha2::{Digest, Sha256};
 
-    let raw = ureq_get(checksum_url)?;
+    let raw = http_get(checksum_url)?;
     let text = String::from_utf8_lossy(&raw);
     let expected = text
         .split_whitespace()

@@ -4344,9 +4344,18 @@ struct UpdateInfo {
 
 /// 请求 GitHub Releases API 获取最新版本
 async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo, String> {
-    let client = reqwest::Client::builder()
+    // 必须走代理：GitHub 在部分地区不可直连，不带代理的话检查更新永远超时。
+    // 锁在作用域里取完即放，别把 guard 带过 await
+    let proxy_url = AppSettings::global().read().proxy.to_proxy_url();
+
+    let mut builder = reqwest::Client::builder()
         .user_agent("picacg-rust")
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(15));
+    if let Some(ref url) = proxy_url {
+        let proxy = reqwest::Proxy::all(url).map_err(|e| format!("代理配置无效: {e}"))?;
+        builder = builder.proxy(proxy);
+    }
+    let client = builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 

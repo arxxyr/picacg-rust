@@ -1065,6 +1065,9 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
   更新前必须比对，缺失或不匹配一律中止
 - 产物直链从 release 的 `assets` 里按平台后缀挑（`pick_platform_asset`），
   不是 `html_url`；后者只用于「前往下载」
+- ⚠️ **检查与下载都必须走 `AppSettings.proxy`**：产物托管在 GitHub，部分地区
+  不可直连。两处各有自己的 HTTP 客户端（检查是异步 `reqwest::Client`，
+  下载是 `reqwest::blocking`），**任一处漏配代理，症状都是「提示有新版本但下不下来」**
 - `extract_from_targz` 抽成**平台无关的纯函数 + 单测**：它只有 Linux 分支用得到，
   写在 `#[cfg(target_os = "linux")]` 里就只有 CI 的 Linux 构建才编译，写错要等一轮 CI
 - ⚠️ `compare_versions` 必须先切掉 `+build` / `-prerelease` 后缀再比数字段。
