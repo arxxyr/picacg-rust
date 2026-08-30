@@ -11,20 +11,17 @@ name = "picacg"
 path = "src/main.rs"
 
 [features]
+default = ["profiling"]
 
 # 系统耗时追踪：打开 bevy_ecs 的 trace，让每个系统的每次执行都带上
 # `info_span!("system", name = ...)`，由 utils::profiling 的 Layer 聚合。
+#
 # 这些 span 在 bevy_ecs 里是 `#[cfg(feature = "trace")]` 门控的，不编进来
-# 就压根不存在，光靠运行时开关拿不到数据。
+# 就压根不存在，光靠运行时开关拿不到数据——所以**默认开启**，让设置页的
+# 开关有东西可管。真正的开销由「装不装聚合 Layer」决定：不装时没有订阅者对
+# 这个 callsite 感兴趣，tracing 把它缓存成禁用态，`.enter()` 退化成一次分支。
 #
-# ⚠️ **不能设成默认 feature**：`bevy/trace` 会直接插桩 bevy_render 等巨型 crate，
-# 编译峰值内存随之上涨。GitHub 的 ubuntu runner 实测只有 7.8GB 内存 + 3GB swap，
-# 开了之后单个 rustc 编译 bevy_render 就会陷入交换抖动——实测卡死 35 分钟零输出、
-# runner 被整个杀掉，且把 CARGO_BUILD_JOBS 降到 1 也无济于事（不是并行度问题，
-# 是单 crate 峰值就超了）。
-#
-# 想用耗时榜：`cargo run --release --features profiling`
-# （F3 帧时叠加层与设置页其余部分在任何构建里都可用，不需要本 feature）
+# 要一个连 span 都不编的构建：`cargo build --no-default-features`
 profiling = ["bevy/trace"]
 
 [dependencies]

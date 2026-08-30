@@ -1019,7 +1019,7 @@ pub struct ChannelSettings {
 不必改动那 120+ 个系统的注册代码。
 
 **为什么开关要重启**：两层门。① 编译期，那对 span 在 bevy_ecs 里是
-`#[cfg(feature = "trace")]` 门控的，不编进来就不存在——需 `--features profiling`；
+`#[cfg(feature = "trace")]` 门控的，不编进来就不存在——所以 `profiling` 是**默认 feature**；
 ② 启动期，bevy 在系统初始化时**一次性**建好 Span 对象，那一刻没有订阅者感兴趣就
 永远是禁用态，运行中再装 Layer 也救不回来。反过来这也是关掉时几乎零成本的原因：
 tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次分支。
@@ -1027,12 +1027,6 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
 **踩过的坑**：
 
 - 只做运行时开关不开 feature → 榜单恒空（曾照着"不受 feature 门控"的错误判断写过一版）
-- ⚠️ **`profiling` 不能设成默认 feature**：`bevy/trace` 直接插桩 bevy_render 等巨型
-  crate，编译峰值内存随之上涨。GitHub 的 ubuntu runner 实测只有 **7.8GB 内存 + 3GB
-  swap**，开了之后单个 rustc 编译 bevy_render 陷入交换抖动——实测卡死 35 分钟零输出、
-  runner 被整个杀掉（`received a shutdown signal` + exit 143），把 `CARGO_BUILD_JOBS`
-  降到 1 也无济于事（不是并行度问题，是单 crate 峰值就超了）。
-  曾为了让设置页开关在普通构建里可用而设成默认，连挂 5 次 CI 才定位到
 - span 是 `info` 级：日志等级低于 info，tracing 会把 span 整个滤掉，榜单同样是空的
 - `Extensions::insert` 撞到同类型已存在会 **panic**；同一 span 每帧重新进入，
   记录进入时刻必须用 `replace`（第一版在登录页直接崩）
@@ -1275,17 +1269,17 @@ fn auto_resume_downloads_on_startup(
 |-----|---------|------|
 | `fmt` | push/PR | `cargo fmt --all -- --check` |
 | `clippy` | push/PR | `cargo clippy --all --all-targets` |
-| `test` | clippy 通过后 | `cargo test --all`（**不用 release**，见下） |
+| `test` | clippy 通过后 | `cargo test --all --release` |
 | `build` | test 通过后 | Linux x64 + Windows x64 + macOS ARM64 矩阵构建 |
 | `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
 | `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |
 
-> **test job 不用 `--release`**：单测全是纯函数（内容过滤 / 复用规划 / 条漫锚点换算），
-> release 对它们零额外覆盖，却要把 bevy 整棵依赖树做优化编译——实测两次都在
-> release 编译依赖的第 8~12 分钟被 runner 杀掉
-> （`The runner has received a shutdown signal` + exit 143，资源耗尽的典型形态）。
-> release 的编译覆盖交给 `build` job（三平台）。附带好处：debug 默认开溢出检查，
-> 对算术逻辑比 release 更严。
+> ⚠️ **仓库必须保持 public**：私有仓库的免费 runner 只有 **2 核 / 7.8GB**，
+> 编译 `bevy_ui` / `bevy_render` 会把内存吃穿，runner 直接被杀
+> （`The runner has received a shutdown signal` + exit 143，日志停在编译中途、
+> 无任何现场）。public 仓库是 4 核 / 16GB，同一套配置 13 分钟就能跑完。
+> 曾在这上面连挂 7 次 CI，先后错怪过 release 编译、并行度、`bevy/trace`、
+> `Cargo.lock` 未入库——全都不是。**先看 `nproc` 和 `free -h`，别猜**。
 
 **版本号格式：**
 - Release（标签触发）：`v{版本号}+{commit短哈希}`

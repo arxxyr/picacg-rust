@@ -72,9 +72,6 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     needs: [clippy]
-    # 编译被 runner 杀掉时（"received a shutdown signal" + exit 143）不会自己停，
-    # 给个上限好把"卡住"和"被杀"区分开
-    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -94,53 +91,14 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # runner 出厂就用掉 60G/72G，只剩 12G——bevy 的 target 目录很容易吃满。
-      # 删掉预装的 dotnet/android/ghc 等本项目用不到的工具链，能腾出 20G+
-      - name: Free up disk space
-        run: |
-          echo "清理前:"; df -h /
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
-          echo "清理后:"; df -h /
-
-      - name: Show runner resources
-        run: |
-          echo "== 内存 =="; free -h
-          echo "== 磁盘 =="; df -h /
-          echo "== CPU =="; nproc
-
-      # 不用 --release：单测全是纯函数（内容过滤、复用规划、条漫锚点换算），
-      # release 对它们没有任何额外覆盖，却要把 bevy 整棵依赖树做优化编译。
-      # release 的编译覆盖由下面的 build job（三平台）负责。
-      # 附带好处：debug 默认开溢出检查，对算术逻辑反而比 release 更严
       - name: Run tests
-        env:
-          # runner 实测只有 7.8GB 内存（可用 6.7GB），bevy_render / bevy_ui
-          # 这类巨型 crate 的 codegen 峰值贴着上限。留一点余量，不跑满 4 路。
-          # 判据：同样编译整棵依赖树的 clippy job 从没挂过——它只做元数据分析、
-          # 不做代码生成，正是 codegen 阶段吃内存
-          CARGO_BUILD_JOBS: 2
-          # 单测不需要调试符号，关掉同时省内存和磁盘
-          CARGO_PROFILE_DEV_DEBUG: "0"
-          CARGO_PROFILE_TEST_DEBUG: "0"
-        run: |
-          # 后台每 20 秒记一次内存/磁盘余量。runner 被杀时日志里只有一句
-          # "received a shutdown signal"，没有任何现场——只有连续采样才能
-          # 看出到底是内存见底还是磁盘写满（此前连猜三次都猜错）
-          ( while true; do
-              echo "[res] $(date -u +%H:%M:%S) 可用内存=$(free -m | awk 'NR==2{print $7}')MB 可用磁盘=$(df -m / | awk 'NR==2{print $4}')MB"
-              sleep 20
-            done ) &
-          MONITOR_PID=$!
-          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT
-          cargo test --all
+        run: cargo test --all --release
 
   # ============ 构建 ============
   build:
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     needs: [test]
-    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

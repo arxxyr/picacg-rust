@@ -4169,7 +4169,7 @@ fn profiling_section(overlay_visible: bool, profiling_enabled: bool) -> impl Sce
 /// 状态提示文案
 fn profiling_hint_text(profiling_enabled: bool) -> String {
     if !profiling::is_compiled_in() {
-        "本次构建未编入耗时 span，需 --features profiling 重新构建".to_string()
+        "本次构建未编入耗时 span（--no-default-features）".to_string()
     } else if profiling::is_enabled() {
         "统计中，点击查看上次刷新之后的累计".to_string()
     } else if profiling_enabled {
