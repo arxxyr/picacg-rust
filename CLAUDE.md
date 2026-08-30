@@ -1046,13 +1046,27 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
 - 启动那一帧的 `text_system`（首次字形整形）与 `apply_app_icon`（PNG 解码 + AppKit
   刷 dock）是一次性成本，不是稳态开销
 
-## 检查更新（只查不装）
+## 检查更新与自动更新
 
-设置页「关于」分组：`⟳ 检查更新` 手动触发，`⬇ 前往下载` 在检出新版本时才显示
-（`open::that` 打开 GitHub Release 页），另有「启动时自动检查更新」开关。
+设置页「关于」分组：`⟳ 检查更新` 手动触发，检出新版本后出现 `⬇ 前往下载`
+（打开 Release 页）与一键更新按钮，另有「启动时自动检查更新」开关。
 
-- **只跳转、不自替换**：原地升级在三平台各有坑（Windows 不能覆盖运行中的 exe、
-  macOS 未签名替换触发 Gatekeeper），投入产出比差，另案评估
+### 三平台走三条路
+
+| 平台 | 产物 | 策略 | 为什么 |
+|------|------|------|--------|
+| Linux | `tar.gz` 里的裸可执行文件 | **原地自替换**（`self-replace`） | 无 Gatekeeper / SmartScreen |
+| macOS | `.dmg` | **下载 + 校验 + `open`** | 挂载后弹拖拽安装窗口，用户拖进「应用程序」 |
+| Windows | `.zip` | **下载 + 校验 + 打开** | 无 Authenticode 签名，自动替换极易被 Defender 拦 |
+
+- macOS 不做原地替换：改写 `.app` bundle 会破坏完整性，Gatekeeper 判「应用已损坏」。
+  但**可以**自动下载 dmg 再 `open` —— 系统会挂载并弹出拖拽窗口，体验接近原生安装器
+- **强制校验 SHA-256**：CI 的 `Generate checksums` 步骤给每个产物生成 `.sha256`，
+  更新前必须比对，缺失或不匹配一律中止
+- 产物直链从 release 的 `assets` 里按平台后缀挑（`pick_platform_asset`），
+  不是 `html_url`；后者只用于「前往下载」
+- `extract_from_targz` 抽成**平台无关的纯函数 + 单测**：它只有 Linux 分支用得到，
+  写在 `#[cfg(target_os = "linux")]` 里就只有 CI 的 Linux 构建才编译，写错要等一轮 CI
 - ⚠️ `compare_versions` 必须先切掉 `+build` / `-prerelease` 后缀再比数字段。
   本项目发版格式就是 `v{version}+{commit}`，旧实现用
   `filter_map(parse::<u64>)` 把 `0+abc1234` 这种段**静默丢掉**，
@@ -1285,6 +1299,7 @@ fn auto_resume_downloads_on_startup(
 | `fmt` | push/PR | `cargo fmt --all -- --check` |
 | `clippy` | push/PR | `cargo clippy --all --all-targets` |
 | `test` | clippy 通过后 | `cargo test --all`（**不用 release**，见下） |
+| `build` 产物 | 每个包附 `.sha256` | 手动核对完整性 + 自动更新校验 |
 | `build` | test 通过后 | Linux x64 + Windows x64 + macOS ARM64 矩阵构建 |
 | `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
 | `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |

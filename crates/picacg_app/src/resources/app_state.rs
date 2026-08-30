@@ -86,6 +86,14 @@ pub struct UpdateCheckState {
     pub release_notes: Option<String>,
     /// 下载链接
     pub download_url: Option<String>,
+    /// 本平台产物直链（自动下载用）
+    pub asset_url: Option<String>,
+    /// 该产物的 `.sha256` 直链
+    pub checksum_url: Option<String>,
+    /// 是否正在执行自替换更新
+    pub is_updating: bool,
+    /// 自替换更新的结果提示（成功需重启 / 失败原因）
+    pub update_result: Option<String>,
     /// 错误信息
     pub error: Option<String>,
 }

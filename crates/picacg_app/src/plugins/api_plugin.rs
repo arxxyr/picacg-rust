@@ -4300,6 +4300,8 @@ fn handle_check_update(
         update_state.latest_version = None;
         update_state.release_notes = None;
         update_state.download_url = None;
+        update_state.asset_url = None;
+        update_state.checksum_url = None;
 
         let current_version = env!("CARGO_PKG_VERSION").to_string();
 
@@ -4314,6 +4316,8 @@ fn handle_check_update(
                         has_update: info.has_update,
                         release_notes: info.release_notes,
                         download_url: info.download_url,
+                        asset_url: info.asset_url,
+                        checksum_url: info.checksum_url,
                     });
                 }
                 Err(e) => {
@@ -4332,6 +4336,10 @@ struct UpdateInfo {
     has_update: bool,
     release_notes: Option<String>,
     download_url: Option<String>,
+    /// 本平台产物的直链（用于自动下载）
+    asset_url: Option<String>,
+    /// 该产物的 `.sha256` 直链
+    checksum_url: Option<String>,
 }
 
 /// 请求 GitHub Releases API 获取最新版本
@@ -4373,6 +4381,12 @@ async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo
     let release_notes = body["body"].as_str().map(|s| s.to_string());
     let download_url = body["html_url"].as_str().map(|s| s.to_string());
 
+    // 挑出本平台的产物直链与它的校验和
+    //
+    // 产物命名是 `{项目名}-{版本}-{平台}.{扩展名}`（CLAUDE.md §9），
+    // 按平台后缀匹配即可。校验和是同名 + `.sha256`。
+    let (asset_url, checksum_url) = pick_platform_asset(&body);
+
     let has_update = compare_versions(&latest_version, current_version);
 
     tracing::info!(
@@ -4388,7 +4402,41 @@ async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo
         has_update,
         release_notes,
         download_url,
+        asset_url,
+        checksum_url,
     })
+}
+
+/// 从 release 的 assets 里挑出本平台的产物与其 `.sha256`
+///
+/// 返回 `(产物直链, 校验和直链)`。任一缺失都返回 None——
+/// 没有校验和就不该自动下载执行。
+fn pick_platform_asset(body: &serde_json::Value) -> (Option<String>, Option<String>) {
+    // 与 CI 打包矩阵的 platform 字段对齐
+    let platform = if cfg!(target_os = "macos") {
+        "macos-arm64"
+    } else if cfg!(target_os = "windows") {
+        "windows-x64"
+    } else {
+        "linux-x64"
+    };
+
+    let Some(assets) = body["assets"].as_array() else {
+        return (None, None);
+    };
+
+    let url_of = |predicate: &dyn Fn(&str) -> bool| -> Option<String> {
+        assets.iter().find_map(|a| {
+            let name = a["name"].as_str()?;
+            predicate(name)
+                .then(|| a["browser_download_url"].as_str().map(str::to_string))
+                .flatten()
+        })
+    };
+
+    let asset = url_of(&|n: &str| n.contains(platform) && !n.ends_with(".sha256"));
+    let checksum = url_of(&|n: &str| n.contains(platform) && n.ends_with(".sha256"));
+    (asset, checksum)
 }
 
 /// 简单的语义化版本比较：latest > current 则返回 true
@@ -4437,6 +4485,8 @@ fn handle_check_update_response(
         update_state.has_update = Some(event.has_update);
         update_state.release_notes.clone_from(&event.release_notes);
         update_state.download_url.clone_from(&event.download_url);
+        update_state.asset_url.clone_from(&event.asset_url);
+        update_state.checksum_url.clone_from(&event.checksum_url);
         update_state.error = None;
     }
 }

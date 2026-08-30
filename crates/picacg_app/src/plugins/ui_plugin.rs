@@ -410,6 +410,7 @@ impl Plugin for UiPlugin {
                         check_update_button_interaction,
                         refresh_update_status,
                         open_release_page_interaction,
+                        self_update_button_interaction,
                         auto_check_update_checkbox_interaction,
                     ),
                 )

@@ -29,7 +29,8 @@ bevy = { version = "0.19.1", default-features = false, features = [
 tokio = { version = "1.53.1", features = ["full"] }
 
 # === 网络与序列化 ===
-reqwest = { version = "0.13.4", features = ["json", "cookies", "stream", "rustls", "socks", "gzip", "brotli"] }
+# blocking：自动更新在 spawn_blocking 里同步下载校验（见 utils/self_update.rs）
+reqwest = { version = "0.13.4", features = ["json", "cookies", "stream", "rustls", "socks", "gzip", "brotli", "blocking"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 toml = "1.1.4"
@@ -67,6 +68,15 @@ open = "5.4.2"
 
 # === 文件对话框 ===
 rfd = "0.17.2"
+
+# === 自动更新 ===
+# Linux 走原地自替换（self-replace 处理"替换正在运行的可执行文件"），
+# 需要自己解 tar.gz；macOS / Windows 只下载后交给系统打开，不需要这些。
+# 没用 self_update crate：它把下载/解包/替换打成黑盒，而我们要三平台各走各的路，
+# 且校验和策略要自己掌控。
+self-replace = "1.5"
+tar = "0.4"
+flate2 = "1.1"
 
 # === 窗口 / Dock 图标 ===
 # 版本与 bevy_winit 0.19 依赖的 winit 对齐，避免多编一份

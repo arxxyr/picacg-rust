@@ -237,18 +237,18 @@ jobs:
             exit 1
           fi
 
-      # UPX 压缩（Linux/Windows，macOS 不支持）
+      # UPX 压缩：**仅 Linux**
+      #
+      # Windows 必须跳过：UPX 加壳的无签名 exe 会触发 Defender / SmartScreen
+      # 的木马误报（Wacatac、Wacapew!ml 之类启发式判定），拿体积换可用性不划算，
+      # 根治要 Authenticode 签名证书。macOS 则是 UPX 本身不支持。
+      # （此前条件写的是 `runner.os != 'macOS'`，把 Windows 也压了）
       - name: Install UPX (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y upx-ucl
 
-      - name: Install UPX (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install upx -y
-
       - name: Compress binary with UPX
-        if: runner.os != 'macOS'
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           EXE="target/${{ matrix.target }}/release/picacg${{ matrix.exe_suffix }}"
@@ -375,6 +375,28 @@ jobs:
 
           Compress-Archive -Path package/* -DestinationPath "${{ steps.version.outputs.package_name }}.zip"
 
+      # 生成 SHA-256 校验和
+      #
+      # 两个用途：① 手动下载的人能自己核对完整性；
+      # ② 自动更新据此校验下载回来的包（见 utils/self_update.rs），
+      #    没有校验和就不能安全地替换自身
+      - name: Generate checksums
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for f in ${{ steps.version.outputs.package_name }}.*; do
+            case "$f" in
+              *.sha256) continue ;;
+            esac
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$f" > "$f.sha256"
+            else
+              # macOS 没有 sha256sum，用 shasum 并对齐成同样的两列格式
+              shasum -a 256 "$f" > "$f.sha256"
+            fi
+            echo "校验和: $(cat "$f.sha256")"
+          done
+
       # 上传产物（master/main 和 tag 都上传，供 release 使用）
       - name: Upload artifacts
         if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
@@ -385,6 +407,7 @@ jobs:
             ${{ steps.version.outputs.package_name }}.tar.gz
             ${{ steps.version.outputs.package_name }}.zip
             ${{ steps.version.outputs.package_name }}.dmg
+            ${{ steps.version.outputs.package_name }}.*.sha256
           retention-days: 7
 
   # ============ 自动 Tag + Release（master 分支版本变化时触发） ============
@@ -438,7 +461,7 @@ jobs:
         if: steps.check.outputs.should_release == 'true'
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" -o -name "*.sha256" \) -exec cp {} release/ \;
           echo "=== Release files ==="
           ls -la release/
 
@@ -509,7 +532,7 @@ jobs:
       - name: Collect release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.dmg" -o -name "*.sha256" \) -exec cp {} release/ \;
           echo "=== Release files ==="
           ls -la release/
 

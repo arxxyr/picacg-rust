@@ -478,6 +478,10 @@ pub struct OpenReleasePageButton;
 #[derive(Component, Default, Clone)]
 pub struct AutoCheckUpdateCheckbox;
 
+/// 「立即更新」按钮（自替换升级，仅受支持的平台显示）
+#[derive(Component, Default, Clone)]
+pub struct SelfUpdateButton;
+
 // ==================== 网络诊断组件 ====================
 
 /// 测速按钮
@@ -1780,6 +1784,7 @@ fn about_section(auto_check_update: bool) -> impl Scene + use<> {
     let bevy_text = format!("框架: Bevy {}", env!("BEVY_VERSION"));
     let check_update_label = format!("{ICON_REFRESH} 检查更新");
     let open_release_label = format!("{ICON_DOWNLOAD} 前往下载");
+    let self_update_label = format!("{ICON_SYNC} {}", crate::utils::self_update::action_label());
 
     bsn! {
         Node {
@@ -1852,6 +1857,27 @@ fn about_section(auto_check_update: bool) -> impl Scene + use<> {
                                 Text({open_release_label})
                                 TextFont { font_size: FontSize::Px(13.0) }
                                 TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        // 立即更新（自替换）：默认隐藏，检出新版本且平台支持时才显示
+                        SelfUpdateButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            display: Display::None,
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({self_update_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
                             )
                         ]
                     ),
@@ -3692,14 +3718,18 @@ pub fn refresh_update_status(
     mut text_query: Query<(&mut Text, &mut TextColor), With<UpdateStatusText>>,
     mut btn_query: Query<&mut ButtonStyle, With<CheckUpdateButton>>,
     mut release_btn_query: Query<&mut Node, With<OpenReleasePageButton>>,
+    mut self_update_btn_query: Query<
+        &mut Node,
+        (With<SelfUpdateButton>, Without<OpenReleasePageButton>),
+    >,
 ) {
     if !update_state.is_changed() {
         return;
     }
 
     // 只有确实检测到新版本、且拿到了下载地址时才给入口
-    let show_release_btn =
-        update_state.has_update == Some(true) && update_state.download_url.is_some();
+    let has_new = update_state.has_update == Some(true);
+    let show_release_btn = has_new && update_state.download_url.is_some();
     let display = if show_release_btn {
         Display::Flex
     } else {
@@ -3708,6 +3738,20 @@ pub fn refresh_update_status(
     for mut node in release_btn_query.iter_mut() {
         if node.display != display {
             node.display = display;
+        }
+    }
+
+    // 有新版本且拿到本平台产物直链时才给一键更新
+    //（Linux 原地替换 / macOS 下载并弹拖拽窗口 / Windows 下载并打开目录）
+    let show_self_update = has_new && update_state.asset_url.is_some();
+    let self_display = if show_self_update {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in self_update_btn_query.iter_mut() {
+        if node.display != self_display {
+            node.display = self_display;
         }
     }
 
@@ -3724,6 +3768,12 @@ pub fn refresh_update_status(
         } else if let Some(ref error) = update_state.error {
             **text = format!("检查失败: {}", error);
             *color = TextColor(AppColors::ERROR);
+        } else if update_state.is_updating {
+            **text = "正在下载并替换...".to_string();
+            *color = TextColor(AppColors::TEXT_SECONDARY);
+        } else if let Some(ref result) = update_state.update_result {
+            **text = result.clone();
+            *color = TextColor(Color::srgb(0.3, 0.8, 0.4));
         } else if let Some(has_update) = update_state.has_update {
             if has_update {
                 let version = update_state.latest_version.as_deref().unwrap_or("未知");
@@ -3757,6 +3807,58 @@ pub fn open_release_page_interaction(
         if let Err(e) = open::that(url) {
             tracing::error!("打开下载页面失败: {} - {}", url, e);
         }
+    }
+}
+
+/// 一键更新按钮交互：后台执行下载 → 校验 → 安装
+///
+/// 必须放后台——下载 + 校验 + 解包是阻塞 IO，跑在主线程会把画面冻住。
+/// 三平台的"安装"含义不同，见 `utils::self_update` 的模块文档。
+pub fn self_update_button_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<SelfUpdateButton>)>,
+    mut update_state: ResMut<crate::resources::UpdateCheckState>,
+    runtime: ResMut<crate::utils::TokioTasksRuntime>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed || update_state.is_updating {
+            continue;
+        }
+
+        let asset_url = update_state.asset_url.clone();
+        let checksum_url = update_state.checksum_url.clone();
+        update_state.is_updating = true;
+        update_state.update_result = None;
+        tracing::info!("开始更新: {:?}", asset_url);
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            // 阻塞 IO 丢给 spawn_blocking，别占着 tokio worker
+            let outcome = tokio::task::spawn_blocking(move || {
+                crate::utils::self_update::run_update(asset_url.as_deref(), checksum_url.as_deref())
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("更新任务异常退出: {e}")));
+
+            let message = match outcome {
+                Ok(outcome) => {
+                    let msg = outcome.message();
+                    tracing::info!("{}", msg);
+                    msg
+                }
+                Err(e) => {
+                    tracing::error!("更新失败: {}", e);
+                    format!("更新失败: {e}")
+                }
+            };
+
+            ctx.run_on_main_thread(move |ctx| {
+                let mut state = ctx
+                    .world
+                    .resource_mut::<crate::resources::UpdateCheckState>();
+                state.is_updating = false;
+                state.update_result = Some(message);
+            })
+            .await;
+        });
     }
 }
 

@@ -698,8 +698,12 @@ pub struct CheckUpdateResponse {
     pub has_update: bool,
     /// 更新说明（如果有）
     pub release_notes: Option<String>,
-    /// 下载链接
+    /// 下载链接（Release 页面）
     pub download_url: Option<String>,
+    /// 本平台产物直链（自动下载用）
+    pub asset_url: Option<String>,
+    /// 该产物的 `.sha256` 直链
+    pub checksum_url: Option<String>,
 }
 
 /// 检查更新失败事件

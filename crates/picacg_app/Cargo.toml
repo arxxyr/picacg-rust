@@ -98,6 +98,16 @@ mimalloc.workspace = true
 # === 窗口图标（bevy 未暴露 winit::window::Icon，需直接依赖 winit）===
 winit.workspace = true
 
+# === 自动更新 ===
+# tar/flate2 全平台引入：解包逻辑抽成了平台无关的纯函数并配了单测，
+# 否则那段只有 Linux 构建会编译，写错了要等 CI 才知道
+tar.workspace = true
+flate2.workspace = true
+
+# 自替换只有 Linux 用得上
+[target.'cfg(target_os = "linux")'.dependencies]
+self-replace.workspace = true
+
 # === macOS dock 图标（AppKit）===
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
