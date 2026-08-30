@@ -470,6 +470,14 @@ pub struct CheckUpdateButton;
 #[derive(Component, Default, Clone)]
 pub struct UpdateStatusText;
 
+/// 「前往下载」按钮（仅在检测到新版本时显示）
+#[derive(Component, Default, Clone)]
+pub struct OpenReleasePageButton;
+
+/// 「启动时自动检查更新」勾选框
+#[derive(Component, Default, Clone)]
+pub struct AutoCheckUpdateCheckbox;
+
 // ==================== 网络诊断组件 ====================
 
 /// 测速按钮
@@ -650,7 +658,7 @@ fn settings_page(
         overlay_visible,
         settings.enable_profiling
     )];
-    let about_content = bsn_list![about_section()];
+    let about_content = bsn_list![about_section(settings.auto_check_update)];
 
     bsn! {
         SettingsRoot
@@ -1767,10 +1775,11 @@ fn cache_setting() -> impl Scene {
 }
 
 /// 创建关于分组
-fn about_section() -> impl Scene {
+fn about_section(auto_check_update: bool) -> impl Scene + use<> {
     let version_text = format!("当前版本: v{}", env!("CARGO_PKG_VERSION"));
     let bevy_text = format!("框架: Bevy {}", env!("BEVY_VERSION"));
     let check_update_label = format!("{ICON_REFRESH} 检查更新");
+    let open_release_label = format!("{ICON_DOWNLOAD} 前往下载");
 
     bsn! {
         Node {
@@ -1825,6 +1834,28 @@ fn about_section() -> impl Scene {
                         ]
                     ),
                     (
+                        // 前往下载按钮：默认隐藏，检测到新版本时由
+                        // refresh_update_status 显示
+                        OpenReleasePageButton
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            display: Display::None,
+                        }
+                        BackgroundColor(AppColors::SURFACE)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({open_release_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
                         // 更新状态文本
                         UpdateStatusText
                         Text(" ")
@@ -1832,6 +1863,12 @@ fn about_section() -> impl Scene {
                         TextColor(AppColors::TEXT_SECONDARY)
                     ),
                 ]
+            ),
+            toggle_row(
+                AutoCheckUpdateCheckbox,
+                "启动时自动检查更新",
+                "登录后在后台查一次 GitHub Releases，只查不装",
+                auto_check_update,
             ),
         ]
     }
@@ -3654,9 +3691,24 @@ pub fn refresh_update_status(
     update_state: Res<crate::resources::UpdateCheckState>,
     mut text_query: Query<(&mut Text, &mut TextColor), With<UpdateStatusText>>,
     mut btn_query: Query<&mut ButtonStyle, With<CheckUpdateButton>>,
+    mut release_btn_query: Query<&mut Node, With<OpenReleasePageButton>>,
 ) {
     if !update_state.is_changed() {
         return;
+    }
+
+    // 只有确实检测到新版本、且拿到了下载地址时才给入口
+    let show_release_btn =
+        update_state.has_update == Some(true) && update_state.download_url.is_some();
+    let display = if show_release_btn {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in release_btn_query.iter_mut() {
+        if node.display != display {
+            node.display = display;
+        }
     }
 
     // 检查中降为次要色
@@ -3682,6 +3734,63 @@ pub fn refresh_update_status(
                 *color = TextColor(Color::srgb(0.4, 0.8, 0.5));
             }
         }
+    }
+}
+
+/// 「前往下载」按钮交互：用系统浏览器打开 Release 页面
+///
+/// 只跳转、不自替换——真正的原地升级在三平台各有坑（Windows 不能覆盖运行中的
+/// exe、macOS 未签名替换会触发 Gatekeeper），另案调研。
+pub fn open_release_page_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<OpenReleasePageButton>)>,
+    update_state: Res<crate::resources::UpdateCheckState>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let Some(url) = update_state.download_url.as_deref() else {
+            tracing::warn!("没有可用的下载地址");
+            continue;
+        };
+        tracing::info!("打开 Release 页面: {}", url);
+        if let Err(e) = open::that(url) {
+            tracing::error!("打开下载页面失败: {} - {}", url, e);
+        }
+    }
+}
+
+/// 「启动时自动检查更新」勾选框交互
+pub fn auto_check_update_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
+        (Changed<Interaction>, With<AutoCheckUpdateCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+) {
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // 与「系统耗时追踪」同理：这一项不参与 auto_save_settings
+        // 的状态资源体系， 直接落全局配置
+        let is_enabled = {
+            let settings = AppSettings::global();
+            let mut settings = settings.write();
+            settings.auto_check_update = !settings.auto_check_update;
+            settings.auto_check_update
+        };
+        if let Err(e) = AppSettings::global().read().save() {
+            tracing::error!("保存自动检查更新开关失败: {}", e);
+        }
+        tracing::info!(
+            "启动时自动检查更新: {}",
+            if is_enabled { "启用" } else { "禁用" }
+        );
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
     }
 }
 

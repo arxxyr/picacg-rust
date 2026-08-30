@@ -1046,6 +1046,21 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
 - 启动那一帧的 `text_system`（首次字形整形）与 `apply_app_icon`（PNG 解码 + AppKit
   刷 dock）是一次性成本，不是稳态开销
 
+## 检查更新（只查不装）
+
+设置页「关于」分组：`⟳ 检查更新` 手动触发，`⬇ 前往下载` 在检出新版本时才显示
+（`open::that` 打开 GitHub Release 页），另有「启动时自动检查更新」开关。
+
+- **只跳转、不自替换**：原地升级在三平台各有坑（Windows 不能覆盖运行中的 exe、
+  macOS 未签名替换触发 Gatekeeper），投入产出比差，另案评估
+- ⚠️ `compare_versions` 必须先切掉 `+build` / `-prerelease` 后缀再比数字段。
+  本项目发版格式就是 `v{version}+{commit}`，旧实现用
+  `filter_map(parse::<u64>)` 把 `0+abc1234` 这种段**静默丢掉**，
+  `0.5.1+abc` 被解析成 `[0,5]`，patch 位一带后缀就误判为「无更新」。已加单测覆盖
+- ⚠️ 历史坑：`check_update_button_interaction` / `refresh_update_status`
+  **从未注册到调度**，按钮点了没有任何反应，而 CLAUDE.md 里已标记为完成。
+  新增页面系统后务必确认 `ui_plugin.rs` 里接线了
+
 ## mimalloc 内存分配器
 
 全局使用 mimalloc 替换默认分配器，优化多线程内存碎片。
@@ -1415,7 +1430,7 @@ fn auto_resume_downloads_on_startup(
 - [x] 下载页"全部更新"按钮（对所有已下载漫画发送 RedownloadRequest 检查新章节）
 - [x] 个人资料修复（handle_profile_loaded 全局运行，刷新不再卡在加载中）
 - [x] 网络诊断（设置页测速 + Ping 测试）
-- [x] 检查更新（GitHub Releases API，semver 版本比较）
+- [x] 检查更新（GitHub Releases API，版本比较 + 前往下载入口 + 启动自动检查）
 - [x] 侧边栏布局优化（用户信息区/版本号 flex_shrink:0，菜单区精简移除工具分组）
 
 ---

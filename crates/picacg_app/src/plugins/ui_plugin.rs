@@ -404,6 +404,14 @@ impl Plugin for UiPlugin {
                     theme_mode_button_interaction,
                     language_button_interaction,
                     close_behavior_button_interaction,
+                    // 检查更新（此前 check_update_button_interaction 与
+                    // refresh_update_status 从未注册，按钮点了没有任何反应）
+                    (
+                        check_update_button_interaction,
+                        refresh_update_status,
+                        open_release_page_interaction,
+                        auto_check_update_checkbox_interaction,
+                    ),
                 )
                     .run_if(in_state(AppRoute::Settings)),
             )

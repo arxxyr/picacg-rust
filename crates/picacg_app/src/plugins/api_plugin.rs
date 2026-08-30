@@ -137,6 +137,7 @@ impl Plugin for ApiPlugin {
             .add_message::<UserProfileLoadedEvent>()
             .add_message::<UserProfileLoadFailedEvent>()
             // 版本更新检查消息
+            .add_systems(Startup, auto_check_update_on_startup)
             .add_message::<CheckUpdateRequest>()
             .add_message::<CheckUpdateResponse>()
             .add_message::<CheckUpdateFailedEvent>()
@@ -4263,6 +4264,26 @@ fn handle_delete_like_record(
 const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/arxxyr/picacg-rust/releases/latest";
 
 /// 处理检查更新请求
+/// 启动后自动检查一次更新（设置开启时）
+///
+/// 用 `Local<bool>` 保证整个进程只查一次。不等登录——检查更新走的是 GitHub
+/// Releases API，与 PicACG 账号无关，没必要挂在登录之后。
+fn auto_check_update_on_startup(
+    mut has_run: Local<bool>,
+    mut check_messages: MessageWriter<CheckUpdateRequest>,
+) {
+    if *has_run {
+        return;
+    }
+    *has_run = true;
+
+    if !AppSettings::global().read().auto_check_update {
+        return;
+    }
+    tracing::info!("启动自动检查更新");
+    check_messages.write(CheckUpdateRequest);
+}
+
 fn handle_check_update(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<CheckUpdateRequest>,
@@ -4372,10 +4393,23 @@ async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo
 
 /// 简单的语义化版本比较：latest > current 则返回 true
 fn compare_versions(latest: &str, current: &str) -> bool {
-    let parse =
-        |v: &str| -> Vec<u64> { v.split('.').filter_map(|s| s.parse::<u64>().ok()).collect() };
-    let latest_parts = parse(latest);
-    let current_parts = parse(current);
+    // 先切掉 build metadata（`+abc1234`）与预发布后缀（`-rc.1`）再逐段比数字。
+    //
+    // ⚠️ 本项目的发版格式就是 `v{version}+{commit}`（见 CLAUDE.md §9），
+    // 旧实现用 `filter_map(parse::<u64>)` 直接把 `0+abc1234`
+    // 这种段**静默丢掉**， `0.5.1+abc` 会被解析成 [0, 5]，与 [0, 5, 0]
+    // 比出「无更新」—— patch 位一带后缀就误判。
+    let core = |v: &str| -> Vec<u64> {
+        v.trim_start_matches('v')
+            .split(['+', '-'])
+            .next()
+            .unwrap_or("")
+            .split('.')
+            .map(|s| s.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let latest_parts = core(latest);
+    let current_parts = core(current);
 
     // 逐段比较，缺失的段视为 0
     let max_len = latest_parts.len().max(current_parts.len());
@@ -5309,5 +5343,46 @@ fn handle_disconnect_chat_room(
         chat_room_state.is_connecting = false;
         chat_room_state.ws_receiver = None;
         chat_room_state.ws_sender = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compare_versions;
+
+    #[test]
+    fn detects_newer_version() {
+        assert!(compare_versions("0.5.0", "0.4.0"));
+        assert!(compare_versions("0.4.1", "0.4.0"));
+        assert!(compare_versions("1.0.0", "0.9.9"));
+    }
+
+    #[test]
+    fn rejects_same_or_older() {
+        assert!(!compare_versions("0.4.0", "0.4.0"));
+        assert!(!compare_versions("0.3.9", "0.4.0"));
+    }
+
+    /// 本项目发版格式是 `v{version}+{commit}`——旧实现会把 `0+abc1234` 这种段
+    /// 静默丢掉，导致 patch 位带后缀时误判为「无更新」
+    #[test]
+    fn handles_build_metadata() {
+        assert!(compare_versions("v0.5.1+abc1234", "0.5.0"));
+        assert!(!compare_versions("v0.5.0+abc1234", "0.5.0"));
+        assert!(compare_versions("0.5.0+20260830.abc1234", "0.4.9"));
+    }
+
+    /// 预发布后缀同样要切掉再比数字位
+    #[test]
+    fn handles_prerelease_suffix() {
+        assert!(compare_versions("0.5.0-rc.1", "0.4.0"));
+        assert!(!compare_versions("0.4.0-beta", "0.4.0"));
+    }
+
+    /// 前缀 v 与段数不齐
+    #[test]
+    fn handles_v_prefix_and_short_versions() {
+        assert!(compare_versions("v0.5", "0.4.9"));
+        assert!(!compare_versions("0.4", "0.4.0"));
     }
 }

@@ -459,6 +459,9 @@ pub struct AppSettings {
     /// 下载队列全部完成后自动退出程序（挂机下载用）
     #[serde(default)]
     pub exit_after_downloads: bool,
+    /// 启动后自动检查新版本（只查不装，发现新版本时在设置页给出下载入口）
+    #[serde(default)]
+    pub auto_check_update: bool,
     /// 启用系统耗时追踪（设置页开关，**重启后生效**）
     ///
     /// 为什么要重启：bevy 在系统初始化时**一次性**建好 `info_span!("system")`，
@@ -538,6 +541,7 @@ impl Default for AppSettings {
             database_path: String::new(),
             auto_resume_downloads: false,
             exit_after_downloads: false,
+            auto_check_update: false,
             enable_profiling: false,
             max_concurrent_downloads: 3,
             auto_pack_cbz: false,
