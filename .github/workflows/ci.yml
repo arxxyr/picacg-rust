@@ -94,8 +94,15 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
-      # 编译前留一份资源快照：runner 被杀时日志里只有一句
-      # "received a shutdown signal"，没有任何现场，靠这个判断是内存还是磁盘
+      # runner 出厂就用掉 60G/72G，只剩 12G——bevy 的 target 目录很容易吃满。
+      # 删掉预装的 dotnet/android/ghc 等本项目用不到的工具链，能腾出 20G+
+      - name: Free up disk space
+        run: |
+          echo "清理前:"; df -h /
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          echo "清理后:"; df -h /
+
       - name: Show runner resources
         run: |
           echo "== 内存 =="; free -h
@@ -116,7 +123,17 @@ jobs:
           # 单测不需要调试符号，关掉同时省内存和磁盘
           CARGO_PROFILE_DEV_DEBUG: "0"
           CARGO_PROFILE_TEST_DEBUG: "0"
-        run: cargo test --all
+        run: |
+          # 后台每 20 秒记一次内存/磁盘余量。runner 被杀时日志里只有一句
+          # "received a shutdown signal"，没有任何现场——只有连续采样才能
+          # 看出到底是内存见底还是磁盘写满（此前连猜三次都猜错）
+          ( while true; do
+              echo "[res] $(date -u +%H:%M:%S) 可用内存=$(free -m | awk 'NR==2{print $7}')MB 可用磁盘=$(df -m / | awk 'NR==2{print $4}')MB"
+              sleep 20
+            done ) &
+          MONITOR_PID=$!
+          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT
+          cargo test --all
 
   # ============ 构建 ============
   build:
