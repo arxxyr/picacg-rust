@@ -94,13 +94,29 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # 编译前留一份资源快照：runner 被杀时日志里只有一句
+      # "received a shutdown signal"，没有任何现场，靠这个判断是内存还是磁盘
+      - name: Show runner resources
+        run: |
+          echo "== 内存 =="; free -h
+          echo "== 磁盘 =="; df -h /
+          echo "== CPU =="; nproc
+
       # 不用 --release：单测全是纯函数（内容过滤、复用规划、条漫锚点换算），
-      # release 对它们没有任何额外覆盖，却要把 bevy 整棵依赖树做优化编译——
-      # 实测两次都在 release 编译依赖的第 8~12 分钟被 runner 杀掉。
+      # release 对它们没有任何额外覆盖，却要把 bevy 整棵依赖树做优化编译。
       # release 的编译覆盖由下面的 build job（三平台）负责。
-      #
       # 附带好处：debug 默认开溢出检查，对算术逻辑反而比 release 更严
       - name: Run tests
+        env:
+          # 峰值内存 ≈ 并行 rustc 进程数 × 单进程占用。4 路并行啃 bevy_ui 这类
+          # 大 crate 会把 16GB 的 runner 打爆，表现为 runner 直接被杀
+          # （"received a shutdown signal" + exit 143，日志停在编译中途）。
+          # 判据：同样编译整棵依赖树的 clippy job 从没挂过——它只做元数据分析、
+          # 不做代码生成，正是 codegen 阶段吃内存
+          CARGO_BUILD_JOBS: 2
+          # 单测不需要调试符号，关掉同时省内存和磁盘
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
         run: cargo test --all
 
   # ============ 构建 ============
