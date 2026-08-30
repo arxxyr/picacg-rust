@@ -502,7 +502,8 @@ pub fn login_keyboard_input(
             continue;
         }
 
-        // 焦点在代理设置按钮上 → 跳转；其余（邮箱/密码/登录按钮/无焦点）→ 提交登录
+        // 焦点在代理设置按钮上 → 跳转；其余（邮箱/密码/登录按钮/无焦点）→
+        // 提交登录
         let on_proxy_button = input_focus
             .get()
             .is_some_and(|entity| proxy_button_query.contains(entity));

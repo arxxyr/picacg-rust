@@ -69,7 +69,8 @@ pub fn apply_app_icon(
             *cached_icon = decode_window_icon();
         }
         let Some(icon) = cached_icon.as_ref() else {
-            // 解码失败是编译期资源出了问题，重试也无意义——记为已处理，避免每帧重试
+            // 解码失败是编译期资源出了问题，重试也无意义——记为已处理，
+            // 避免每帧重试
             done.extend(pending);
             return;
         };

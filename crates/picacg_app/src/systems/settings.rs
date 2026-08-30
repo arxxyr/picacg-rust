@@ -511,7 +511,8 @@ pub fn setup_settings_ui(
         }
     };
 
-    // 初始化下载路径输入状态（insert_resource 首次创建，re-enter 时不会执行到此处）
+    // 初始化下载路径输入状态（insert_resource 首次创建，re-enter
+    // 时不会执行到此处）
     commands.insert_resource(DownloadPathInputState {
         value: settings.download_path.clone(),
     });

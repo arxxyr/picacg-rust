@@ -497,7 +497,8 @@ pub fn waterfall_create_cards(
             .map(|t| t == rankings_state.current_type)
             .unwrap_or(false);
 
-        // 惰性过滤：稳定态（已有卡片且类型匹配）什么都不做，不必每帧全量 zhconv 扫描
+        // 惰性过滤：稳定态（已有卡片且类型匹配）什么都不做，不必每帧全量 zhconv
+        // 扫描
         if !has_cards || !type_matches {
             let comics = rankings_state.current_comics();
             let filtered_indices = CompiledFilter::from_settings().filter_comic_indices(comics);

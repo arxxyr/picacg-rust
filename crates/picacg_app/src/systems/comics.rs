@@ -897,7 +897,8 @@ pub fn auto_load_more_comics(
         return;
     };
 
-    // 内容/视口尺寸由引擎布局输出（物理像素），换算成 ScrollPosition 所用的逻辑像素
+    // 内容/视口尺寸由引擎布局输出（物理像素），换算成 ScrollPosition
+    // 所用的逻辑像素
     let content_height = computed.content_size().y * computed.inverse_scale_factor;
     let viewport_height = computed.size().y * computed.inverse_scale_factor;
 
@@ -1089,7 +1090,8 @@ pub fn comics_virtual_scroll(
     //
     // 不再"移出窗口就 despawn、移入窗口就 spawn"。移出的卡片实体直接留作
     // 空闲池，改绑到移入位置的数据上——实体数恒定，滚动路径上零 spawn/despawn。
-    // 卡片能被改绑的前提是它是**固定形态**（徽章/时间槽位常驻，见 comic_card）。
+    // 卡片能被改绑的前提是它是**固定形态**（徽章/时间槽位常驻，见
+    // comic_card）。
     let new_lo = row_index_range(new_start).start;
     let new_hi = row_index_range(new_end).start;
     let needed = new_hi.saturating_sub(new_lo);
@@ -1234,8 +1236,9 @@ pub fn update_comics_images(
             continue;
         };
 
-        // 就地补 ImageNode——不再"销毁占位实体 + 新建图片实体 + insert_children"，
-        // 那套会打乱卡片子节点顺序，也和节点复用冲突（复用要求封面实体身份稳定）
+        // 就地补 ImageNode——不再"销毁占位实体 + 新建图片实体 +
+        // insert_children"， 那套会打乱卡片子节点顺序，
+        // 也和节点复用冲突（复用要求封面实体身份稳定）
         commands
             .entity(entity)
             .remove::<PlaceholderImage>()
@@ -1319,7 +1322,8 @@ pub fn comics_rebind_cards(
                                 });
                         }
                         None => {
-                            // 新 URL 还没缓存：撤掉旧图，挂回占位标记等 update_comics_images
+                            // 新 URL 还没缓存：撤掉旧图，挂回占位标记等
+                            // update_comics_images
                             if has_image {
                                 commands.entity(child).remove::<ImageNode>();
                             }
@@ -1333,7 +1337,8 @@ pub fn comics_rebind_cards(
                 continue;
             }
 
-            // 下载角标：改绑后由 refresh_download_status_badges 按 Changed 刷外观
+            // 下载角标：改绑后由 refresh_download_status_badges 按 Changed
+            // 刷外观
             if let Ok(mut badge) = badge_query.get_mut(child) {
                 badge.comic_id = comic.id.clone();
                 badge.remote_episodes = comic.eps_count;

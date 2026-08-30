@@ -137,7 +137,8 @@ pub fn animate_loading_shimmer(
     let elapsed = time.elapsed_secs();
 
     for (entity, shimmer, mut bg_color) in query.iter_mut() {
-        // Entity → 稳定的相位偏移（0.19 的 EntityIndex 不能直接 as，走 to_bits）
+        // Entity → 稳定的相位偏移（0.19 的 EntityIndex 不能直接 as，走
+        // to_bits）
         let phase = (entity.to_bits() % 64) as f32 * SHIMMER_PHASE_STEP;
         // sin → 0..1
         let k = (elapsed * SHIMMER_SPEED + phase).sin() * 0.5 + 0.5;

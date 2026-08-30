@@ -1084,7 +1084,8 @@ pub fn handle_search_keyboard_input(
 
         match &event.logical_key {
             Key::Enter => {
-                // 关键词以输入框为准（输入过程只写 TextInput.value，不回写状态）
+                // 关键词以输入框为准（输入过程只写
+                // TextInput.value，不回写状态）
                 let keyword = input.value.trim();
                 if keyword.is_empty() {
                     continue;

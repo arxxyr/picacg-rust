@@ -1697,7 +1697,8 @@ pub fn reader_mouse_wheel_control(
         if ctrl_pressed {
             // Ctrl + 滚轮：缩放
             //
-            // ⚠️ macOS 会把 Ctrl+滚轮吃掉当系统缩放手势，触控板上多半到不了这里，
+            // ⚠️ macOS 会把
+            // Ctrl+滚轮吃掉当系统缩放手势，触控板上多半到不了这里，
             // 故工具栏另配了 − / + / ⟲ 按钮和键盘 +/-/0 两条等价入口
             let step = if scroll_delta > 0.0 {
                 consts::SCALE_STEP

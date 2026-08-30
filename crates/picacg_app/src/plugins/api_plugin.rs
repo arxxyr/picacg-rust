@@ -2699,7 +2699,8 @@ fn handle_resume_download(
 
         let client = api_client.0.clone();
 
-        // 启动后台下载任务（使用元数据中保存的章节信息，会自动跳过已存在的文件）
+        // 启动后台下载任务（使用元数据中保存的章节信息，
+        // 会自动跳过已存在的文件）
         spawn_download_task(
             runtime.as_ref(),
             client,
@@ -3565,7 +3566,8 @@ fn download_queue_manager(
             continue;
         }
 
-        // 只自动启动排队中的任务（用户手动暂停的不自动恢复）；直接判 FSM 状态免深拷贝
+        // 只自动启动排队中的任务（用户手动暂停的不自动恢复）；直接判 FSM
+        // 状态免深拷贝
         if matches!(fsm.meta.state, crate::resources::DownloadState::Queued) {
             resume_messages.write(ResumeDownloadRequest {
                 comic_id: fsm.meta.comic_id.clone(),
@@ -3708,7 +3710,7 @@ fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, St
     }
 
     // 创建 CBZ 输出目录
-    // 从 source_path 推导：source_path = base/image/漫画名 → CBZ 目录 = base/cbz
+    // 从 source_path 推导：base/image/漫画名 → base/cbz
     // 这样自定义下载路径的 CBZ 也会保存在同一基础目录下
     let cbz_dir = source_dir
         .parent() // base/image

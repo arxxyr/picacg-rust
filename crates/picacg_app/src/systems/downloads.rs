@@ -2586,7 +2586,8 @@ pub fn update_floating_header(
                 }
             }
 
-            // 图标始终显示向下箭头（点击跳转到该区域；比较后写避免每次触发文字整形）
+            // 图标始终显示向下箭头（点击跳转到该区域；
+            // 比较后写避免每次触发文字整形）
             if let Ok(mut icon_component) = floating_icon_query.single_mut()
                 && **icon_component != ICON_CHEVRON_DOWN
             {
@@ -2645,7 +2646,8 @@ pub fn floating_header_click_interaction(
                         .map(|n| n.size().y / scale_factor)
                         .unwrap_or(0.0);
 
-                    // 按布局顺序计算目标位置：Downloading → Waiting → Stopped → Completed
+                    // 按布局顺序计算目标位置：Downloading → Waiting → Stopped →
+                    // Completed
                     let target_y = match target_section {
                         SectionType::Downloading => 0.0,
                         SectionType::Waiting => downloading_height + SECTION_GAP,
@@ -4361,7 +4363,8 @@ pub fn move_all_downloads_button_interaction(
                     let tasks: Vec<(String, String, String)> = db_tasks
                         .into_iter()
                         .filter_map(|t| {
-                            // 使用 save_path（完整图片路径，如 /base/image/漫画名）
+                            // 使用 save_path（完整图片路径，如
+                            // /base/image/漫画名）
                             // 不用 custom_download_path（只是基础目录）
                             if t.save_path.is_empty() {
                                 None

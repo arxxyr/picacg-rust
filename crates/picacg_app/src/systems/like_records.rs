@@ -335,7 +335,8 @@ fn like_record_card(
                 handle.clone()
             )])
         } else {
-            // 占位符：自带 URL，图片就绪后由 update_like_records_images 直接替换
+            // 占位符：自带 URL，图片就绪后由 update_like_records_images
+            // 直接替换
             let placeholder_url = thumb_url.to_string();
             Box::new(bsn_list![(
                 PlaceholderImage

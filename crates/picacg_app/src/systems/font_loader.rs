@@ -38,8 +38,9 @@ pub fn setup_fonts(mut fonts: ResMut<Assets<Font>>) {
     };
 
     // 替换 Bevy 默认字体（FiraMono → CJK 字体）
-    // Bevy TextPlugin 在 build() 中用 assets.insert(AssetId::default(), FiraMono)
-    // 设置了默认字体。我们用同样的 API 替换它，之后 Handle::default() = CJK 字体。
+    // Bevy TextPlugin 在 build() 中用 assets.insert(AssetId::default(),
+    // FiraMono) 设置了默认字体。我们用同样的 API 替换它，之后
+    // Handle::default() = CJK 字体。
     if let Err(e) = fonts.insert(AssetId::default(), font) {
         tracing::error!("设置默认字体失败: {:?}", e);
         return;
@@ -54,7 +55,8 @@ fn load_font_asset(path: &Option<String>, label: &str) -> Option<Font> {
     match std::fs::read(path) {
         Ok(bytes) => {
             tracing::info!("{}读取成功: {} bytes", label, bytes.len());
-            // Bevy 0.19: Font::from_bytes 不再返回 Result，解析延迟到文本布局阶段
+            // Bevy 0.19: Font::from_bytes 不再返回
+            // Result，解析延迟到文本布局阶段
             Some(Font::from_bytes(bytes))
         }
         Err(e) => {

@@ -321,7 +321,8 @@ pub fn waterfall_create_category_cards(
                     .filter_category_indices(&categories_state.categories);
 
                 if !filtered_indices.is_empty() {
-                    // 删除"加载中..."指示器（安全删除，实体可能已被其他系统删除）
+                    // 删除"加载中..."指示器（安全删除，
+                    // 实体可能已被其他系统删除）
                     for entity in loading_query.iter() {
                         if let Ok(mut entity_commands) = commands.get_entity(entity) {
                             entity_commands.despawn();
