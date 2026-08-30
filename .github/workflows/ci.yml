@@ -101,6 +101,13 @@ jobs:
           echo "== CPU =="; nproc
 
       - name: Run tests
+        env:
+          # 峰值内存 ≈ 并行 rustc 数 × 单进程占用。public runner 是 4 核 / 16GB，
+          # 跑满 4 路编译 bevy 大 crate 会把内存吃穿——实测可用内存 80 秒内
+          # 从 12.8GB 掉到 37MB，runner 整个被杀（日志只有一句
+          # "received a shutdown signal"，没有任何现场）。
+          # 砍到 2 路后峰值减半，16GB 上留出充足余量
+          CARGO_BUILD_JOBS: 2
         run: |
           # 后台每 20 秒记一次余量，死前最后一条即为现场
           ( while true; do
@@ -197,6 +204,9 @@ jobs:
           echo "Full Version: $FULL_VERSION"
 
       - name: Build release
+        env:
+          # 同 test job：限制并行度压住编译峰值内存（见那边的说明）
+          CARGO_BUILD_JOBS: 2
         run: cargo build --release -p picacg --target ${{ matrix.target }}
 
       - name: Verify build artifacts
