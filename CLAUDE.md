@@ -1250,6 +1250,21 @@ fn auto_resume_downloads_on_startup(
 
 **工作流文件：** `.github/workflows/ci.yml`
 
+> ⚠️ **提交前先 `rustup update nightly`**
+>
+> CI 用 `dtolnay/rust-toolchain@nightly`，每次装的是**当前最新** nightly。本地
+> nightly 一旦落后，就会出现「本地 `cargo fmt --all --check` 通过、CI 的
+> Format Check 却挂」——rustfmt 的行为在 nightly 之间会变（实测 2026-08-29
+> 那版起把 CJK 字符按双宽计算，中文注释折行位置整体改变，十几个文件被重排）。
+>
+> 仓库根的 `rust-toolchain.toml` 只声明 `channel = "nightly"`（**不钉日期**，
+> 跟随最新），它保证「用 nightly」，**不保证「用同一个 nightly」**——
+> 版本对齐只能靠上面这条命令。更新后按全局 CLAUDE.md §5 跑一次
+> `cargo sweep -r --installed ~/repo/rust` 清旧工具链产物。
+>
+> 触发分支必须包含 **`dev`**：本项目日常开发在 dev，配置里原先只写了
+> `develop`，导致 dev 的推送长期不跑 CI、格式漂移无人发现。
+
 | Job | 触发条件 | 说明 |
 |-----|---------|------|
 | `fmt` | push/PR | `cargo fmt --all -- --check` |

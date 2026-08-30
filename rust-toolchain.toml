@@ -1,0 +1,9 @@
+# 本仓库固定使用 nightly（mimalloc、let-chains 等依赖 nightly 特性）
+#
+# 只声明 channel、**不钉具体日期**：跟随最新 nightly。
+#
+# ⚠️ 注意它不做版本对齐：rustup 不会自动升级已装的 nightly，本地仍可能落后于
+# CI（CI 的 dtolnay/rust-toolchain@nightly 每次装当前最新）。真正防止
+# 「本地 fmt 过、CI fmt 挂」的是提交前先跑 rustup update nightly，见 CLAUDE.md §5。
+[toolchain]
+channel = "nightly"
