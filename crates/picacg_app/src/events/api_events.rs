@@ -345,6 +345,12 @@ pub struct DownloadComicRequest {
     pub comic_title: String,
     /// 要下载的章节列表（空表示下载全部）
     pub episodes: Vec<i32>,
+    /// 服务端 `epsCount`（None/0 = 未知）
+    ///
+    /// 落到 `DownloadTaskMeta.remote_eps_count`，
+    /// 是封面角标判定「有更新」的基准。 从列表右键下载时详情页并未加载，
+    /// 只能由卡片持有的 `Comic` 一路捎带过来。
+    pub remote_eps_count: Option<i32>,
 }
 
 /// 下载进度更新事件
@@ -397,6 +403,35 @@ pub struct RedownloadRequest {
     /// 新的基础目录（原路径不存在时由用户选择）
     /// 实际保存路径 = new_base_path/Images/漫画文件夹名
     pub new_base_path: Option<String>,
+    /// 强制更新：跳过章节数前置比对，逐章拉图片列表补全缺失文件（慢，
+    /// 能修本地损坏）
+    ///
+    /// `false` 为普通更新：先取漫画详情比对章节数，与本地记录一致即跳过（快）
+    pub force: bool,
+}
+
+/// 更新前置检查通过（章节数变多或无法判定），开始实际的重新下载
+///
+/// 仅普通更新会经过这一步；强制更新由 `RedownloadRequest` 直接进入下载流程
+#[derive(Message)]
+pub struct RedownloadConfirmed {
+    pub comic_id: String,
+    pub new_base_path: Option<String>,
+    /// 服务端章节数（仅用于日志/提示）
+    pub remote_episodes: i32,
+    /// 本地已记录的章节数（仅用于日志/提示）
+    pub local_episodes: i32,
+}
+
+/// 更新前置检查判定「已是最新」，本次不下载
+#[derive(Message)]
+pub struct RedownloadSkipped {
+    pub comic_id: String,
+    pub comic_title: String,
+    /// 章节数（服务端与本地一致）
+    pub episodes: i32,
+    /// 检查失败时的错误信息（None 表示确实已是最新）
+    pub error: Option<String>,
 }
 
 // ==================== 排行榜消息 ====================

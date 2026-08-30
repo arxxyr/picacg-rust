@@ -11,7 +11,10 @@ use crate::{
     systems::{
         login::AppColors,
         scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
-        ui_common::{TagColor, comic_time_info, format_number, tag_badge_truncated, truncate_text},
+        ui_common::{
+            BadgeAnchor, TagColor, comic_time_info, download_status_badge, format_number,
+            tag_badge_truncated, truncate_text,
+        },
         waterfall::{RankingsCardCreationState, RankingsContext},
         widgets::ButtonStyle,
     },
@@ -467,6 +470,7 @@ pub fn waterfall_create_cards(
     scroll_container_query: Query<(Entity, Option<&Children>), With<RankingsScrollContainer>>,
     card_query: Query<&RankingsComicCard>,
     loading_query: Query<Entity, With<RankingsLoadingIndicator>>,
+    downloaded: Res<DownloadedComicsIndex>,
     time: Res<Time>,
     _asset_server: Res<AssetServer>,
 ) {
@@ -582,7 +586,7 @@ pub fn waterfall_create_cards(
             {
                 // 排名号使用原始索引 +1，保留真实排名
                 let entity = commands
-                    .spawn_scene(comic_card(comic, original_index + 1, true))
+                    .spawn_scene(comic_card(comic, original_index + 1, &downloaded, true))
                     .insert(ChildOf(container_entity))
                     .id();
                 entities.push(entity);
@@ -711,10 +715,16 @@ fn error_state(message: &str) -> impl Scene + use<> {
 }
 
 /// 漫画卡片场景（`hidden` 用于瀑布式预创建，先隐藏后分批显示）
-fn comic_card(comic: &picacg_api::models::Comic, rank: usize, hidden: bool) -> impl Scene + use<> {
+fn comic_card(
+    comic: &picacg_api::models::Comic,
+    rank: usize,
+    downloaded: &DownloadedComicsIndex,
+    hidden: bool,
+) -> impl Scene + use<> {
     let card_comic_id = comic.id.clone();
     let menu_comic_id = comic.id.clone();
     let menu_comic_title = comic.title.clone();
+    let menu_eps_count = comic.eps_count;
     let image_url = comic.thumb.url();
     let title = truncate_text(&comic.title, 12);
     let author = truncate_text(&comic.author, 10);
@@ -773,9 +783,17 @@ fn comic_card(comic: &picacg_api::models::Comic, rank: usize, hidden: bool) -> i
     // 创建/更新时间
     let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
 
+    // 封面右下角下载角标（挂在封面区域内，与左上角排名标签互不遮挡）
+    let badge: Box<dyn SceneList> = Box::new(bsn_list![download_status_badge(
+        &comic.id,
+        comic.eps_count,
+        downloaded,
+        BadgeAnchor::CoverContainer
+    )]);
+
     bsn! {
         RankingsComicCard { comic_id: {card_comic_id}, rank: {rank} }
-        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title}, eps_count: {menu_eps_count} }
         Button
         template_value(ButtonStyle::card())
         Node {
@@ -837,6 +855,8 @@ fn comic_card(comic: &picacg_api::models::Comic, rank: usize, hidden: bool) -> i
                             )
                         ]
                     ),
+                    // 下载状态角标（右下角）
+                    {badge},
                 ]
             ),
             (

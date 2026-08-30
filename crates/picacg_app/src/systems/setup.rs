@@ -140,8 +140,10 @@ pub fn save_window_position(
     save_window_geometry_to_config(window);
 }
 
-/// 将窗口几何信息保存到全局配置（内部辅助函数）
-fn save_window_geometry_to_config(window: &Window) {
+/// 将窗口几何信息保存到全局配置
+///
+/// 用户主动关闭与「下载完成后自动退出」共用，保证两条退出路径都记住窗口位置
+pub fn save_window_geometry_to_config(window: &Window) {
     let mut settings = AppSettings::global().write();
 
     // 保存窗口大小（逻辑像素）

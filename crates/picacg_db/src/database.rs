@@ -176,6 +176,8 @@ impl Database {
             "ALTER TABLE download_task ADD COLUMN completed_episodes TEXT",
             "ALTER TABLE download_task ADD COLUMN custom_download_path TEXT",
             "ALTER TABLE download_task ADD COLUMN custom_auto_pack_cbz INTEGER",
+            // 下载当时服务端的 epsCount 快照（更新检测基准，见 models.rs 注释）
+            "ALTER TABLE download_task ADD COLUMN remote_eps_count INTEGER",
             // history 表扩展列
             "ALTER TABLE history ADD COLUMN comic_title TEXT",
             "ALTER TABLE history ADD COLUMN thumb_url TEXT",
@@ -579,8 +581,8 @@ impl Database {
                 comic_id, comic_title, total_episodes, episode_orders,
                 save_path, state, state_data, created_at, updated_at,
                 categories, tags, completed_episodes,
-                custom_download_path, custom_auto_pack_cbz
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                custom_download_path, custom_auto_pack_cbz, remote_eps_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(comic_id) DO UPDATE SET
                 comic_title = excluded.comic_title,
                 total_episodes = excluded.total_episodes,
@@ -593,7 +595,9 @@ impl Database {
                 tags = excluded.tags,
                 completed_episodes = excluded.completed_episodes,
                 custom_download_path = excluded.custom_download_path,
-                custom_auto_pack_cbz = excluded.custom_auto_pack_cbz
+                custom_auto_pack_cbz = excluded.custom_auto_pack_cbz,
+                -- 快照只增不清：新值为 NULL（调用方没拿到 epsCount）时保留旧快照
+                remote_eps_count = COALESCE(excluded.remote_eps_count, download_task.remote_eps_count)
             "#,
         )
         .bind(&task.comic_id)
@@ -610,6 +614,7 @@ impl Database {
         .bind(&task.completed_episodes)
         .bind(&task.custom_download_path)
         .bind(task.custom_auto_pack_cbz)
+        .bind(task.remote_eps_count)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -734,8 +739,8 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
             comic_id, comic_title, total_episodes, episode_orders,
             save_path, state, state_data, created_at, updated_at,
             categories, tags, completed_episodes,
-            custom_download_path, custom_auto_pack_cbz
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            custom_download_path, custom_auto_pack_cbz, remote_eps_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(comic_id) DO UPDATE SET
             comic_title = excluded.comic_title,
             total_episodes = excluded.total_episodes,
@@ -748,7 +753,9 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
             tags = excluded.tags,
             completed_episodes = excluded.completed_episodes,
             custom_download_path = excluded.custom_download_path,
-            custom_auto_pack_cbz = excluded.custom_auto_pack_cbz
+            custom_auto_pack_cbz = excluded.custom_auto_pack_cbz,
+            -- 快照只增不清：新值为 NULL（调用方没拿到 epsCount）时保留旧快照
+            remote_eps_count = COALESCE(excluded.remote_eps_count, download_task.remote_eps_count)
         "#,
     )
     .bind(&task.comic_id)
@@ -765,6 +772,7 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
     .bind(&task.completed_episodes)
     .bind(&task.custom_download_path)
     .bind(task.custom_auto_pack_cbz)
+    .bind(task.remote_eps_count)
     .execute(pool)
     .await?;
     Ok(())

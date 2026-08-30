@@ -35,17 +35,21 @@ fn main() {
     let filter = EnvFilter::new(log_level_str);
     let (filter_layer, reload_handle) = reload::Layer::new(filter);
 
+    // 系统耗时统计（--features profiling 才编进来，见 utils::profiling）
+    let profiling_wanted = utils::profiling::wants_profiling();
+
     // 初始化日志（使用可重载的过滤器）
+    let fmt_layer = fmt::layer()
+        .with_target(false)
+        // 日志时间戳用系统本地时区（默认是 UTC，排查问题时对不上表）
+        .with_timer(fmt::time::ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+        ));
+    let profiler_layer = profiling_wanted.then(utils::profiling::layer);
     tracing_subscriber::registry()
         .with(filter_layer)
-        .with(
-            fmt::layer()
-                .with_target(false)
-                // 日志时间戳用系统本地时区（默认是 UTC，排查问题时对不上表）
-                .with_timer(fmt::time::ChronoLocal::new(
-                    "%Y-%m-%d %H:%M:%S%.3f".to_string(),
-                )),
-        )
+        .with(fmt_layer)
+        .with(profiler_layer)
         .init();
 
     // 保存 reload handle 供后续动态更新使用
@@ -138,6 +142,24 @@ fn main() {
         )
         // Tokio 运行时集成
         .add_plugins(TokioTasksPlugin::default())
+        // 窗口图标 + macOS dock 图标（窗口重建后会自动补贴）
+        .add_systems(Update, systems::app_icon::apply_app_icon)
+        // 性能追踪：F3 叠加层（FPS/帧时间/实体数）+ F4 系统耗时榜
+        .add_plugins((
+            bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
+            bevy::diagnostic::EntityCountDiagnosticsPlugin::default(),
+        ))
+        .init_resource::<systems::perf_overlay::PerfOverlayState>()
+        .add_systems(Startup, systems::perf_overlay::setup_perf_overlay)
+        .add_systems(
+            Update,
+            (
+                systems::perf_overlay::toggle_perf_overlay,
+                systems::perf_overlay::update_perf_overlay,
+                systems::perf_overlay::print_system_timings,
+                systems::perf_overlay::auto_report_slow_frames,
+            ),
+        )
         // 自定义插件
         .add_plugins((UiPlugin, ApiPlugin))
         // 设置全局 panic handler 为 warn（防止 text_system 等内部系统 panic 导致崩溃）

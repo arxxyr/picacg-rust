@@ -16,7 +16,10 @@ use crate::{
         login::AppColors,
         pagination::{Pagination, PaginationControl, pagination_controls},
         scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
-        ui_common::{TagColor, comic_time_info, tag_badge},
+        ui_common::{
+            BadgeAnchor, LoadingShimmer, TagColor, comic_time_info, download_status_badge,
+            tag_badge,
+        },
         waterfall::SearchCardCreationState,
         widgets::ButtonStyle,
     },
@@ -860,11 +863,13 @@ pub fn setup_search_ui(
 fn search_result_card(
     comic: &picacg_api::models::Comic,
     image_cache: &ImageCache,
+    downloaded: &DownloadedComicsIndex,
     hidden: bool,
 ) -> impl Scene + use<> {
     let card_comic_id = comic.id.clone();
     let menu_comic_id = comic.id.clone();
     let menu_comic_title = comic.title.clone();
+    let menu_eps_count = comic.eps_count;
     let title = comic.title.clone();
     let author = comic.author.clone();
     let visibility = if hidden {
@@ -888,6 +893,7 @@ fn search_result_card(
         )]),
         None => Box::new(bsn_list![(
             SearchResultImage { comic_id: {image_comic_id}, url: {cover_url} }
+            template_value(LoadingShimmer::new(AppColors::SECONDARY))
             Node {
                 width: Val::Px(164.0),
                 height: Val::Px(220.0),
@@ -944,9 +950,17 @@ fn search_result_card(
     // 创建/更新时间
     let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
 
+    // 封面右下角下载角标（挂在封面容器内，直接贴容器右下角）
+    let badge: Box<dyn SceneList> = Box::new(bsn_list![download_status_badge(
+        &comic.id,
+        comic.eps_count,
+        downloaded,
+        BadgeAnchor::CoverContainer
+    )]);
+
     bsn! {
         SearchResultCard { comic_id: {card_comic_id} }
-        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title}, eps_count: {menu_eps_count} }
         Button
         template_value(ButtonStyle::card())
         Node {
@@ -970,7 +984,7 @@ fn search_result_card(
                     overflow: Overflow::clip(),
                 }
                 BackgroundColor(AppColors::SECONDARY)
-                Children [ {cover} ]
+                Children [ {cover}, {badge} ]
             ),
             (
                 // 标题
@@ -1325,6 +1339,7 @@ pub fn waterfall_create_search_cards(
     mut creation_state: ResMut<SearchCardCreationState>,
     search_state: Res<SearchState>,
     image_cache: Res<ImageCache>,
+    downloaded: Res<DownloadedComicsIndex>,
     results_grid_query: Query<Entity, With<SearchResultsGrid>>,
     time: Res<Time>,
 ) {
@@ -1357,7 +1372,7 @@ pub fn waterfall_create_search_cards(
                 && let Some(comic) = results.get(original_index)
             {
                 let entity = commands
-                    .spawn_scene(search_result_card(comic, &image_cache, true))
+                    .spawn_scene(search_result_card(comic, &image_cache, &downloaded, true))
                     .insert(ChildOf(grid_entity))
                     .id();
                 entities.push(entity);
@@ -1402,16 +1417,18 @@ pub fn waterfall_create_search_cards(
 // ==================== 过滤工具栏交互系统 ====================
 
 /// 排序按钮交互
+///
+/// 查询**不加** `Changed<Interaction>`：选中态刷新需要覆盖所有排序按钮
+/// （点 B 时 A 的 Interaction 并未变化，加过滤器会让 A 一直亮着）。
+/// 重复触发由 `search_state.sort != btn.sort` 挡掉——按下第一帧改完状态后，
+/// 后续帧该条件即为假。
 pub fn sort_button_interaction(
-    mut interaction_query: Query<
-        (
-            &Interaction,
-            &SortButton,
-            &mut ButtonStyle,
-            &mut BorderColor,
-        ),
-        Changed<Interaction>,
-    >,
+    mut interaction_query: Query<(
+        &Interaction,
+        &SortButton,
+        &mut ButtonStyle,
+        &mut BorderColor,
+    )>,
     mut search_state: ResMut<SearchState>,
     mut search_messages: MessageWriter<SearchComicsRequestEvent>,
 ) {

@@ -1015,6 +1015,7 @@ pub fn download_button_interaction(
                     comic_id: detail_state.comic_id.clone(),
                     comic_title: comic.title.clone(),
                     episodes: vec![], // 空表示下载所有章节
+                    remote_eps_count: Some(comic.eps_count),
                 });
             }
             None => tracing::warn!("漫画信息未加载，无法下载"),

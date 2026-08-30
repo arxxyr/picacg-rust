@@ -13,7 +13,10 @@ use crate::{
         login::AppColors,
         pagination::{Pagination, PaginationControl, pagination_controls},
         scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
-        ui_common::{TagColor, comic_time_info, tag_badge},
+        ui_common::{
+            BadgeAnchor, LoadingShimmer, TagColor, comic_time_info, download_status_badge,
+            tag_badge,
+        },
         widgets::ButtonStyle,
     },
     utils::content_filter::CompiledFilter,
@@ -263,11 +266,13 @@ fn favorite_thumbnail(url: String, handle: Handle<Image>) -> impl Scene + use<> 
 fn favorite_card(
     comic: &picacg_api::models::Comic,
     image_cache: &ImageCache,
+    downloaded: &DownloadedComicsIndex,
     hidden: bool,
 ) -> impl Scene + use<> {
     let card_comic_id = comic.id.clone();
     let menu_comic_id = comic.id.clone();
     let menu_comic_title = comic.title.clone();
+    let menu_eps_count = comic.eps_count;
     let title = comic.title.clone();
     let author = comic.author.clone();
 
@@ -290,6 +295,7 @@ fn favorite_card(
             Box::new(bsn_list![(
                 PlaceholderImage
                 FavoriteThumbnail { url: {placeholder_url} }
+                template_value(LoadingShimmer::new(AppColors::SURFACE_HOVER))
                 Node {
                     width: Val::Px(164.0),
                     height: Val::Px(220.0),
@@ -333,9 +339,17 @@ fn favorite_card(
     // 创建/更新时间
     let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
 
+    // 封面右下角下载角标（绝对定位，与封面同为卡片直接子节点）
+    let badge: Box<dyn SceneList> = Box::new(bsn_list![download_status_badge(
+        &comic.id,
+        comic.eps_count,
+        downloaded,
+        BadgeAnchor::CardCover
+    )]);
+
     bsn! {
         FavoriteCard { comic_id: {card_comic_id} }
-        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title}, eps_count: {menu_eps_count} }
         Button
         template_value(ButtonStyle::card())
         Node {
@@ -372,6 +386,8 @@ fn favorite_card(
             {tags_container},
             // 创建/更新时间
             {time_info},
+            // 下载状态角标（绝对定位，不参与列布局）
+            {badge},
         ]
     }
 }
@@ -459,6 +475,7 @@ pub fn waterfall_create_favorite_cards(
     loading_query: Query<Entity, With<LoadingIndicator>>,
     empty_hint_query: Query<Entity, With<FavoritesEmptyHint>>,
     image_cache: Res<ImageCache>,
+    downloaded: Res<DownloadedComicsIndex>,
     _asset_server: Res<AssetServer>,
 ) {
     // 如果没有滚动容器，退出
@@ -521,7 +538,7 @@ pub fn waterfall_create_favorite_cards(
         for comic in favorites_state.comics.iter() {
             if !filter.should_block_comic(comic) {
                 commands
-                    .spawn_scene(favorite_card(comic, &image_cache, true))
+                    .spawn_scene(favorite_card(comic, &image_cache, &downloaded, true))
                     .insert(ChildOf(scroll_entity));
             }
         }

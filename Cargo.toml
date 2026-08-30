@@ -68,6 +68,23 @@ open = "5.4.1"
 # === 文件对话框 ===
 rfd = "0.17.2"
 
+# === 窗口 / Dock 图标 ===
+# 版本与 bevy_winit 0.19 依赖的 winit 对齐，避免多编一份
+winit = { version = "0.30", default-features = false }
+# macOS dock 图标走 AppKit；这几个 crate 已在 winit/rfd/arboard 的依赖树中，
+# 所用 feature 也已被它们打开，直接依赖不增加编译量
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSImage",
+    "NSResponder",
+] }
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSData",
+] }
+
 # === 压缩 ===
 zip = { version = "8.6.0", default-features = false }
 

@@ -287,6 +287,12 @@ pub enum ZoomType {
 pub struct ContextMenuTarget {
     pub comic_id: String,
     pub comic_title: String,
+    /// 列表接口给的 `epsCount`（0 = 未知）
+    ///
+    /// 顺着右键下载一路带到 `DownloadTaskMeta.remote_eps_count`，作为封面角标的
+    /// 更新基准。卡片本来就持有 `Comic`，捎带这个字段是零成本；不带的话右键
+    /// 下载的漫画永远没有基准，之后再有新章节也不会亮更新角标。
+    pub eps_count: i32,
 }
 
 // ==================== 通用组件 ====================

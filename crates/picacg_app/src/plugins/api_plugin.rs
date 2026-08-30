@@ -25,6 +25,8 @@ impl Plugin for ApiPlugin {
             .insert_resource(ApiClientResource::new())
             // 注册下载管理状态
             .init_resource::<DownloadManagerState>()
+            // CBZ 打包在途计数（「下载完成后退出」依赖它等打包收尾）
+            .init_resource::<CbzPackagingState>()
             // 启动时加载未完成的下载任务
             .add_systems(Startup, setup_download_manager)
             // 注册消息 (Bevy 0.17 使用 add_message)
@@ -65,6 +67,8 @@ impl Plugin for ApiPlugin {
             .add_message::<DownloadPausedEvent>()
             .add_message::<ResumeDownloadRequest>()
             .add_message::<RedownloadRequest>()
+            .add_message::<RedownloadConfirmed>()
+            .add_message::<RedownloadSkipped>()
             // CBZ 打包相关消息
             .add_message::<CbzPackageRequest>()
             .add_message::<CbzPackageCompletedEvent>()
@@ -218,8 +222,11 @@ impl Plugin for ApiPlugin {
                     handle_download_failed,
                     handle_download_paused,
                     handle_resume_download,
+                    // 前置检查（普通更新）与实际下载（强制更新 / 检查放行后）
+                    handle_redownload_precheck,
                     handle_redownload,
                     download_queue_manager,
+                    exit_after_downloads_complete,
                 ),
             )
             // 注册系统 - 搜索
@@ -1661,6 +1668,7 @@ fn handle_download_comic(
             let client = api_client.0.clone();
             let cid = comic_id.clone();
             let ctitle = comic_title.clone();
+            let event_eps_count = event.remote_eps_count;
             runtime.spawn_background_task(move |mut ctx| async move {
                 use picacg_api::endpoints::GetEpisodesRequest;
                 tracing::info!("快速下载：正在获取 {} 的章节列表...", ctitle);
@@ -1697,6 +1705,7 @@ fn handle_download_comic(
                         comic_id: cid,
                         comic_title: ctitle,
                         episodes: all_episodes,
+                        remote_eps_count: event_eps_count,
                     });
                 })
                 .await;
@@ -1715,19 +1724,25 @@ fn handle_download_comic(
             .to_string_lossy()
             .to_string();
 
-        // 从漫画详情获取分类和标签（可能为空，后续下载时会从 API 获取）
-        let (categories, tags) = if detail_state.comic_id == comic_id {
+        // 从漫画详情获取分类、标签与 epsCount 快照（详情未加载时为空）
+        let (categories, tags, detail_eps_count) = if detail_state.comic_id == comic_id {
             detail_state
                 .comic
                 .as_ref()
-                .map(|c| (c.categories.clone(), c.tags.clone()))
+                .map(|c| (c.categories.clone(), c.tags.clone(), Some(c.eps_count)))
                 .unwrap_or_default()
         } else {
-            (vec![], vec![])
+            (vec![], vec![], None)
         };
+        // 基准优先取请求自带的（列表右键下载走这条），再回落详情页；
+        // 两处都没有就留空 = 未知，角标只报已下载、不猜更新
+        let remote_eps_count = event
+            .remote_eps_count
+            .filter(|v| *v > 0)
+            .or(detail_eps_count);
 
         // 创建 FSM 任务元数据
-        let meta = DownloadTaskMeta::new(
+        let mut meta = DownloadTaskMeta::new(
             comic_id.clone(),
             comic_title.clone(),
             episodes_to_download.clone(),
@@ -1735,6 +1750,7 @@ fn handle_download_comic(
             categories,
             tags,
         );
+        meta.remote_eps_count = remote_eps_count;
 
         // 保存元数据到文件
         if let Err(e) = meta.save() {
@@ -2522,10 +2538,17 @@ fn handle_download_progress(
 fn handle_download_completed(
     mut messages: MessageReader<DownloadCompletedEvent>,
     mut download_state: ResMut<DownloadManagerState>,
+    mut downloaded_index: ResMut<DownloadedComicsIndex>,
     mut cbz_messages: MessageWriter<CbzPackageRequest>,
 ) {
     for event in messages.read() {
         download_state.downloading_ids.remove(&event.comic_id);
+
+        // 同步封面角标索引：基准取刚下完的任务里记录的 epsCount 快照
+        let remote_eps_count = download_state
+            .find_task(&event.comic_id)
+            .and_then(|fsm| fsm.meta.remote_eps_count);
+        downloaded_index.insert(event.comic_id.clone(), remote_eps_count);
 
         // 获取漫画标题（用于 CBZ 打包）
         let comic_title = download_state
@@ -2690,19 +2713,209 @@ fn handle_resume_download(
     }
 }
 
+/// 更新前置检查：只取一次漫画详情比对章节数，判断是否真的有新章节
+///
+/// 普通「更新」的快路径——章节数与本地记录一致即判定已是最新，不进下载流程
+/// （旧实现无论有无更新都要逐章拉图片列表、逐图比对文件名，几十章的漫画一次
+/// 检查就是几十个 API 请求）。真有新章节时再走与强制更新相同的完整流程。
+fn handle_redownload_precheck(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<RedownloadRequest>,
+    api_client: Res<ApiClientResource>,
+    download_state: Res<DownloadManagerState>,
+) {
+    use crate::resources::DownloadTaskMeta;
+
+    for event in messages.read() {
+        // 强制更新不做前置检查，由 handle_redownload 直接接手
+        if event.force {
+            continue;
+        }
+
+        let comic_id = event.comic_id.clone();
+        let new_base_path = event.new_base_path.clone();
+
+        if download_state.downloading_ids.contains(&comic_id) {
+            tracing::warn!("漫画 {} 已在下载中，跳过更新检查", comic_id);
+            continue;
+        }
+
+        let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&comic_id) else {
+            tracing::warn!("找不到漫画 {} 的下载记录", comic_id);
+            continue;
+        };
+
+        // 比对基准是下载当时的 epsCount 快照，不是本地章节数——服务端这个字段
+        // 与真实章节列表长期对不上（详见 DownloadedComicsIndex::badge_state），
+        // 只有同一字段自比才可靠。老记录没有快照，只能跑完整流程后补上。
+        // 比对基准是下载当时的 epsCount 快照，不是本地章节数——服务端这个字段
+        // 与真实章节列表长期对不上（详见 DownloadedComicsIndex::badge_state），
+        // 只有同一字段自比才可靠。
+        let baseline = old_meta.remote_eps_count;
+        let local_episodes = if old_meta.episode_orders.is_empty() {
+            old_meta.total_episodes
+        } else {
+            old_meta.episode_orders.len() as i32
+        };
+        let comic_title = old_meta.comic_title.clone();
+        let client = api_client.0.clone();
+
+        runtime.spawn_background_task(move |mut ctx| async move {
+            use picacg_api::endpoints::comic::{GetComicDetailRequest, GetEpisodesRequest};
+
+            // 失败收口：报一次 RedownloadSkipped 就退出
+            macro_rules! bail {
+                ($ctx:expr, $err:expr) => {{
+                    let error = $err;
+                    tracing::error!("[{}] 更新检查失败: {}", comic_title, error);
+                    $ctx.run_on_main_thread(move |ctx| {
+                        ctx.world.write_message(RedownloadSkipped {
+                            comic_id,
+                            comic_title,
+                            episodes: local_episodes,
+                            error: Some(error),
+                        });
+                    })
+                    .await;
+                    return;
+                }};
+            }
+
+            // 第一跳：1 个请求拿当前 epsCount
+            let remote_episodes = match client
+                .request(GetComicDetailRequest {
+                    comic_id: comic_id.clone(),
+                })
+                .await
+            {
+                Ok(resp) => resp.comic.eps_count,
+                Err(e) => bail!(ctx, e.to_string()),
+            };
+
+            // 快路径：有基准且没变大 → 已是最新，一个请求收工
+            if matches!((baseline, remote_episodes), (Some(base), now) if now > 0 && now <= base) {
+                tracing::info!(
+                    "[{}] 已是最新（epsCount 基准 {:?} → 现 {}），跳过更新",
+                    comic_title,
+                    baseline,
+                    remote_episodes
+                );
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world.write_message(RedownloadSkipped {
+                        comic_id,
+                        comic_title,
+                        episodes: local_episodes,
+                        error: None,
+                    });
+                })
+                .await;
+                return;
+            }
+
+            // 慢路径：epsCount 变大了，或压根没基准（老记录）。
+            // 此时**不能**直接进完整下载流程——epsCount 会无缘无故漂移，
+            // 光凭它变大就逐章拉图片列表，代价是几十上百个请求却常常一无所获。
+            // 改为拉一次真实章节列表（分页，每页 ~40 条）核对：
+            //   真实条数 <= 本地已下载章节数 → 确实没新章节，顺手把基准补上
+            //   否则                         → 真有新章节，交给完整流程
+            let mut real_episodes = 0;
+            let mut page = 1;
+            loop {
+                match client
+                    .request(GetEpisodesRequest {
+                        comic_id: comic_id.clone(),
+                        page,
+                    })
+                    .await
+                {
+                    Ok(resp) => {
+                        real_episodes += resp.eps.docs.len() as i32;
+                        if page >= resp.eps.pages {
+                            break;
+                        }
+                        page += 1;
+                    }
+                    Err(e) => bail!(ctx, e.to_string()),
+                }
+            }
+
+            if real_episodes <= local_episodes {
+                tracing::info!(
+                    "[{}] 已是最新（真实 {} 章 / 本地 {} 章；epsCount {:?} → {}，仅为字段漂移），\
+                     刷新基准后跳过",
+                    comic_title,
+                    real_episodes,
+                    local_episodes,
+                    baseline,
+                    remote_episodes
+                );
+                // 基准落库 + 同步内存索引，下次就能走一个请求的快路径
+                if let Ok(mut meta) = DownloadTaskMeta::load_by_comic_id(&comic_id) {
+                    meta.remote_eps_count = Some(remote_episodes);
+                    if let Err(e) = meta.save() {
+                        tracing::warn!("[{}] 写回更新基准失败: {}", comic_title, e);
+                    }
+                }
+                ctx.run_on_main_thread(move |ctx| {
+                    ctx.world
+                        .resource_mut::<DownloadedComicsIndex>()
+                        .insert(comic_id.clone(), Some(remote_episodes));
+                    ctx.world.write_message(RedownloadSkipped {
+                        comic_id,
+                        comic_title,
+                        episodes: local_episodes,
+                        error: None,
+                    });
+                })
+                .await;
+                return;
+            }
+
+            tracing::info!(
+                "[{}] 发现新章节（真实 {} 章 / 本地 {} 章），开始下载",
+                comic_title,
+                real_episodes,
+                local_episodes
+            );
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world.write_message(RedownloadConfirmed {
+                    comic_id,
+                    new_base_path,
+                    remote_episodes,
+                    local_episodes,
+                });
+            })
+            .await;
+        });
+    }
+}
+
 /// 处理重新下载请求（检查更新/补全缺失）
+///
+/// 入口有二：强制更新的 `RedownloadRequest`（`force = true`），以及普通更新
+/// 通过前置检查后的 `RedownloadConfirmed`。两者进入的下载流程完全一致。
 fn handle_redownload(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<RedownloadRequest>,
+    mut confirmed_messages: MessageReader<RedownloadConfirmed>,
     api_client: Res<ApiClientResource>,
     mut download_state: ResMut<DownloadManagerState>,
 ) {
     use crate::resources::{DownloadState, DownloadTaskMeta};
 
-    for event in messages.read() {
-        let comic_id = event.comic_id.clone();
-        let new_base_path = event.new_base_path.clone();
+    // 强制更新直接入队；普通更新只接受前置检查放行的那部分
+    let pending: Vec<(String, Option<String>)> = messages
+        .read()
+        .filter(|event| event.force)
+        .map(|event| (event.comic_id.clone(), event.new_base_path.clone()))
+        .chain(
+            confirmed_messages
+                .read()
+                .map(|event| (event.comic_id.clone(), event.new_base_path.clone())),
+        )
+        .collect();
 
+    for (comic_id, new_base_path) in pending {
         // 检查是否已在下载
         if download_state.downloading_ids.contains(&comic_id) {
             tracing::warn!("漫画 {} 已在下载中，跳过重新下载", comic_id);
@@ -2778,6 +2991,8 @@ fn handle_redownload(
                 tags: old_tags,
                 custom_download_path: custom_download_path.clone(),
                 custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
+                // 保留旧基准，等这轮更新真正跑完再刷新
+                remote_eps_count: old_meta.remote_eps_count,
             };
             // 保存到数据库（更新状态从 Completed 变为 Queued）
             if let Err(e) = queued_meta.save() {
@@ -2806,6 +3021,7 @@ fn handle_redownload(
             tags: old_tags,
             custom_download_path: custom_download_path.clone(),
             custom_auto_pack_cbz: old_meta.custom_auto_pack_cbz,
+            remote_eps_count: old_meta.remote_eps_count,
         };
         download_state.add_task(temp_meta);
         download_state.downloading_ids.insert(comic_id.clone());
@@ -2886,6 +3102,8 @@ fn handle_redownload(
                 tags: comic.tags.clone(),
                 custom_download_path: custom_download_path_clone,
                 custom_auto_pack_cbz,
+                // 刚取到的详情就是新基准——这轮更新之后再变大才算又有新章节
+                remote_eps_count: Some(comic.eps_count),
             };
 
             if let Err(e) = meta.save() {
@@ -3261,12 +3479,17 @@ fn handle_knight_rankings_response(
 // ==================== 启动时自动恢复下载 ====================
 
 /// 加载未完成的下载任务（Startup 阶段）
-fn setup_download_manager(mut download_state: ResMut<DownloadManagerState>) {
+fn setup_download_manager(
+    mut download_state: ResMut<DownloadManagerState>,
+    mut downloaded_index: ResMut<DownloadedComicsIndex>,
+) {
     download_state.load_incomplete_tasks();
     tracing::info!(
         "加载未完成的下载任务: {} 个",
         download_state.fsm_tasks.len()
     );
+    // 封面角标的数据源，随下载任务表一起初始化
+    downloaded_index.reload();
 }
 
 /// 下载队列管理系统
@@ -3547,6 +3770,7 @@ fn create_cbz_package(source_path: &str, comic_title: &str) -> Result<String, St
 fn handle_cbz_package_request(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<CbzPackageRequest>,
+    mut packaging: ResMut<CbzPackagingState>,
 ) {
     for event in messages.read() {
         let comic_id = event.comic_id.clone();
@@ -3554,6 +3778,7 @@ fn handle_cbz_package_request(
         let source_path = event.source_path.clone();
 
         tracing::info!("收到 CBZ 打包请求: {}", comic_title);
+        packaging.in_flight += 1;
 
         // 使用 spawn_blocking 在后台线程执行 IO 密集型操作
         runtime.spawn_background_task(move |mut ctx| async move {
@@ -3598,8 +3823,12 @@ fn handle_cbz_package_request(
 }
 
 /// 处理 CBZ 打包完成
-fn handle_cbz_package_completed(mut messages: MessageReader<CbzPackageCompletedEvent>) {
+fn handle_cbz_package_completed(
+    mut messages: MessageReader<CbzPackageCompletedEvent>,
+    mut packaging: ResMut<CbzPackagingState>,
+) {
     for event in messages.read() {
+        packaging.finish_one();
         tracing::info!("CBZ 打包完成: {} -> {}", event.comic_id, event.cbz_path);
 
         // 检查是否需要删除原图文件夹
@@ -3627,10 +3856,78 @@ fn handle_cbz_package_completed(mut messages: MessageReader<CbzPackageCompletedE
 }
 
 /// 处理 CBZ 打包失败
-fn handle_cbz_package_failed(mut messages: MessageReader<CbzPackageFailedEvent>) {
+fn handle_cbz_package_failed(
+    mut messages: MessageReader<CbzPackageFailedEvent>,
+    mut packaging: ResMut<CbzPackagingState>,
+) {
     for event in messages.read() {
+        packaging.finish_one();
         tracing::error!("CBZ 打包失败: {} - {}", event.comic_id, event.error);
     }
+}
+
+// ==================== 下载完成后自动退出 ====================
+
+/// CBZ 打包在途计数
+///
+/// 打包在后台线程写文件，进程若在此时退出会留下半截 .cbz。
+/// 「下载完成后退出」据此等打包收尾。
+#[derive(Resource, Default)]
+pub struct CbzPackagingState {
+    /// 已发出但尚未收到完成/失败回执的打包任务数
+    pub in_flight: usize,
+}
+
+impl CbzPackagingState {
+    /// 一个打包任务收尾（成功或失败都算）
+    fn finish_one(&mut self) {
+        self.in_flight = self.in_flight.saturating_sub(1);
+    }
+}
+
+/// 「下载全部完成后退出」
+///
+/// 判定"还有活儿"= 有任务处于下载中/排队中，或 CBZ 还在打包。
+/// **已暂停/已失败的任务不算**——它们不会自己往前走，等下去等于永不退出。
+///
+/// `was_busy` 保证只在"本次运行确实跑过下载"之后才触发：刚启动时队列本来
+/// 就空，不能直接退出。退出前保存窗口几何，与用户主动关闭走同一套收尾。
+fn exit_after_downloads_complete(
+    download_state: Res<DownloadManagerState>,
+    packaging: Res<CbzPackagingState>,
+    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    mut was_busy: Local<bool>,
+    mut exit_messages: MessageWriter<AppExit>,
+) {
+    let busy = packaging.in_flight > 0
+        || !download_state.downloading_ids.is_empty()
+        || download_state.fsm_tasks.iter().any(|fsm| {
+            matches!(
+                fsm.meta.state,
+                DownloadState::Downloading { .. } | DownloadState::Queued
+            )
+        });
+
+    if busy {
+        *was_busy = true;
+        return;
+    }
+    if !*was_busy {
+        return;
+    }
+
+    // 设置读到最后一刻，避免下载途中改设置后行为与预期不符
+    if !AppSettings::global().read().exit_after_downloads {
+        *was_busy = false;
+        return;
+    }
+
+    *was_busy = false;
+    tracing::info!("下载队列已清空，按设置自动退出");
+    if let Ok(window) = window_query.single() {
+        crate::systems::save_window_geometry_to_config(window);
+    }
+    exit_messages.write(AppExit::Success);
 }
 
 /// 自动收集标签到缓存（监听所有漫画状态变化）

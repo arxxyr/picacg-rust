@@ -227,6 +227,10 @@ impl ApiRequest for FavoriteComicRequest {
 pub struct SearchComicsRequest {
     pub keyword: String,
     pub page: i32,
+    /// 排序方式：ua=默认, dd=新到旧, da=旧到新, ld=最多爱心, vd=最多浏览
+    ///
+    /// 高级搜索走 POST，服务端只认**请求体**里的 `sort` 字段；查询串上的 `s`
+    /// 会被忽略（历史实现只发 `s`，导致排序完全不生效）。
     #[serde(skip_serializing)]
     pub sort: String,
     /// 分类过滤（空列表表示不过滤）
@@ -260,6 +264,7 @@ impl ApiRequest for SearchComicsRequest {
     fn body(&self) -> Option<serde_json::Value> {
         let mut body = serde_json::json!({
             "keyword": self.keyword,
+            "sort": self.sort,
         });
         if !self.categories.is_empty() {
             body["categories"] = serde_json::json!(self.categories);

@@ -650,10 +650,23 @@ pub struct ReaderState {
     pub scale: f32,
     /// 阅读模式
     pub read_mode: ReadMode,
-    /// 条漫滚动锚点：(锚定页, 页内偏移逻辑像素)。
-    /// 图片真实高度陆续就位时按它补偿滚动量，保持视觉位置不跳
-    /// （否则占位高度→真实高度的差会让页码级联漂移回第 1 页）。
-    pub webtoon_anchor: Option<(usize, f32)>,
+    /// 条漫滚动锚点：(锚定页, 页内偏移逻辑像素)
+    ///
+    /// **滚动位置的唯一真相**：每帧由锚点算出 `ScrollPosition` 写下去，
+    /// 而不是反过来读 `ScrollPosition` 再去纠正。图片真实高度陆续就位时，
+    /// 锚定页上方的高度变化会被这次换算自然吸收，视觉位置纹丝不动——
+    /// 且**与用户是否正在滚动无关**。
+    ///
+    /// 旧实现相反：`ScrollPosition` 是真相、锚点当补丁，且补偿只在
+    /// 「非用户滚动帧」执行——用户一路拖到底时每帧都是用户滚动帧，
+    /// 补偿全被跳过，于是新图加载就错位。
+    pub webtoon_anchor: (usize, f32),
+    /// 条漫每页高度（逻辑像素），未测量的页用占位高度
+    ///
+    /// 与 `pictures` 平行。测量值只增不改（由布局实测覆盖占位值），
+    /// 不做「按已测均值重估未测页」——那会让锚点上方的估算高度变动，
+    /// 反而制造跳动。
+    pub webtoon_page_heights: Vec<f32>,
     /// 是否正在加载
     pub is_loading: bool,
     /// 错误信息
@@ -669,7 +682,8 @@ pub struct ReaderState {
 impl Default for ReaderState {
     fn default() -> Self {
         Self {
-            webtoon_anchor: None,
+            webtoon_anchor: (0, 0.0),
+            webtoon_page_heights: Vec::new(),
             comic_id: String::new(),
             comic_title: String::new(),
             episodes: Vec::new(),
@@ -900,6 +914,12 @@ pub struct DownloadTaskMeta {
     /// 独立 CBZ 打包开关（None 时使用全局设置）
     #[serde(default)]
     pub custom_auto_pack_cbz: Option<bool>,
+    /// 下载/更新当时服务端 `epsCount` 的快照（None = 老记录，未知）
+    ///
+    /// 更新检测的基准，详见
+    /// `picacg_db::models::DbDownloadTask::remote_eps_count`
+    #[serde(default)]
+    pub remote_eps_count: Option<i32>,
 }
 
 impl DownloadTaskMeta {
@@ -930,6 +950,7 @@ impl DownloadTaskMeta {
             tags,
             custom_download_path: None,
             custom_auto_pack_cbz: None,
+            remote_eps_count: None,
         }
     }
 
@@ -999,6 +1020,7 @@ impl DownloadTaskMeta {
         db_task.set_tags(&self.tags);
         db_task.custom_download_path = self.custom_download_path.clone();
         db_task.set_custom_auto_pack_cbz(self.custom_auto_pack_cbz);
+        db_task.remote_eps_count = self.remote_eps_count.map(i64::from);
 
         db_task
     }
@@ -1035,6 +1057,7 @@ impl DownloadTaskMeta {
             tags: db_task.get_tags(),
             custom_download_path: db_task.custom_download_path.clone(),
             custom_auto_pack_cbz: db_task.get_custom_auto_pack_cbz(),
+            remote_eps_count: db_task.remote_eps_count.map(|v| v as i32),
         }
     }
 
@@ -1867,4 +1890,125 @@ pub struct NasState {
     pub success: Option<String>,
     /// 需要重建 UI
     pub needs_rebuild: bool,
+}
+
+// ==================== 漫画列表批量选择 ====================
+
+/// 漫画列表的批量选择状态
+///
+/// 只在「漫画列表」页使用。开启选择模式后卡片点击变成勾选/取消，
+/// 而不是跳转详情页；选完一次性发下载请求。
+#[derive(Resource, Default)]
+pub struct ComicsSelectionState {
+    /// 是否处于选择模式
+    pub active: bool,
+    /// 已选中的漫画 ID
+    pub selected: std::collections::HashSet<String>,
+}
+
+impl ComicsSelectionState {
+    /// 切换一本漫画的选中态，返回切换后是否选中
+    pub fn toggle(&mut self, comic_id: &str) -> bool {
+        if self.selected.remove(comic_id) {
+            false
+        } else {
+            self.selected.insert(comic_id.to_string());
+            true
+        }
+    }
+
+    /// 退出选择模式并清空选中项
+    pub fn exit(&mut self) {
+        self.active = false;
+        self.selected.clear();
+    }
+}
+
+// ==================== 已下载漫画索引 ====================
+
+/// 封面下载角标状态
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DownloadBadgeState {
+    /// 已下载，且服务端章节数与下载当时相同
+    Downloaded,
+    /// 已下载，但服务端 `epsCount` 比下载当时变大（有新章节）
+    UpdateAvailable,
+}
+
+/// 已下载漫画索引（漫画卡片封面角标的数据源）
+///
+/// 卡片建卡是高频路径，不能每张卡都查一次数据库——这里把「已完成下载」的
+/// 漫画 ID 与 `epsCount` 快照缓存成内存表，建卡与刷新都只做一次哈希查找。
+/// 数据来源是下载任务表，故只在启动、下载完成、删除记录三处刷新。
+#[derive(Resource, Default)]
+pub struct DownloadedComicsIndex {
+    /// comic_id → 下载当时的 `epsCount` 快照（None = 老记录，基准未知）
+    snapshots: std::collections::HashMap<String, Option<i32>>,
+}
+
+impl DownloadedComicsIndex {
+    /// 判断某漫画的角标状态
+    ///
+    /// `remote_episodes` 是**当前**列表接口给的 `Comic::eps_count`，与下载
+    /// 当时的快照比：变大 = 有新章节。
+    ///
+    /// ⚠️ **不能拿 `eps_count` 直接跟本地章节数比**——实测该字段与
+    /// `/comics/{id}/eps` 的真实条数长期对不上，且两个方向都会偏
+    /// （48↔49、46↔48、12↔15、55↔53）。它是个漂移的冗余计数，直接比会让
+    /// 早已下完的漫画常年亮「有更新」。同一字段自比，系统偏差才相消。
+    ///
+    /// 快照缺失（老记录）或当前值为 0（接口没给）→ 只报「已下载」，不猜更新。
+    #[must_use]
+    pub fn badge_state(&self, comic_id: &str, remote_episodes: i32) -> Option<DownloadBadgeState> {
+        let snapshot = *self.snapshots.get(comic_id)?;
+        match snapshot {
+            Some(base) if remote_episodes > 0 && remote_episodes > base => {
+                Some(DownloadBadgeState::UpdateAvailable)
+            }
+            _ => Some(DownloadBadgeState::Downloaded),
+        }
+    }
+
+    /// 是否已下载
+    #[must_use]
+    pub fn contains(&self, comic_id: &str) -> bool {
+        self.snapshots.contains_key(comic_id)
+    }
+
+    /// 记录/更新一本漫画的 `epsCount` 快照
+    pub fn insert(&mut self, comic_id: impl Into<String>, remote_eps_count: Option<i32>) {
+        self.snapshots.insert(comic_id.into(), remote_eps_count);
+    }
+
+    /// 移除一本漫画（删除下载记录时调用）
+    pub fn remove(&mut self, comic_id: &str) {
+        self.snapshots.remove(comic_id);
+    }
+
+    /// 从数据库全量重建索引
+    pub fn reload(&mut self) {
+        use picacg_db::{get_completed_download_tasks_async, get_pool, run_db_operation};
+
+        let pool = get_pool();
+        let tasks =
+            run_db_operation(async move { get_completed_download_tasks_async(&pool).await })
+                .unwrap_or_default();
+
+        self.snapshots = tasks
+            .iter()
+            .map(|task| {
+                (
+                    task.comic_id.clone(),
+                    task.remote_eps_count.map(|v| v as i32),
+                )
+            })
+            .collect();
+
+        let with_base = self.snapshots.values().filter(|v| v.is_some()).count();
+        tracing::info!(
+            "已下载漫画索引重建完成: {} 本（{} 本有更新基准）",
+            self.snapshots.len(),
+            with_base
+        );
+    }
 }

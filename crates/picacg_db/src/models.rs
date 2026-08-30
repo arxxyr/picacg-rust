@@ -226,6 +226,15 @@ pub struct DbDownloadTask {
     /// 独立 CBZ 打包开关（None 时使用全局设置）
     #[sqlx(default)]
     pub custom_auto_pack_cbz: Option<i64>, // 0=false, 1=true, NULL=使用全局
+    /// 下载/更新当时服务端 `epsCount` 的快照（None = 老记录，未知）
+    ///
+    /// **更新检测的基准**。不能拿 `epsCount` 直接跟本地章节数比——实测该字段
+    /// 与 `/comics/{id}/eps` 的真实条数长期对不上，且两个方向都会偏
+    /// （48↔49、46↔48、12↔15、55↔53）。它是个漂移的冗余计数，但对同一本漫画
+    /// **随时间自增**，所以「今天的 epsCount > 下载当时的
+    /// epsCount」才是可靠信号： 同一字段自比，系统偏差相消。
+    #[sqlx(default)]
+    pub remote_eps_count: Option<i64>,
 }
 
 /// 下载状态附加数据（序列化为 JSON 存储）
@@ -263,6 +272,7 @@ impl DbDownloadTask {
             completed_episodes: None,
             custom_download_path: None,
             custom_auto_pack_cbz: None,
+            remote_eps_count: None,
         }
     }
 

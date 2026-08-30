@@ -18,6 +18,7 @@ use crate::{
     },
     utils::{
         icons::*,
+        profiling,
         text_input::{TextInput, TextInputDisplay},
     },
 };
@@ -161,10 +162,17 @@ impl Default for LogLevelInputState {
 #[derive(Component, Default, Clone)]
 pub struct AutoResumeDownloadsCheckbox;
 
-/// 自动恢复下载设置状态
+/// 下载完成后退出勾选框
+#[derive(Component, Default, Clone)]
+pub struct ExitAfterDownloadsCheckbox;
+
+/// 下载行为设置状态（两个开关同属"下载队列生命周期"，合在一个资源里）
 #[derive(Resource)]
-pub struct AutoResumeDownloadsState {
-    pub enabled: bool,
+pub struct DownloadBehaviorState {
+    /// 启动后自动恢复未完成的下载
+    pub auto_resume: bool,
+    /// 下载队列全部完成后自动退出程序
+    pub exit_after_all_done: bool,
 }
 
 // ==================== 最大并发下载数设置组件 ====================
@@ -483,6 +491,7 @@ pub fn setup_settings_ui(
     content_area_query: Query<Entity, With<ContentArea>>,
     categories_state: Res<crate::resources::CategoriesState>,
     cached_tags: Res<crate::resources::CachedTagsState>,
+    overlay_state: Res<crate::systems::perf_overlay::PerfOverlayState>,
     mut existing_query: Query<&mut Node, With<SettingsRoot>>,
 ) {
     // 如果 SettingsRoot 已存在（被 Display::None 隐藏了），直接显示
@@ -521,9 +530,10 @@ pub fn setup_settings_ui(
         level: settings.log_level,
     });
 
-    // 初始化自动恢复下载状态
-    commands.insert_resource(AutoResumeDownloadsState {
-        enabled: settings.auto_resume_downloads,
+    // 初始化下载行为状态
+    commands.insert_resource(DownloadBehaviorState {
+        auto_resume: settings.auto_resume_downloads,
+        exit_after_all_done: settings.exit_after_downloads,
     });
 
     // 初始化最大并发下载数状态
@@ -592,7 +602,12 @@ pub fn setup_settings_ui(
 
     // 在内容区域下创建设置页面
     let settings_root = commands
-        .spawn_scene(settings_page(&settings, &category_titles, &tag_titles))
+        .spawn_scene(settings_page(
+            &settings,
+            &category_titles,
+            &tag_titles,
+            overlay_state.visible,
+        ))
         .id();
     commands.entity(content_area).add_child(settings_root);
 
@@ -604,6 +619,7 @@ fn settings_page(
     settings: &AppSettings,
     category_titles: &[String],
     tag_titles: &[String],
+    overlay_visible: bool,
 ) -> impl Scene + use<> {
     // 各分组内容（SceneList 需在 bsn! 宏外构建后传入 settings_section）
     let theme_content = bsn_list![theme_setting(settings.theme)];
@@ -616,6 +632,7 @@ fn settings_page(
         download_path_setting(&settings.download_path),
         max_concurrent_downloads_setting(settings.max_concurrent_downloads),
         auto_resume_downloads_setting(settings.auto_resume_downloads),
+        exit_after_downloads_setting(settings.exit_after_downloads),
         auto_pack_cbz_setting(settings.auto_pack_cbz),
         delete_images_after_cbz_setting(settings.delete_images_after_cbz),
     ];
@@ -628,6 +645,10 @@ fn settings_page(
     ];
     let cache_content = bsn_list![cache_setting()];
     let network_diag_content = bsn_list![network_diag_section()];
+    let profiling_content = bsn_list![profiling_section(
+        overlay_visible,
+        settings.enable_profiling
+    )];
     let about_content = bsn_list![about_section()];
 
     bsn! {
@@ -689,6 +710,8 @@ fn settings_page(
                             settings_section("缓存设置", cache_content),
                             // 网络诊断分组
                             settings_section("网络诊断", network_diag_content),
+                            // 性能追踪分组
+                            settings_section("性能追踪", profiling_content),
                             // 关于分组
                             settings_section("关于", about_content),
                         ]
@@ -837,7 +860,11 @@ fn set_busy(style: &mut ButtonStyle, busy: bool) {
 }
 
 /// 写入勾选框内的对勾字符（勾选框的唯一子节点是 Text）
-fn set_check_icon(children: &Children, text_query: &mut Query<&mut Text>, checked: bool) {
+fn set_check_icon<F: bevy::ecs::query::QueryFilter>(
+    children: &Children,
+    text_query: &mut Query<&mut Text, F>,
+    checked: bool,
+) {
     for child in children.iter() {
         if let Ok(mut text) = text_query.get_mut(child) {
             **text = if checked {
@@ -1193,6 +1220,16 @@ fn auto_resume_downloads_setting(is_enabled: bool) -> impl Scene {
         AutoResumeDownloadsCheckbox,
         "启动后自动开始下载",
         "程序启动时自动恢复未完成的下载任务",
+        is_enabled,
+    )
+}
+
+/// 创建下载完成后退出设置
+fn exit_after_downloads_setting(is_enabled: bool) -> impl Scene {
+    toggle_row(
+        ExitAfterDownloadsCheckbox,
+        "下载全部完成后退出",
+        "队列清空（含 CBZ 打包）后自动退出程序，适合挂机下载",
         is_enabled,
     )
 }
@@ -2687,7 +2724,7 @@ fn save_all_settings(
     input_state: &DownloadPathInputState,
     proxy_state: &ProxySettingsInputState,
     log_state: &LogLevelInputState,
-    auto_resume_state: &AutoResumeDownloadsState,
+    behavior_state: &DownloadBehaviorState,
     max_concurrent_state: &MaxConcurrentDownloadsState,
     cbz_state: &CbzPackageSettingsState,
     filter_state: &FilterSettingsState,
@@ -2705,7 +2742,8 @@ fn save_all_settings(
     settings.proxy.host = proxy_state.host.clone();
     settings.proxy.port = proxy_state.port.parse().unwrap_or(7890);
     settings.log_level = log_state.level;
-    settings.auto_resume_downloads = auto_resume_state.enabled;
+    settings.auto_resume_downloads = behavior_state.auto_resume;
+    settings.exit_after_downloads = behavior_state.exit_after_all_done;
     settings.max_concurrent_downloads = max_concurrent_state.value;
     settings.auto_pack_cbz = cbz_state.auto_pack_cbz;
     settings.delete_images_after_cbz = cbz_state.delete_images_after_cbz;
@@ -2736,7 +2774,7 @@ pub fn auto_save_settings(
     input_state: Res<DownloadPathInputState>,
     proxy_state: Res<ProxySettingsInputState>,
     log_state: Res<LogLevelInputState>,
-    auto_resume_state: Res<AutoResumeDownloadsState>,
+    behavior_state: Res<DownloadBehaviorState>,
     max_concurrent_state: Res<MaxConcurrentDownloadsState>,
     cbz_state: Res<CbzPackageSettingsState>,
     filter_state: Res<FilterSettingsState>,
@@ -2755,7 +2793,7 @@ pub fn auto_save_settings(
     let any_changed = input_state.is_changed()
         || proxy_state.is_changed()
         || log_state.is_changed()
-        || auto_resume_state.is_changed()
+        || behavior_state.is_changed()
         || max_concurrent_state.is_changed()
         || cbz_state.is_changed()
         || filter_state.is_changed()
@@ -2780,7 +2818,7 @@ pub fn auto_save_settings(
         &input_state,
         &proxy_state,
         &log_state,
-        &auto_resume_state,
+        &behavior_state,
         &max_concurrent_state,
         &cbz_state,
         &filter_state,
@@ -3083,16 +3121,42 @@ pub fn auto_resume_downloads_checkbox_interaction(
         (Changed<Interaction>, With<AutoResumeDownloadsCheckbox>),
     >,
     mut text_query: Query<&mut Text>,
-    mut auto_resume_state: ResMut<AutoResumeDownloadsState>,
+    mut behavior_state: ResMut<DownloadBehaviorState>,
 ) {
     for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
         if *interaction != Interaction::Pressed {
             continue;
         }
-        auto_resume_state.enabled = !auto_resume_state.enabled;
-        let is_enabled = auto_resume_state.enabled;
+        behavior_state.auto_resume = !behavior_state.auto_resume;
+        let is_enabled = behavior_state.auto_resume;
 
         tracing::info!("自动恢复下载: {}", if is_enabled { "启用" } else { "禁用" });
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
+    }
+}
+
+/// 下载完成后退出勾选框交互
+pub fn exit_after_downloads_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
+        (Changed<Interaction>, With<ExitAfterDownloadsCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut behavior_state: ResMut<DownloadBehaviorState>,
+) {
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        behavior_state.exit_after_all_done = !behavior_state.exit_after_all_done;
+        let is_enabled = behavior_state.exit_after_all_done;
+
+        tracing::info!(
+            "下载全部完成后退出: {}",
+            if is_enabled { "启用" } else { "禁用" }
+        );
 
         apply_selected(&mut style, &mut border_color, is_enabled);
         set_check_icon(children, &mut text_query, is_enabled);
@@ -3960,5 +4024,368 @@ pub fn prefer_ipv6_checkbox_interaction(
 
         apply_selected(&mut style, &mut border_color, is_enabled);
         set_check_icon(children, &mut text_query, is_enabled);
+    }
+}
+
+// ==================== 性能追踪设置 ====================
+
+/// 「性能叠加层」开关（立即生效）
+#[derive(Component, Default, Clone)]
+pub struct PerfOverlayCheckbox;
+
+/// 「系统耗时追踪」开关（重启后生效）
+#[derive(Component, Default, Clone)]
+pub struct ProfilingCheckbox;
+
+/// 「刷新耗时榜」按钮
+#[derive(Component, Default, Clone)]
+pub struct RefreshTimingsButton;
+
+/// 耗时榜列表容器（局部刷新的靶子）
+#[derive(Component, Default, Clone)]
+pub struct TimingsListContainer;
+
+/// 耗时榜状态提示文本
+#[derive(Component, Default, Clone)]
+pub struct TimingsHintText;
+
+/// 「打开日志目录」按钮
+#[derive(Component, Default, Clone)]
+pub struct OpenProfilingLogButton;
+
+/// 榜单在设置页里显示几行
+const TIMINGS_ROWS: usize = 12;
+
+/// 性能追踪分组
+///
+/// 榜单渲染在页面里而不是只打日志——打包成 .app 之后没有终端可看。
+fn profiling_section(overlay_visible: bool, profiling_enabled: bool) -> impl Scene + use<> {
+    let refresh_label = format!("{ICON_REFRESH} 刷新耗时榜");
+    let open_log_label = format!("{ICON_FOLDER_OPEN} 日志目录");
+    let hint = profiling_hint_text(profiling_enabled);
+    let log_path_label = format!("榜单落盘: {}", profiling::report_log_path().display());
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        Children [
+            (
+                Text("叠加层显示 FPS / 帧时间 / 实体数；耗时榜按累计耗时列出最慢的系统")
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+            ),
+            toggle_row(
+                PerfOverlayCheckbox,
+                "性能叠加层",
+                "右上角实时显示 FPS / 帧时间 / 实体数（快捷键 F3）",
+                overlay_visible,
+            ),
+            toggle_row(
+                ProfilingCheckbox,
+                "系统耗时追踪",
+                "统计每个 ECS 系统的耗时，用于定位卡顿来源；重启后生效",
+                profiling_enabled,
+            ),
+            (
+                // 刷新按钮行
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(12.0),
+                    margin: UiRect::top(Val::Px(16.0)),
+                }
+                Children [
+                    (
+                        RefreshTimingsButton
+                        Button
+                        template_value(ButtonStyle::primary())
+                        Node {
+                            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::PRIMARY)
+                        template_value(BorderColor::all(AppColors::PRIMARY))
+                        Children [
+                            (
+                                Text({refresh_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(Color::WHITE)
+                            )
+                        ]
+                    ),
+                    (
+                        OpenProfilingLogButton
+                        Button
+                        template_value(ButtonStyle::card())
+                        Node {
+                            padding: UiRect::new(Val::Px(16.0), Val::Px(16.0), Val::Px(8.0), Val::Px(8.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(AppColors::SURFACE)
+                        template_value(BorderColor::all(AppColors::BORDER))
+                        Children [
+                            (
+                                Text({open_log_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        TimingsHintText
+                        Text({hint})
+                        TextFont { font_size: FontSize::Px(12.0) }
+                        TextColor(AppColors::TEXT_SECONDARY)
+                    ),
+                ]
+            ),
+            (
+                // 落盘路径（方便直接把文件发出来）
+                Text({log_path_label})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(AppColors::TEXT_MUTED)
+                Node { margin: UiRect::top(Val::Px(6.0)) }
+            ),
+            (
+                // 榜单列表（由 refresh_timings_list 填充）
+                TimingsListContainer
+                Node {
+                    width: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(2.0),
+                    margin: UiRect::top(Val::Px(10.0)),
+                }
+            ),
+        ]
+    }
+}
+
+/// 状态提示文案
+fn profiling_hint_text(profiling_enabled: bool) -> String {
+    if !profiling::is_compiled_in() {
+        "本次构建未编入耗时 span（--no-default-features）".to_string()
+    } else if profiling::is_enabled() {
+        "统计中，点击查看上次刷新之后的累计".to_string()
+    } else if profiling_enabled {
+        "已打开，重启后开始统计".to_string()
+    } else {
+        "未启用".to_string()
+    }
+}
+
+/// 榜单表头
+fn timings_header_row() -> impl Scene {
+    timings_row_scene("总耗时ms", "峰值ms", "次数", "系统", AppColors::TEXT)
+}
+
+/// 榜单一行
+fn timings_row_scene(
+    total: &str,
+    peak: &str,
+    calls: &str,
+    name: &str,
+    color: Color,
+) -> impl Scene + use<> {
+    let (total, peak, calls, name) = (
+        total.to_string(),
+        peak.to_string(),
+        calls.to_string(),
+        name.to_string(),
+    );
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Row,
+            column_gap: Val::Px(10.0),
+            overflow: Overflow::clip(),
+        }
+        Children [
+            (
+                Text({total})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(color)
+                Node { width: Val::Px(70.0) }
+            ),
+            (
+                Text({peak})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(color)
+                Node { width: Val::Px(64.0) }
+            ),
+            (
+                Text({calls})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(color)
+                Node { width: Val::Px(48.0) }
+            ),
+            (
+                Text({name})
+                TextFont { font_size: FontSize::Px(11.0) }
+                TextColor(color)
+                Node { flex_grow: 1.0, overflow: Overflow::clip() }
+            ),
+        ]
+    }
+}
+
+/// 「性能叠加层」开关交互（立即生效，与 F3 同源）
+pub fn perf_overlay_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
+        (Changed<Interaction>, With<PerfOverlayCheckbox>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut overlay_state: ResMut<crate::systems::perf_overlay::PerfOverlayState>,
+) {
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        overlay_state.visible = !overlay_state.visible;
+        let is_enabled = overlay_state.visible;
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
+    }
+}
+
+/// 「系统耗时追踪」开关交互（写配置，重启后生效）
+pub fn profiling_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
+        (Changed<Interaction>, With<ProfilingCheckbox>),
+    >,
+    mut text_query: Query<&mut Text, Without<TimingsHintText>>,
+    mut hint_query: Query<&mut Text, With<TimingsHintText>>,
+    mut behavior_state: ResMut<DownloadBehaviorState>,
+) {
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        // 直接改全局配置：这一项不参与 auto_save_settings 的状态资源体系
+        //（它不影响任何运行时行为，只在下次启动被读一次）
+        let is_enabled = {
+            let settings = AppSettings::global();
+            let mut settings = settings.write();
+            settings.enable_profiling = !settings.enable_profiling;
+            settings.enable_profiling
+        };
+        if let Err(e) = AppSettings::global().read().save() {
+            tracing::error!("保存性能追踪开关失败: {}", e);
+        }
+        // 借下载行为资源的变更去触发底部「已保存」状态栏，免得用户以为没生效
+        behavior_state.set_changed();
+
+        tracing::info!(
+            "系统耗时追踪: {}（重启后生效）",
+            if is_enabled { "启用" } else { "禁用" }
+        );
+
+        apply_selected(&mut style, &mut border_color, is_enabled);
+        set_check_icon(children, &mut text_query, is_enabled);
+
+        let hint = profiling_hint_text(is_enabled);
+        for mut text in hint_query.iter_mut() {
+            **text = hint.clone();
+        }
+    }
+}
+
+/// 「刷新耗时榜」按钮交互：取一次榜单并重建列表
+pub fn refresh_timings_button_interaction(
+    mut commands: Commands,
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<RefreshTimingsButton>)>,
+    list_query: Query<(Entity, Option<&Children>), With<TimingsListContainer>>,
+    mut hint_query: Query<&mut Text, With<TimingsHintText>>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+
+        let Ok((container, children)) = list_query.single() else {
+            continue;
+        };
+
+        // 清空旧行
+        if let Some(children) = children {
+            for child in children.iter() {
+                if let Ok(mut entity_commands) = commands.get_entity(child) {
+                    entity_commands.despawn();
+                }
+            }
+        }
+
+        if !profiling::is_enabled() {
+            for mut text in hint_query.iter_mut() {
+                **text = profiling_hint_text(AppSettings::global().read().enable_profiling);
+            }
+            continue;
+        }
+
+        let rows = profiling::take_report(TIMINGS_ROWS);
+        if rows.is_empty() {
+            for mut text in hint_query.iter_mut() {
+                **text = "本区间无数据（刚刷新过？让它跑一会儿再点）".to_string();
+            }
+            continue;
+        }
+
+        profiling::append_report_to_log("设置页手动刷新（页面 Settings）", &rows);
+
+        let header = commands.spawn_scene(timings_header_row()).id();
+        commands.entity(container).add_child(header);
+        for row in &rows {
+            let entity = commands
+                .spawn_scene(timings_row_scene(
+                    &format!("{:.2}", row.total_ms),
+                    &format!("{:.3}", row.max_ms),
+                    &row.calls.to_string(),
+                    &short_system_name(&row.name),
+                    AppColors::TEXT_SECONDARY,
+                ))
+                .id();
+            commands.entity(container).add_child(entity);
+        }
+
+        for mut text in hint_query.iter_mut() {
+            **text = format!("上次刷新之后的累计（Top {}），已追加到日志", rows.len());
+        }
+    }
+}
+
+/// 「打开日志目录」按钮交互
+pub fn open_profiling_log_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<OpenProfilingLogButton>)>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let dir = AppSettings::log_dir();
+        // 目录可能还没建（一次都没打过榜），先建再开，免得资源管理器报错
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            tracing::error!("创建日志目录失败: {} - {}", dir.display(), e);
+            continue;
+        }
+        if let Err(e) = open::that(&dir) {
+            tracing::error!("打开日志目录失败: {} - {}", dir.display(), e);
+        }
+    }
+}
+
+/// 系统名去掉模块前缀，只留最后两段——全路径太长会把整行挤没
+fn short_system_name(full: &str) -> String {
+    let segments: Vec<&str> = full.split("::").collect();
+    match segments.as_slice() {
+        [.., module, name] => format!("{module}::{name}"),
+        _ => full.to_string(),
     }
 }

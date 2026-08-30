@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2026-08-11
+> 最后更新: 2026-08-29
 
 ## 其他
  - git commit 带emoji
@@ -12,13 +12,15 @@
 ```
 picacg-rust/
 ├── Cargo.toml                    # 纯 Workspace 配置（无 [package]）
-├── assets/                       # 静态资源（字体、图片）
-│   └── fonts/SarasaTermSCNerd/   # 内置更纱黑体 CJK 字体
+├── assets/                       # 静态资源（字体、图标）
+│   ├── fonts/SarasaTermSCNerd/   # 内置更纱黑体 CJK 字体
+│   └── icons/                    # 应用图标（官方素材 192 权威源 + 512/256 投放尺寸）
 ├── docs/                         # 文档
 ├── migrations/                   # SQLite 数据库迁移脚本
 ├── scripts/                      # 部署脚本
 │   ├── deploy.sh                 # Bash 部署脚本
-│   └── deploy-windows.ps1        # PowerShell 部署脚本
+│   ├── deploy-windows.ps1        # PowerShell 部署脚本
+│   └── make-icon.sh              # 由官方素材生成图标尺寸（--fetch 可重抓）
 └── crates/
     ├── picacg_app/               # 主应用 (picacg)
     │   └── src/
@@ -31,6 +33,7 @@ picacg-rust/
     │       ├── plugins/          # Bevy 插件
     │       └── utils/            # 工具模块
     │           ├── content_filter.rs  # 内容过滤（繁简转换+多维度匹配）
+    │           ├── profiling.rs       # 系统耗时统计（tracing Layer，F4 打榜）
     │           └── tokio_tasks.rs     # Bevy-tokio 集成
     ├── picacg_core/              # 核心类型库
     │   └── src/
@@ -325,6 +328,21 @@ bsn! {
 
 ## 常见陷阱
 
+### 高级搜索的排序只认请求体（2026-08 修复）
+
+`POST /comics/advanced-search` 的排序参数必须放在**请求体** `sort` 字段里；
+查询串上的 `s=` 会被服务端忽略（`GET /comics` 才认 `s`）。
+历史实现只发查询串，表现为「点排序按钮无任何效果」——四种排序返回完全相同的列表。
+
+```rust
+// SearchComicsRequest::body()
+serde_json::json!({ "keyword": self.keyword, "sort": self.sort })
+```
+
+同一文件里的排序按钮系统 `sort_button_interaction` **不能加 `Changed<Interaction>` 过滤器**：
+选中态刷新要覆盖所有按钮（点 B 时 A 的 Interaction 并未变化，加过滤器会让 A 一直亮着）。
+重复触发由 `search_state.sort != btn.sort` 挡掉。
+
 ### B0001：同系统 Query 读写冲突（运行时 panic，编译期查不出）
 
 同一系统内两个 Query 对同一组件「一写一读/两写」且不可证不相交 → 系统**首次初始化时 panic**
@@ -354,31 +372,102 @@ Query 里出现实体没有的组件 → 匹配 0 个实体，**不报错、只�
 
 ---
 
-### 漫画列表虚拟滚动（comics.rs）
+### 漫画列表虚拟滚动 + 节点复用（comics.rs）
 
 无限滚动页面的实体数不再随翻页累积：`comics_virtual_scroll` 只为可见窗口 ±2 行
 维持卡片实体，容器首尾各一个 spacer（`ComicsTopSpacer`/`ComicsBottomSpacer`，
 width:100% 独占整行）撑起总高度——引擎 `content_size()` 与上游滚动条因此天然正确，
 `auto_load_more_comics` 的触底判定不受影响。
 
-- 状态：`ComicsVirtualState`（过滤索引缓存 / 实测行高 / 列数 / 窗口区间 / 在场实体表）
-- 滚动跨行：行级增量 spawn/despawn（`insert_children` 定位到 spacer 之间）
+**滚动路径零 spawn/despawn**（2026-08 下旬）：移出窗口的卡片不销毁，直接作为空闲池
+改绑到移入位置的数据上（RecyclerView 那套）。
+
+- 状态：`ComicsVirtualState`（过滤索引缓存 / 实测行高 / 列数 / 窗口区间 / 在场实体表 /
+  待改绑清单）
+- `plan_recycle(old_range, new_range)` 是**纯函数**，算「哪些槽位可沿用、哪些卡片空闲」；
+  复用只在滚动时触发，肉眼很难覆盖「窗口缩小」「完全不重叠」等边界，故有单测
+- 两步走：`comics_virtual_scroll` 排出 `pending_rebind` → `comics_rebind_cards` 改内容
+  （`.chain()` 保证同帧顺序）。拆开是为了让滚动系统不必持有一大堆改 UI 的可变查询
+- **卡片必须是固定形态**：徽章槽（分类 3 + 标签 3）、时间槽（更新/创建）常驻，
+  多余的 `Display::None`。形态随数据变的话就没法「只改内容」了
+- 封面是**单实体**：`update_comics_images` 就地补 `ImageNode`，不再「销毁占位实体 +
+  新建图片实体 + insert_children(0)」——那套会打乱子节点顺序，与复用冲突
+- 改绑后 `DownloadStatusBadge` / `ComicSelectionMark` 的组件被写过，
+  `refresh_download_status_badges` / `refresh_comics_selection_ui` 靠 `Ref<T>::is_changed()`
+  只刷这几个，不必全场重刷
+- `comics_rebind_cards` 的查询把 `Text`/`TextColor`/`BackgroundColor` 全塞进**同一个**
+  `node_query` 做 `Option<&mut>`：拆成多个 `&mut Node`/`&mut Text` 查询会直接撞 B0001
 - 数据/列数变化：全量重建窗口；屏蔽词过滤只在数据变化的低频路径执行
-- 卡片场景 `comic_card` 复用；徽章为单实体（Text 自带 padding/圆角/底色）
 - 其余分页页面数据量有界，仍用瀑布流分帧显示（`WaterfallState`）
 
-### 条漫滚动锚定（reader.rs）
+### 漫画列表批量下载
 
-条漫槽位以占位高度（1000px）起步，真实图高陆续就位——同一滚动偏移映射到的页码
-会**级联漂移**（曾表现为：打开显示中间页码、图片加载后跌回第 1 页，恢复上次
-阅读页功能一并失效）。治法：
+`ComicsSelectionState { active, selected }`：开启选择模式后卡片点击变勾选而非跳详情。
+标题栏右侧「选择」开关 + 选择模式下的「已选 N / 全选 / 清空 / 下载选中」。
 
-- `ReaderState.webtoon_anchor: Option<(页, 页内偏移)>`——创建视图时锚到目标页；
-  非用户滚动帧若上方内容高度变化，按锚点补偿 `ScrollPosition` 保持视觉位置不动
-  （补偿写入用 `Local<bool>` 标志与用户滚动区分）
-- 用户滚动 → 重锚到当前页；当前页判定用**视口顶边**规则（开屏恒为第 1 页；
-  原「视口中心」规则在占位高度下会指到中间值）
-- 阅读中途上方图片补载的跳动同样被锚定消除
+- 「全选」以 `ComicsVirtualState.filtered` 为准——屏蔽掉的漫画根本没建卡，不该被捎带
+- 选中标记在封面**左上角**，与右下角下载角标错开
+- 下载请求带上 `remote_eps_count`，下完即有更新基准
+- 换分类（`setup_comics_list_ui`）会 `exit()`：换了数据集，旧选中项不该带过来
+
+### 阅读器缩放（reader.rs）
+
+三条等价入口共用 `apply_scale()`（钳位 + 刷工具栏百分比，避免各写一份后走样）：
+工具栏 `− / xx% / + / ⟲` 按钮、键盘 `+` `-` `0`、`Ctrl/⌘ + 滚轮`。
+
+- ⚠️ **macOS 会把 `Ctrl+滚轮` 当系统缩放手势吃掉**，触控板上基本到不了应用；
+  所以按钮与键盘入口是必需的，不是锦上添花。⌘ 也一并认（不被系统抢）
+- ⚠️ 条漫模式此前**完全无视 `scale`**：宽度硬编码 `WEBTOON_IMAGE_WIDTH_PERCENT`(80%)，
+  表现为"缩放没反应"。现在宽度 = `80% × scale`，且**未加载的占位槽也要跟着改**，
+  否则放大后已载入的图和占位槽宽度不一致，滚动条与锚定都会跳
+- 放大超过 125% 时图片宽于视口，容器改 `Overflow::scroll()`（双向），
+  `Shift+滚轮` 横向平移
+
+### 条漫滚动：锚点是唯一真相（reader.rs，2026-08 下旬重设计）
+
+条漫槽位以占位高度（1000px）起步，真实图高陆续就位——同一滚动像素映射到的页码
+会**级联漂移**。
+
+**现行模型**：`ReaderState.webtoon_anchor: (页, 页内偏移)` 是滚动位置的**唯一真相**，
+每帧由它算出 `ScrollPosition` 写下去。锚定页上方的高度一变，换算结果同步变，
+视觉位置自然不动，**且与用户是否正在滚动无关**。
+
+| 职责 | 系统 |
+|------|------|
+| 实测页高 → 由锚点算 `ScrollPosition` | `sync_webtoon_scroll`（每帧无条件） |
+| 按当前页决定加载哪些图 | `update_webtoon_window` |
+| 滚轮 → 改**锚点**（不碰 ScrollPosition） | `reader_mouse_wheel_control` |
+
+- `page_top` / `anchor_to_scroll` / `scroll_to_anchor` / `content_height` 是**纯函数**，
+  配有单测（含核心不变量：锚定页上方高度变化不改变其视觉位置）——滚动错位靠肉眼
+  复现代价太高
+- 页高表 `webtoon_page_heights` 与 `pictures` 平行，测量值覆盖占位值。**不做**
+  「按已测均值重估未测页」——那会让锚点上方的估算高度变动，反而制造跳动
+- 本容器**不挂 `ScrollArea`**（滚轮由阅读器模态处理），所以 `sync_webtoon_scroll`
+  是 `ScrollPosition.y` 的唯一写者。这正是能把它当「锚点的投影」而非状态的前提
+- ⚠️ 上界优先用引擎 `content_size()`，但**首帧它是 0**，直接用会把 max_scroll
+  算成 0、把「恢复上次阅读页」的锚点当场钳回第 1 页——引擎值不可信时退回页高表自算
+- 横向（缩放放大后 Shift+滚轮平移）直接写 `ScrollPosition.x`：横向没有「内容宽度
+  会变」的问题，不需要锚点
+
+**旧实现错在哪**（别再走回去）：`ScrollPosition` 是真相、锚点当补丁，且补偿只在
+「非用户滚动帧」执行，用 `Local<bool>` 区分补偿写入与用户滚动。用户一路拖到底时
+**每帧都是用户滚动帧**，补偿永远轮不到 → 新图一加载就错位。
+
+### 图片占位骨架屏微光
+
+图片没到位时占位块在两档底色间脉动（`ui_common::LoadingShimmer` +
+全局 `animate_loading_shimmer`）。接入：漫画列表 / 搜索 / 收藏 / 首页封面占位、
+条漫槽位。
+
+- **挂在占位节点自身，不建子实体**：占位块要么被 `ImageNode` 就地覆盖
+  （漫画列表的节点复用要求封面是单实体），要么整个换掉；多一个子节点就得跟着
+  处理生命周期，还会盖在图片上面
+- 动画只改 `BackgroundColor`，不碰布局
+- 查询带 `Without<ImageNode>`：图片一就位节点自动退出查询，**零清理代码**
+- 每个占位块按实体号错开相位，否则整屏同频闪烁，像坏了而不像在加载
+- ⚠️ **终局失败必须摘掉 `LoadingShimmer`**（comics 与 reader 的图片系统各有一处），
+  否则失败的框会一直脉动，等于骗用户"还在加载"
 
 ### 图片加载管线（重试机制）
 
@@ -808,6 +897,155 @@ pub struct ChannelSettings {
 
 ---
 
+## 下载更新：普通更新 vs 强制更新
+
+「已下载」项与标题栏各有两个按钮，走同一套下载流程，差别只在**要不要做前置检查**：
+
+| 动作 | 消息 | 行为 | 代价 |
+|------|------|------|------|
+| 更新 / 全部更新 | `RedownloadRequest { force: false }` | `handle_redownload_precheck` 三段判定，见下 | 快路径 1 个请求 |
+| 强制更新 / 全部强制更新 | `RedownloadRequest { force: true }` | 直接进 `handle_redownload`，逐章拉图片列表、逐图比对文件名补缺 | 每本 N 章 × 若干请求 |
+
+**前置检查三段**（`handle_redownload_precheck`）：
+
+1. 取漫画详情拿当前 `epsCount`（1 个请求）
+2. 有基准且 `epsCount` 没变大 → **已是最新，收工**
+3. 否则拉一次真实章节列表（分页，每页 ~40 条）核对：
+   - 真实条数 ≤ 本地章节数 → 只是 `epsCount` 漂移，**把新基准写回去**再跳过
+   - 否则 → 真有新章节 → `RedownloadConfirmed` → `handle_redownload`（与强制更新同一条路径）
+
+- 判定已是最新 / 检查失败 → 写 `RedownloadSkipped` → `handle_redownload_skipped` 按帧聚合成一条
+  Toast（「全部更新」一次几十条，逐条弹没法看）
+- 第 3 段兼作**老记录的基准回填**：升级前的下载记录没有基准，第一次「更新」会走
+  第 3 段并把基准补上，之后就都是 1 个请求的快路径
+- **已下载列表项在「确认要下载」时才摘除**（`remove_completed_item_on_redownload`），
+  不能在点击时摘——普通更新可能被判定已是最新，摘了还得补回来
+
+## 封面下载角标
+
+漫画卡片封面右下角显示下载状态：绿色 ✓ = 已下载，橙色 ⟳ = 有新章节。
+
+### ⚠️ 更新判定不能用 `epsCount` 直接比本地章节数
+
+服务端 `Comic::eps_count` 与 `/comics/{id}/eps` 的真实条数**长期对不上，且两个方向都会偏**
+（实测：48↔49、46↔48、12↔15、55↔53）。它是个漂移的冗余计数。拿它跟本地章节数直接比，
+早就下完的漫画会常年亮「有更新」。
+
+正解：**存下载当时的 `epsCount` 快照，跟今天的 `epsCount` 自比**——同一字段自比，
+系统偏差相消；漫画真加了章节，这个计数一定变大。
+
+- 快照存 `download_task.remote_eps_count`（`ALTER TABLE` 迁移，None = 升级前的老记录）
+- 老记录判不了 → 只报「已下载」，不猜更新；第一次点「更新」会把基准补上（见上一节第 3 段）
+- `upsert` 用 `COALESCE(excluded.remote_eps_count, download_task.remote_eps_count)`：
+  调用方没拿到 `epsCount` 时保留旧基准，别把它冲成 NULL
+
+### 其余实现
+
+- 数据源 `DownloadedComicsIndex`（`comic_id → epsCount 快照`）：建卡是高频路径，不能每张卡查库；
+  只在**启动**（`setup_download_manager`）、**下载完成**（`handle_download_completed`）、
+  **删除记录**（`confirm_delete_button_interaction`）、**前置检查回填基准**四处同步
+- 未下载时 `Visibility::Hidden` 而非不创建——否则下载完回到列表页要等整页重建才看得到
+- `refresh_download_status_badges` 全局注册一次，索引变化时统一改可见性/图标/底色，卡片不必重建
+- 定位：`PositionType::Absolute` + `BadgeAnchor` 两种锚法。taffy 的 inset 参照系是
+  **父节点 padding box**（`container_size − border`，见 `compute/flexbox.rs`
+  "Insets are resolved against the container size minus border"），故：
+  - `CardCover`（角标与封面同为卡片直接子节点，卡片 180 宽 / padding 8 / border 1，封面 164×220）
+    → `right: 10, top: 204`（= 178−172+4 / 8+220−4−20）
+  - `CoverContainer`（角标在封面容器内）→ `right: 4, bottom: 4`
+- **角标是「定尺寸圆底容器 + 文本子节点」两个实体**，不是一个 Text 顶着背景色：
+  Bevy 把文本画在 content box 的**左上角**（`bevy_ui_render/text.rs` 用 `content_box().min`），
+  既不水平也不垂直居中。曾用 padding 手调，结果图标左偏 3.25px——Nerd Font 图标在
+  更纱黑体里是**半角**（advance 0.5em），按整角估的 padding 必然偏。交给 flex 的
+  `justify_content` / `align_items` 居中文本节点才与字体度量无关
+- 字号上限由行高定：Sarasa 的 hhea 行高 1.25em，字号 15 → 行盒 18.75px，20px 徽章里余 1.25px
+- 已接入：comics / search / favorites / rankings / home 五个页面
+
+## 应用图标（窗口 + macOS Dock）
+
+`systems/app_icon.rs`，用的是**哔咔漫画官方 app 图标**，`include_bytes!` 编译进二进制
+（部署漏拷 assets 也不会退化成系统默认方块）。
+
+| 文件 | 角色 |
+|------|------|
+| `assets/icons/picacg-official-192.png` | **权威源**：官网 PWA 的 `logo_round`（192×192，粉底圆角 + 哔咔娘，自带 alpha），已入库，构建不依赖网络 |
+| `assets/icons/icon.png` | 512×512，macOS dock / ⌘Tab（由权威源 Catrom 放大，勿手改） |
+| `assets/icons/icon-256.png` | 256×256，Windows 任务栏 / Linux 标题栏（同上） |
+
+`scripts/make-icon.sh` 从权威源生成两个投放尺寸；`--fetch` 从官网重抓素材
+（走代理时设 `ALL_PROXY`）。官方只提供到 192，放大用 Catrom——Lanczos 会在
+网点边缘振铃。
+
+| 平台 | 生效位置 | 手段 |
+|------|----------|------|
+| Windows / Linux | 标题栏、任务栏 | winit `Window::set_window_icon`（`icon-256.png`） |
+| macOS | Dock、⌘Tab | AppKit `NSApplication::setApplicationIconImage:`（`icon.png`） |
+
+- macOS 上 winit 的窗口图标是**空操作**（系统只认 .app 包里的 icns），dock 图标必须运行时经
+  AppKit 设置——这样 `cargo run` 跑裸二进制也有图标
+- bevy 0.19 的 winit 窗口存在主线程 thread_local `WINIT_WINDOWS`（**不再是 `NonSend` 资源**，
+  写 `NonSend<WinitWindows>` 会每帧报 "Non-send data not found"）；用 `NonSendMarker`
+  把系统钉在主线程，与上游 `changed_windows` 同款
+- 系统常驻 `Update`：合盖等场景窗口会被销毁重建，新窗口要重新贴图标（已处理的记在 `Local` 集合里）
+
+## 下载全部完成后退出
+
+设置页「下载全部完成后退出」（`AppSettings::exit_after_downloads`），挂机下载用。
+
+- `exit_after_downloads_complete`：还有活儿 = 任务处于 `Downloading`/`Queued`，或 CBZ 还在打包；
+  **已暂停/已失败的不算**——它们不会自己往前走，等下去等于永不退出
+- `Local<bool> was_busy` 保证只在本次运行确实跑过下载后才触发（刚启动队列本来就空，不能直接退）
+- `CbzPackagingState.in_flight` 计数（请求 +1，完成/失败 −1）：打包在后台线程写文件，
+  进程此时退出会留下半截 .cbz
+- 退出前调 `save_window_geometry_to_config`，与用户主动关闭走同一套收尾
+- 两个下载行为开关合在 `DownloadBehaviorState`（原 `AutoResumeDownloadsState`）
+
+## 性能追踪
+
+**入口都在设置页「性能追踪」分组**（打包成 .app 后没有终端，诊断必须能在界面里完成）：
+
+| 入口 | 回答什么 | 前提 |
+|------|----------|------|
+| 「性能叠加层」开关 / `F3` | **卡不卡、多卡**：FPS / 帧时间 / 实体数 / UI 节点数 | 无，立即生效 |
+| 「系统耗时追踪」开关 | 打开统计 | **重启后生效** |
+| 「刷新耗时榜」按钮 / `F4` | **谁在卡**：Top N 直接渲染在页面里 | 开关已开 |
+| 自动 | 掉帧时自动打榜（默认 >100ms，`PICACG_PROFILE_SLOW_MS` 可调，5 秒冷却） | 同上 |
+
+榜单**追加落盘**到 `AppSettings::profiling_log_path()`（配置目录 `logs/profiling.log`），
+设置页有「日志目录」按钮直达。标题里带**当前页面**——卡顿多半是某页一次性建大量节点
+导致的，不带页面信息只能看出「谁慢」、看不出「在哪慢」。
+
+**原理**：bevy 给每个系统的每次执行套了 `info_span!("system", name = ...)`，
+`utils/profiling.rs` 挂一个 `tracing` Layer 把 enter/exit 差值按系统名累加——
+不必改动那 120+ 个系统的注册代码。
+
+**为什么开关要重启**：两层门。① 编译期，那对 span 在 bevy_ecs 里是
+`#[cfg(feature = "trace")]` 门控的，不编进来就不存在——所以 `profiling` 是**默认 feature**；
+② 启动期，bevy 在系统初始化时**一次性**建好 Span 对象，那一刻没有订阅者感兴趣就
+永远是禁用态，运行中再装 Layer 也救不回来。反过来这也是关掉时几乎零成本的原因：
+tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次分支。
+
+**踩过的坑**：
+
+- 只做运行时开关不开 feature → 榜单恒空（曾照着"不受 feature 门控"的错误判断写过一版）
+- span 是 `info` 级：日志等级低于 info，tracing 会把 span 整个滤掉，榜单同样是空的
+- `Extensions::insert` 撞到同类型已存在会 **panic**；同一 span 每帧重新进入，
+  记录进入时刻必须用 `replace`（第一版在登录页直接崩）
+- **次数会有偏差**：实测某 `Startup` 系统函数体只跑 1 次，span 却被进出 280 次且
+  enter 套 enter——bevy 内部共享/克隆同一个 `Span` 对象，多个系统的进出落到同一个
+  id 上。上游行为，本层改不了；稳态数字是准的（所有系统次数 = 帧数）
+
+**读榜提示**：
+
+- `bevy_render::view::window::prepare_windows` 常年十几毫秒/帧，**那是在等 vsync**
+  （`get_current_texture()` 阻塞到下一张交换链图像），不是瓶颈；`run_render_schedule`
+  包着它，所以也一样大。看这两个数会把人带偏
+- `bevy_app::main_schedule::Main::run_main` 是所有子调度的父区间，看它下面的具体系统
+- **看「单次峰值」而不是「总耗时」找卡顿**：稳态开销看均值，一次性卡顿看峰值。
+  实测一份 48844 帧的榜单里，`text_system` 均值 0.15ms 但峰值 **1079ms**——
+  那一帧 `run_main` 峰值 1127ms，几乎全是文本整形，这才是卡顿源
+- 启动那一帧的 `text_system`（首次字形整形）与 `apply_app_icon`（PNG 解码 + AppKit
+  刷 dock）是一次性成本，不是稳态开销
+
 ## mimalloc 内存分配器
 
 全局使用 mimalloc 替换默认分配器，优化多线程内存碎片。
@@ -1062,6 +1300,24 @@ fn auto_resume_downloads_on_startup(
 - [ ] 虚拟滚动推广评估：rankings/favorites 等分页页面数据量有界暂用瀑布流；若后续也转无限滚动则复用 comics 的虚拟滚动模式
 
 - [ ] 下载动画效果：右键下载漫画后，封面图从卡片位置飞向侧边栏下载按钮，边移动边缩小变为圆形，最终融入下载计数徽章
+
+### 已完成（2026-08 下旬）
+
+- [x] 修复高级搜索排序不生效（sort 挪进请求体）+ 排序按钮选中态刷新
+- [x] 下载更新分普通/强制两档（章节数前置比对 vs 逐图校验），单本与「全部」各两个按钮
+- [x] 漫画卡片封面下载角标（已下载 ✓ / 有更新 ⟳，5 个页面接入）
+- [x] 应用图标：哔咔官方图标接入窗口/任务栏 + macOS dock（运行时 AppKit 设置，免打 .app 包）
+- [x] 「下载全部完成后退出」设置项（等 CBZ 打包收尾后再退）
+- [x] 修复封面角标假「有更新」：改用 `epsCount` 快照自比（`epsCount` 与真实章节数长期对不上）
+- [x] 修复角标图标未居中（Nerd Font 图标是半角，padding 手调必偏）
+- [x] 性能追踪：F3 帧时叠加层 + F4/掉帧自动的系统耗时榜（`--features profiling`）
+- [x] 漫画列表节点复用：滚动路径零 spawn/despawn（固定形态卡片 + `plan_recycle` + 单测）
+- [x] 漫画列表批量选择下载（选择模式 / 全选 / 下载选中，带更新基准）
+- [x] 阅读器手动缩放：工具栏按钮 + 修复条漫模式无视 scale + Shift 横向平移
+- [x] 右键/批量下载补上 `epsCount` 基准，下完即可正确显示更新角标
+- [x] 条漫滚动重设计：锚点为唯一真相，根除「拉到底加载新图错位」（含 8 个纯函数单测）
+- [x] 性能追踪搬进设置页 + 榜单落盘（`logs/profiling.log`，标题带页面）
+- [x] 图片占位骨架屏微光动画（5 处占位接入，失败即停）
 
 ### 已完成（2026-08 全面重构）
 

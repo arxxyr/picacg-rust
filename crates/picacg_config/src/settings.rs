@@ -456,6 +456,15 @@ pub struct AppSettings {
     /// 启动后自动开始未完成的下载
     #[serde(default)]
     pub auto_resume_downloads: bool,
+    /// 下载队列全部完成后自动退出程序（挂机下载用）
+    #[serde(default)]
+    pub exit_after_downloads: bool,
+    /// 启用系统耗时追踪（设置页开关，**重启后生效**）
+    ///
+    /// 为什么要重启：bevy 在系统初始化时**一次性**建好 `info_span!("system")`，
+    /// 那一刻若没有订阅者感兴趣，span 就是禁用态，之后再打开开关也不会重建。
+    #[serde(default)]
+    pub enable_profiling: bool,
     /// 最大同时下载漫画数量（默认 3）
     #[serde(default = "default_max_concurrent_downloads")]
     pub max_concurrent_downloads: usize,
@@ -528,6 +537,8 @@ impl Default for AppSettings {
             download_path: String::new(),
             database_path: String::new(),
             auto_resume_downloads: false,
+            exit_after_downloads: false,
+            enable_profiling: false,
             max_concurrent_downloads: 3,
             auto_pack_cbz: false,
             delete_images_after_cbz: false,
@@ -603,5 +614,22 @@ impl AppSettings {
         directories::ProjectDirs::from("com", "picacg", "picacg")
             .map(|dirs| dirs.data_dir().join("picacg.db"))
             .unwrap_or_else(|| PathBuf::from("picacg.db"))
+    }
+
+    /// 日志目录（与数据库同级的 `logs/`）
+    ///
+    /// 性能榜单等诊断产物落在这里——打包成 .app 之后没有终端，
+    /// 报告必须有个能用 Finder 打开、能直接发出来的落点。
+    #[must_use]
+    pub fn log_dir() -> PathBuf {
+        directories::ProjectDirs::from("com", "picacg", "picacg")
+            .map(|dirs| dirs.data_dir().join("logs"))
+            .unwrap_or_else(|| PathBuf::from("logs"))
+    }
+
+    /// 系统耗时榜的落盘路径
+    #[must_use]
+    pub fn profiling_log_path() -> PathBuf {
+        Self::log_dir().join("profiling.log")
     }
 }

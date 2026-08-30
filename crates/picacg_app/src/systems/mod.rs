@@ -7,6 +7,7 @@
 #![allow(clippy::type_complexity)]
 #![allow(unused_imports)]
 
+pub mod app_icon;
 mod categories;
 mod chat;
 mod chat_room;
@@ -30,6 +31,7 @@ mod main_layout;
 mod nas;
 mod navigation;
 pub mod pagination;
+pub mod perf_overlay;
 mod placeholder;
 mod profile;
 mod proxy_settings;
@@ -46,6 +48,7 @@ mod waifu2x;
 pub mod waterfall;
 pub mod widgets;
 
+pub use app_icon::*;
 pub use categories::*;
 pub use chat::*;
 pub use chat_room::*;
@@ -69,6 +72,7 @@ pub use main_layout::*;
 pub use nas::*;
 pub use navigation::*;
 pub use pagination::*;
+pub use perf_overlay::*;
 pub use placeholder::*;
 pub use profile::*;
 pub use proxy_settings::*;

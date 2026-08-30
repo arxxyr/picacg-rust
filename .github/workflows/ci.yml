@@ -6,10 +6,12 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    # dev 是本项目的日常开发分支（原先只列了 develop，实际分支叫 dev，
+    # 导致所有开发分支推送都不跑 CI）
+    branches: [main, master, develop, dev]
     tags: ["v*"]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, dev]
 
 env:
   CARGO_TERM_COLOR: always

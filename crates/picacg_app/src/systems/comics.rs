@@ -10,15 +10,50 @@ use crate::{
     systems::{
         login::AppColors,
         scrollbar::{ScrollArea, scrollbar, scrollbar_config::SCROLLBAR_WIDTH},
-        ui_common::{TagColor, comic_time_info, tag_badge},
+        ui_common::{
+            BadgeAnchor, DownloadStatusBadge, LoadingShimmer, TagColor, download_status_badge,
+            format_api_date,
+        },
         widgets::ButtonStyle,
     },
-    utils::content_filter::CompiledFilter,
+    utils::{content_filter::CompiledFilter, icons::ICON_CHECK},
 };
 
 /// 面包屑"分类"按钮，点击返回分类页
 #[derive(Component, Default, Clone)]
 pub struct BreadcrumbBackToCategories;
+
+// ==================== 批量选择组件 ====================
+
+/// 选择模式开关按钮（"选择" / "退出选择"）
+#[derive(Component, Default, Clone)]
+pub struct ComicsSelectModeButton;
+
+/// 「全选」按钮（选中当前已加载且未被屏蔽的全部漫画）
+#[derive(Component, Default, Clone)]
+pub struct ComicsSelectAllButton;
+
+/// 「清空」按钮
+#[derive(Component, Default, Clone)]
+pub struct ComicsClearSelectionButton;
+
+/// 「下载选中」按钮
+#[derive(Component, Default, Clone)]
+pub struct ComicsDownloadSelectedButton;
+
+/// 选择工具栏容器（非选择模式时 display:none）
+#[derive(Component, Default, Clone)]
+pub struct ComicsSelectionBar;
+
+/// 选择计数文本
+#[derive(Component, Default, Clone)]
+pub struct ComicsSelectionCountText;
+
+/// 卡片上的选中标记（勾选圈，未选中时 Visibility::Hidden）
+#[derive(Component, Default, Clone)]
+pub struct ComicSelectionMark {
+    pub comic_id: String,
+}
 
 /// 虚拟滚动：顶部占位实体（撑起窗口上方被跳过的行）
 #[derive(Component, Default, Clone)]
@@ -47,6 +82,11 @@ pub struct ComicsVirtualState {
     window: Option<(usize, usize)>,
     /// 窗口内卡片实体（与窗口数据索引一一对应，按序）
     cards: Vec<Entity>,
+    /// 待重绑定的卡片：(卡片实体, 漫画在 `ComicsListState.comics` 里的下标)
+    ///
+    /// 滚动时被复用的节点排进这里，由 `comics_rebind_cards` 下一步改内容。
+    /// 分成两步是为了让滚动系统不必持有一大堆改 UI 的可变查询。
+    pending_rebind: Vec<(Entity, usize)>,
 }
 
 impl ComicsVirtualState {
@@ -58,6 +98,7 @@ impl ComicsVirtualState {
         self.columns = 0;
         self.window = None;
         self.cards.clear();
+        self.pending_rebind.clear();
     }
 }
 
@@ -88,6 +129,7 @@ pub fn setup_comics_list_ui(
     comics_state: Res<ComicsListState>,
     content_area_query: Query<Entity, With<ContentArea>>,
     mut virtual_state: ResMut<ComicsVirtualState>,
+    mut selection: ResMut<ComicsSelectionState>,
     existing_query: Query<Entity, With<ComicsListRoot>>,
 ) {
     // 参数化页面：每次进入可能是不同分类，直接 despawn 重建
@@ -95,13 +137,18 @@ pub fn setup_comics_list_ui(
         commands.entity(entity).despawn();
     }
 
+    // 换分类等于换数据集，上一轮的选中项不该带过来
+    selection.exit();
+
     // 旧窗口实体已随根节点销毁，清空虚拟滚动状态待重建
     virtual_state.clear();
 
     // 尝试找到 ContentArea
     let content_area = content_area_query.single().ok();
 
-    let comics_root = commands.spawn_scene(comics_list_page(&comics_state)).id();
+    let comics_root = commands
+        .spawn_scene(comics_list_page(&comics_state, &selection))
+        .id();
 
     // 如果有 ContentArea，将漫画列表作为其子实体
     if let Some(content_entity) = content_area {
@@ -110,8 +157,22 @@ pub fn setup_comics_list_ui(
 }
 
 /// 漫画列表页面场景
-fn comics_list_page(state: &ComicsListState) -> impl Scene + use<> {
+fn comics_list_page(
+    state: &ComicsListState,
+    selection: &ComicsSelectionState,
+) -> impl Scene + use<> {
     let category = state.category.clone();
+    let selection_bar_display = if selection.active {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    let select_mode_label = if selection.active {
+        "退出选择"
+    } else {
+        "选择"
+    };
+    let selection_count_label = format!("已选 {}", selection.selected.len());
     // 恢复上次退出时保存的滚动位置
     let scroll_offset = Vec2::new(0.0, state.scroll_y);
     // 网格内边距（右侧额外让出滚动条宽度）
@@ -180,6 +241,40 @@ fn comics_list_page(state: &ComicsListState) -> impl Scene + use<> {
                         TextFont { font_size: FontSize::Px(16.0) }
                         TextColor(AppColors::TEXT)
                     ),
+                    (
+                        // 撑开，把选择控件推到右侧
+                        Node { flex_grow: 1.0 }
+                    ),
+                    (
+                        // 选择工具条（仅选择模式可见）
+                        ComicsSelectionBar
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(8.0),
+                            display: {selection_bar_display},
+                        }
+                        Children [
+                            (
+                                ComicsSelectionCountText
+                                Text({selection_count_label})
+                                TextFont { font_size: FontSize::Px(13.0) }
+                                TextColor(AppColors::TEXT_SECONDARY)
+                            ),
+                            toolbar_button(ComicsSelectAllButton, "全选", AppColors::BORDER),
+                            toolbar_button(ComicsClearSelectionButton, "清空", AppColors::BORDER),
+                            toolbar_button(
+                                ComicsDownloadSelectedButton,
+                                "下载选中",
+                                AppColors::PRIMARY,
+                            ),
+                        ]
+                    ),
+                    toolbar_button(
+                        ComicsSelectModeButton,
+                        select_mode_label,
+                        AppColors::BORDER,
+                    ),
                 ]
             ),
             (
@@ -233,121 +328,140 @@ fn comics_list_page(state: &ComicsListState) -> impl Scene + use<> {
     }
 }
 
-/// 漫画封面缩略图场景（图片已缓存时使用）
-fn comic_thumbnail(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+/// 标题栏小按钮（选择模式的几个操作共用）
+fn toolbar_button<T: Component + Default + Clone + Unpin>(
+    marker: T,
+    label: &str,
+    border: Color,
+) -> impl Scene + use<T> {
+    let label = label.to_string();
     bsn! {
-        ComicThumbnail { url: {url} }
-        ImageNode { image: {handle} }
+        template_value(marker)
+        Button
+        template_value(ButtonStyle::card())
         Node {
-            width: Val::Px(164.0),
-            height: Val::Px(220.0),
+            padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
         }
+        BackgroundColor(AppColors::SURFACE)
+        template_value(BorderColor::all(border))
+        Children [
+            (
+                Text({label})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(AppColors::TEXT)
+            )
+        ]
     }
 }
 
-/// 漫画标签徽章场景（漫画列表专用紫色配色，与 `ui_common` 的绿色标签不同）
-fn comic_tag_badge(text: &str) -> impl Scene + use<> {
-    let text = text.to_string();
+/// 卡片内可重绑定的部件标记
+///
+/// 卡片改成**固定形态**：徽章、时间行都常驻，多余的槽位 `Display::None`。
+/// 形态固定后，滚动时不必销毁重建，只要把这些节点的文字/颜色/可见性改掉
+/// 就能"换一本漫画"——这是节点复用（`comics_virtual_scroll` 的 recycle 路径）
+/// 成立的前提。
+#[derive(Component, Default, Clone)]
+pub struct CardTitle;
 
-    // 单实体徽章：Text 节点自带 padding/圆角/底色（原 Node 套 Text 两实体，虚拟滚动
-    // 窗口内实体数减半的主要来源之一）
-    bsn! {
-        Text({text})
-        TextFont { font_size: FontSize::Px(10.0) }
-        TextColor(Color::srgb(0.9, 0.7, 0.9))
-        Node {
-            padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(1.0), Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(2.0)),
-        }
-        BackgroundColor(Color::srgba(0.6, 0.3, 0.6, 0.3))
-    }
+/// 卡片作者行
+#[derive(Component, Default, Clone)]
+pub struct CardAuthor;
+
+/// 卡片徽章槽位（分类槽在前、标签槽在后，见 `CARD_CATEGORY_SLOTS`）
+#[derive(Component, Default, Clone)]
+pub struct CardBadgeSlot {
+    pub index: usize,
 }
 
-/// 漫画卡片场景
-fn comic_card(comic: &picacg_api::models::Comic, image_cache: &ImageCache) -> impl Scene + use<> {
+/// 卡片徽章行容器（整行没内容时 `Display::None`）
+#[derive(Component, Default, Clone)]
+pub struct CardBadgeRow {
+    /// true = 分类行，false = 标签行
+    pub is_category: bool,
+}
+
+/// 卡片时间行（0 = 更新时间，1 = 创建时间）
+#[derive(Component, Default, Clone)]
+pub struct CardTimeSlot {
+    pub index: usize,
+}
+
+/// 卡片时间容器
+#[derive(Component, Default, Clone)]
+pub struct CardTimeRow;
+
+/// 分类徽章槽位数（与标签槽位数相同）
+const CARD_CATEGORY_SLOTS: usize = 3;
+/// 标签徽章槽位数
+const CARD_TAG_SLOTS: usize = 3;
+/// 时间行槽位数（更新 / 创建）
+const CARD_TIME_SLOTS: usize = 2;
+
+/// 漫画卡片场景（固定形态，可被 `bind_comic_card` 重绑定到任意一本漫画）
+fn comic_card(
+    comic: &picacg_api::models::Comic,
+    image_cache: &ImageCache,
+    downloaded: &DownloadedComicsIndex,
+    selection: &ComicsSelectionState,
+) -> impl Scene + use<> {
     let card_comic_id = comic.id.clone();
     let menu_comic_id = comic.id.clone();
     let menu_comic_title = comic.title.clone();
+    let menu_eps_count = comic.eps_count;
     let title = comic.title.clone();
     let author = comic.author.clone();
 
-    // 封面图片（已缓存直接显示，否则先放占位符）
+    // 封面：**单实体**，缓存命中就直接带 ImageNode，否则留灰底等
+    // update_comics_images 就地补 ImageNode（不再销毁占位再建图片实体）
     let thumb_url = comic.thumb.url();
     let cover: Box<dyn SceneList> = match image_cache.get(&thumb_url) {
-        Some(handle) => Box::new(bsn_list![comic_thumbnail(
+        Some(handle) => Box::new(bsn_list![comic_cover_loaded(
             thumb_url.clone(),
             handle.clone()
         )]),
-        // 占位符自带 URL，图片替换系统据此直接取缓存，无需反查漫画列表
-        None => {
-            let placeholder_url = thumb_url.clone();
-            Box::new(bsn_list![(
-                PlaceholderImage
-                ComicThumbnail { url: {placeholder_url} }
-                Node {
-                    width: Val::Px(164.0),
-                    height: Val::Px(220.0),
-                }
-                BackgroundColor(AppColors::SURFACE_HOVER)
-            )])
-        }
+        None => Box::new(bsn_list![comic_cover_pending(thumb_url.clone())]),
     };
 
-    // 分类标签容器（为空时不创建）
-    let categories_container: Box<dyn SceneList> = if !comic.categories.is_empty() {
-        // 最多显示 3 个分类
-        let badges: Vec<_> = comic
-            .categories
-            .iter()
-            .take(3)
-            .map(|category| tag_badge(category, TagColor::Category))
-            .collect();
+    // 徽章槽位：分类在前、标签在后，一次性建满，按数据决定显隐
+    let category_slots: Vec<_> = (0..CARD_CATEGORY_SLOTS)
+        .map(|i| card_badge_slot(i, comic.categories.get(i).map(String::as_str), true))
+        .collect();
+    let tag_slots: Vec<_> = (0..CARD_TAG_SLOTS)
+        .map(|i| {
+            card_badge_slot(
+                CARD_CATEGORY_SLOTS + i,
+                comic.tags.get(i).map(String::as_str),
+                false,
+            )
+        })
+        .collect();
+    let time_slots: Vec<_> = (0..CARD_TIME_SLOTS)
+        .map(|i| card_time_slot(i, card_time_label(comic, i).as_deref()))
+        .collect();
 
-        Box::new(bsn_list![(
-            Node {
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(4.0),
-                row_gap: Val::Px(2.0),
-                max_width: Val::Px(164.0),
-                overflow: Overflow::clip(),
-            }
-            Children [ {badges} ]
-        )])
-    } else {
-        Box::new(bsn_list![])
-    };
+    let category_display = row_display(!comic.categories.is_empty());
+    let tag_display = row_display(!comic.tags.is_empty());
+    let time_display = row_display(comic.created_at.is_some() || comic.updated_at.is_some());
 
-    // 标签容器（为空时不创建）
-    let tags_container: Box<dyn SceneList> = if !comic.tags.is_empty() {
-        // 最多显示 3 个标签
-        let badges: Vec<_> = comic
-            .tags
-            .iter()
-            .take(3)
-            .map(|tag| comic_tag_badge(tag.as_str()))
-            .collect();
+    // 封面右下角下载角标（绝对定位，与封面同为卡片直接子节点）
+    let badge: Box<dyn SceneList> = Box::new(bsn_list![download_status_badge(
+        &comic.id,
+        comic.eps_count,
+        downloaded,
+        BadgeAnchor::CardCover
+    )]);
 
-        Box::new(bsn_list![(
-            Node {
-                flex_wrap: FlexWrap::Wrap,
-                column_gap: Val::Px(4.0),
-                row_gap: Val::Px(2.0),
-                max_width: Val::Px(164.0),
-                margin: UiRect::top(Val::Px(2.0)),
-                overflow: Overflow::clip(),
-            }
-            Children [ {badges} ]
-        )])
-    } else {
-        Box::new(bsn_list![])
-    };
-
-    // 创建/更新时间
-    let time_info = comic_time_info(comic.created_at.as_deref(), comic.updated_at.as_deref());
+    // 封面左上角选中标记（与右下角下载角标错开，互不遮挡）
+    let mark: Box<dyn SceneList> = Box::new(bsn_list![selection_mark(
+        &comic.id,
+        selection.selected.contains(&comic.id)
+    )]);
 
     bsn! {
         ComicCard { comic_id: {card_comic_id} }
-        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
+        ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title}, eps_count: {menu_eps_count} }
         Button
         template_value(ButtonStyle::card())
         Node {
@@ -364,6 +478,7 @@ fn comic_card(comic: &picacg_api::models::Comic, image_cache: &ImageCache) -> im
             {cover},
             (
                 // 标题
+                CardTitle
                 Text({title})
                 TextFont { font_size: FontSize::Px(14.0) }
                 TextColor(AppColors::TEXT)
@@ -375,17 +490,180 @@ fn comic_card(comic: &picacg_api::models::Comic, image_cache: &ImageCache) -> im
             ),
             (
                 // 作者
+                CardAuthor
                 Text({author})
                 TextFont { font_size: FontSize::Px(12.0) }
                 TextColor(AppColors::TEXT_SECONDARY)
                 Node { margin: UiRect::bottom(Val::Px(4.0)) }
             ),
-            // 分类标签容器
-            {categories_container},
-            // 标签容器
-            {tags_container},
-            // 创建/更新时间
-            {time_info},
+            (
+                // 分类徽章行
+                CardBadgeRow { is_category: true }
+                Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    display: {category_display},
+                }
+                Children [ {category_slots} ]
+            ),
+            (
+                // 标签徽章行
+                CardBadgeRow
+                Node {
+                    flex_wrap: FlexWrap::Wrap,
+                    column_gap: Val::Px(4.0),
+                    row_gap: Val::Px(2.0),
+                    max_width: Val::Px(164.0),
+                    margin: UiRect::top(Val::Px(2.0)),
+                    overflow: Overflow::clip(),
+                    display: {tag_display},
+                }
+                Children [ {tag_slots} ]
+            ),
+            (
+                // 创建/更新时间
+                CardTimeRow
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    margin: UiRect::top(Val::Px(2.0)),
+                    max_width: Val::Px(164.0),
+                    overflow: Overflow::clip(),
+                    display: {time_display},
+                }
+                Children [ {time_slots} ]
+            ),
+            // 下载状态角标（绝对定位，不参与列布局）
+            {badge},
+            // 批量选择标记（同上）
+            {mark},
+        ]
+    }
+}
+
+/// 行容器显隐
+fn row_display(has_content: bool) -> Display {
+    if has_content {
+        Display::Flex
+    } else {
+        Display::None
+    }
+}
+
+/// 时间槽位文案（0 = 更新时间，1 = 创建时间）
+fn card_time_label(comic: &picacg_api::models::Comic, index: usize) -> Option<String> {
+    let raw = match index {
+        0 => comic.updated_at.as_deref(),
+        _ => comic.created_at.as_deref(),
+    }?;
+    let prefix = if index == 0 { "更新" } else { "创建" };
+    Some(format!("{prefix} {}", format_api_date(raw)))
+}
+
+/// 徽章槽位场景（`value` 为 None 时建出来但隐藏，供复用时再点亮）
+fn card_badge_slot(index: usize, value: Option<&str>, is_category: bool) -> impl Scene + use<> {
+    let text = value.unwrap_or_default().to_string();
+    let display = row_display(value.is_some());
+    let (bg_color, text_color) = if is_category {
+        TagColor::Category.colors()
+    } else {
+        // 漫画列表专用紫色标签，与 ui_common 的绿色标签区分
+        (Color::srgba(0.6, 0.3, 0.6, 0.3), Color::srgb(0.9, 0.7, 0.9))
+    };
+
+    bsn! {
+        CardBadgeSlot { index: {index} }
+        Text({text})
+        TextFont { font_size: FontSize::Px(10.0) }
+        TextColor(text_color)
+        Node {
+            padding: UiRect::new(Val::Px(4.0), Val::Px(4.0), Val::Px(1.0), Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(2.0)),
+            display: {display},
+        }
+        BackgroundColor(bg_color)
+    }
+}
+
+/// 时间槽位场景
+fn card_time_slot(index: usize, label: Option<&str>) -> impl Scene + use<> {
+    let text = label.unwrap_or_default().to_string();
+    let display = row_display(label.is_some());
+
+    bsn! {
+        CardTimeSlot { index: {index} }
+        Text({text})
+        TextFont { font_size: FontSize::Px(9.0) }
+        TextColor(AppColors::TEXT_SECONDARY)
+        Node { display: {display} }
+    }
+}
+
+/// 封面（图片已就绪）
+fn comic_cover_loaded(url: String, handle: Handle<Image>) -> impl Scene + use<> {
+    bsn! {
+        ComicThumbnail { url: {url} }
+        ImageNode { image: {handle} }
+        Node {
+            width: Val::Px(164.0),
+            height: Val::Px(220.0),
+        }
+    }
+}
+
+/// 封面（图片未就绪，等 `update_comics_images` 就地补 `ImageNode`）
+fn comic_cover_pending(url: String) -> impl Scene + use<> {
+    bsn! {
+        PlaceholderImage
+        ComicThumbnail { url: {url} }
+        template_value(LoadingShimmer::new(AppColors::SURFACE_HOVER))
+        Node {
+            width: Val::Px(164.0),
+            height: Val::Px(220.0),
+        }
+        BackgroundColor(AppColors::SURFACE_HOVER)
+    }
+}
+
+/// 卡片左上角的选中标记
+///
+/// 与下载角标一样**始终创建**、靠 `Visibility` 控制显隐：选择状态变化时由
+/// `refresh_comic_selection_marks` 就地点亮，不必重建卡片。
+/// 定位口径同 `BadgeAnchor::CardCover`——卡片 padding 8 / border 1，
+/// 封面左上角在 padding box 的 (8, 8)，向内缩 4px。
+fn selection_mark(comic_id: &str, selected: bool) -> impl Scene + use<> {
+    let marker = ComicSelectionMark {
+        comic_id: comic_id.to_string(),
+    };
+    let visibility = if selected {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+
+    bsn! {
+        template_value(marker)
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(12.0),
+            top: Val::Px(12.0),
+            width: Val::Px(20.0),
+            height: Val::Px(20.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(10.0)),
+        }
+        BackgroundColor(AppColors::PRIMARY)
+        template_value(visibility)
+        ZIndex(2)
+        Children [
+            (
+                Text(ICON_CHECK)
+                TextFont { font_size: FontSize::Px(15.0) }
+                TextColor(Color::WHITE)
+            )
         ]
     }
 }
@@ -411,14 +689,200 @@ pub fn cleanup_comics_list_ui(
 /// 漫画卡片交互系统（配色由全局 `apply_button_interaction` 统一处理）
 pub fn comic_card_interaction(
     interaction_query: Query<(&Interaction, &ComicCard), Changed<Interaction>>,
+    mut selection: ResMut<ComicsSelectionState>,
     mut detail_messages: MessageWriter<NavigateToComicDetailEvent>,
 ) {
     for (interaction, card) in &interaction_query {
-        if *interaction == Interaction::Pressed {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        // 选择模式下点击 = 勾选/取消，不跳详情
+        if selection.active {
+            let now_selected = selection.toggle(&card.comic_id);
+            tracing::debug!(
+                "{}选中: {}",
+                if now_selected { "" } else { "取消" },
+                card.comic_id
+            );
+        } else {
             // 通过导航消息跳转到详情页（保留导航历史）
             detail_messages.write(NavigateToComicDetailEvent {
                 comic_id: card.comic_id.clone(),
             });
+        }
+    }
+}
+
+// ==================== 批量选择交互 ====================
+
+/// 「选择 / 退出选择」开关
+pub fn comics_select_mode_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ComicsSelectModeButton>)>,
+    mut selection: ResMut<ComicsSelectionState>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if selection.active {
+            selection.exit();
+        } else {
+            selection.active = true;
+        }
+        tracing::info!("漫画列表选择模式: {}", selection.active);
+    }
+}
+
+/// 「全选」：选中当前已加载且未被屏蔽的全部漫画
+///
+/// 以过滤后的列表为准——屏蔽掉的漫画根本没建卡，不该被"全选"捎带上。
+pub fn comics_select_all_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ComicsSelectAllButton>)>,
+    comics_state: Res<ComicsListState>,
+    virtual_state: Res<ComicsVirtualState>,
+    mut selection: ResMut<ComicsSelectionState>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        for &index in &virtual_state.filtered {
+            if let Some(comic) = comics_state.comics.get(index) {
+                selection.selected.insert(comic.id.clone());
+            }
+        }
+        tracing::info!("全选：共 {} 本", selection.selected.len());
+    }
+}
+
+/// 「清空」：只清选中项，保持在选择模式里
+pub fn comics_clear_selection_interaction(
+    interaction_query: Query<
+        &Interaction,
+        (Changed<Interaction>, With<ComicsClearSelectionButton>),
+    >,
+    mut selection: ResMut<ComicsSelectionState>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction == Interaction::Pressed && !selection.selected.is_empty() {
+            selection.selected.clear();
+        }
+    }
+}
+
+/// 「下载选中」：逐本发下载请求，随后退出选择模式
+///
+/// 并发上限由 `download_queue_manager` 管，这里只管把请求排进去；
+/// `remote_eps_count` 顺手带上，下完就有更新基准（见封面角标一节）。
+pub fn comics_download_selected_interaction(
+    interaction_query: Query<
+        &Interaction,
+        (Changed<Interaction>, With<ComicsDownloadSelectedButton>),
+    >,
+    comics_state: Res<ComicsListState>,
+    mut selection: ResMut<ComicsSelectionState>,
+    mut download_messages: MessageWriter<DownloadComicRequest>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        if selection.selected.is_empty() {
+            tracing::warn!("未选中任何漫画");
+            continue;
+        }
+
+        let mut count = 0;
+        for comic in &comics_state.comics {
+            if !selection.selected.contains(&comic.id) {
+                continue;
+            }
+            download_messages.write(DownloadComicRequest {
+                comic_id: comic.id.clone(),
+                comic_title: comic.title.clone(),
+                episodes: vec![], // 空 = 下载全部章节
+                remote_eps_count: (comic.eps_count > 0).then_some(comic.eps_count),
+            });
+            count += 1;
+        }
+
+        tracing::info!("批量下载：已提交 {} 本漫画", count);
+        selection.exit();
+    }
+}
+
+/// 选择状态变化 → 刷新工具条显隐、计数文本、卡片选中标记
+pub fn refresh_comics_selection_ui(
+    selection: Res<ComicsSelectionState>,
+    mut bar_query: Query<&mut Node, With<ComicsSelectionBar>>,
+    mut count_query: Query<&mut Text, With<ComicsSelectionCountText>>,
+    mut mark_query: Query<(Ref<ComicSelectionMark>, &mut Visibility)>,
+    mode_btn_query: Query<&Children, With<ComicsSelectModeButton>>,
+    mut mode_text_query: Query<&mut Text, Without<ComicsSelectionCountText>>,
+) {
+    // 选择状态没变时，仍要照顾刚被节点复用改绑的标记（它们的 comic_id 变了）
+    let selection_changed = selection.is_changed();
+    if !selection_changed {
+        for (mark, mut visibility) in mark_query.iter_mut() {
+            if !mark.is_changed() {
+                continue;
+            }
+            let visible = selection.active && selection.selected.contains(&mark.comic_id);
+            let target = if visible {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *visibility != target {
+                *visibility = target;
+            }
+        }
+        return;
+    }
+
+    let display = if selection.active {
+        Display::Flex
+    } else {
+        Display::None
+    };
+    for mut node in bar_query.iter_mut() {
+        if node.display != display {
+            node.display = display;
+        }
+    }
+
+    let count_label = format!("已选 {}", selection.selected.len());
+    for mut text in count_query.iter_mut() {
+        if text.as_str() != count_label {
+            **text = count_label.clone();
+        }
+    }
+
+    let mode_label = if selection.active {
+        "退出选择"
+    } else {
+        "选择"
+    };
+    for children in mode_btn_query.iter() {
+        for child in children.iter() {
+            if let Ok(mut text) = mode_text_query.get_mut(child)
+                && text.as_str() != mode_label
+            {
+                **text = mode_label.to_string();
+            }
+        }
+    }
+
+    // 退出选择模式后标记一律熄灭
+    for (mark, mut visibility) in mark_query.iter_mut() {
+        let visible = selection.active && selection.selected.contains(&mark.comic_id);
+        let target = if visible {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != target {
+            *visibility = target;
         }
     }
 }
@@ -514,6 +978,8 @@ pub fn comics_virtual_scroll(
     comics_state: Res<ComicsListState>,
     mut virtual_state: ResMut<ComicsVirtualState>,
     image_cache: Res<ImageCache>,
+    downloaded: Res<DownloadedComicsIndex>,
+    selection: Res<ComicsSelectionState>,
     scroll_query: Query<(Entity, &ScrollPosition, &ComputedNode), With<ComicsScrollContainer>>,
     scroll_changed: Query<
         (),
@@ -618,86 +1084,81 @@ pub fn comics_virtual_scroll(
     let row_index_range = |row: usize| -> std::ops::Range<usize> {
         (row * columns).min(total)..((row + 1) * columns).min(total)
     };
-    // 按行区间建卡（数据序）
-    let spawn_rows = |commands: &mut Commands,
-                      filtered: &[usize],
-                      rows: std::ops::Range<usize>|
-     -> Vec<Entity> {
-        let mut entities = Vec::new();
-        for row in rows {
-            for &comic_index in &filtered[row_index_range(row)] {
-                if let Some(comic) = comics_state.comics.get(comic_index) {
-                    entities.push(commands.spawn_scene(comic_card(comic, &image_cache)).id());
-                }
-            }
-        }
-        entities
-    };
 
-    let old_window = virtual_state.window;
-    match old_window {
-        // 窗口重叠：行级增量
-        Some((old_start, old_end))
-            if new_start < old_end && old_start < new_end && !virtual_state.cards.is_empty() =>
-        {
-            if (old_start, old_end) != (new_start, new_end) {
-                // 顶部移出窗口的行
-                if new_start > old_start {
-                    let remove =
-                        row_index_range(new_start).start - row_index_range(old_start).start;
-                    let cards_len = virtual_state.cards.len();
-                    let removed: Vec<Entity> =
-                        virtual_state.cards.drain(..remove.min(cards_len)).collect();
-                    for entity in removed {
-                        if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                            entity_commands.despawn();
-                        }
-                    }
-                }
-                // 底部移出窗口的行
-                if new_end < old_end {
-                    let keep = row_index_range(new_end).start - row_index_range(new_start).start;
-                    let cards_len = virtual_state.cards.len();
-                    let removed = virtual_state.cards.split_off(keep.min(cards_len));
-                    for entity in removed {
-                        if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                            entity_commands.despawn();
-                        }
-                    }
-                }
-                // 顶部移入的行（插到 TopSpacer 之后 = 子索引 1）
-                if new_start < old_start {
-                    let fresh =
-                        spawn_rows(&mut commands, &virtual_state.filtered, new_start..old_start);
-                    commands.entity(container).insert_children(1, &fresh);
-                    let mut merged = fresh;
-                    merged.append(&mut virtual_state.cards);
-                    virtual_state.cards = merged;
-                }
-                // 底部移入的行（插到 BottomSpacer 之前）
-                if new_end > old_end {
-                    let fresh =
-                        spawn_rows(&mut commands, &virtual_state.filtered, old_end..new_end);
-                    commands
-                        .entity(container)
-                        .insert_children(1 + virtual_state.cards.len(), &fresh);
-                    virtual_state.cards.extend(fresh);
-                }
+    // ==================== 节点复用 ====================
+    //
+    // 不再"移出窗口就 despawn、移入窗口就 spawn"。移出的卡片实体直接留作
+    // 空闲池，改绑到移入位置的数据上——实体数恒定，滚动路径上零 spawn/despawn。
+    // 卡片能被改绑的前提是它是**固定形态**（徽章/时间槽位常驻，见 comic_card）。
+    let new_lo = row_index_range(new_start).start;
+    let new_hi = row_index_range(new_end).start;
+    let needed = new_hi.saturating_sub(new_lo);
+
+    let old_cards = std::mem::take(&mut virtual_state.cards);
+    // 旧池只有在「区间长度与实体数对得上」时才可信；对不上说明中途出过岔子，
+    // 整池作废重建，别拿错位的实体去改绑
+    let old_span = virtual_state
+        .window
+        .map(|(s, e)| (row_index_range(s).start, row_index_range(e).start));
+    let pool_valid = matches!(old_span, Some((lo, hi)) if hi.saturating_sub(lo) == old_cards.len())
+        && !old_cards.is_empty();
+
+    let mut slots: Vec<Option<Entity>> = vec![None; needed];
+    let mut free: Vec<Entity> = Vec::new();
+
+    if pool_valid {
+        let (old_lo, old_hi) = old_span.expect("pool_valid 已保证 old_span 非空");
+        let (keep, spare) = plan_recycle(old_lo..old_hi, new_lo..new_hi);
+        for (offset, reused) in keep.iter().enumerate() {
+            if let Some(old_offset) = reused {
+                slots[offset] = Some(old_cards[*old_offset]);
             }
         }
-        // 无重叠/首建：全量重建窗口
-        _ => {
-            let stale: Vec<Entity> = std::mem::take(&mut virtual_state.cards);
-            for entity in stale {
-                if let Ok(mut entity_commands) = commands.get_entity(entity) {
-                    entity_commands.despawn();
-                }
+        free.extend(spare.into_iter().map(|offset| old_cards[offset]));
+    } else {
+        for entity in old_cards {
+            if let Ok(mut entity_commands) = commands.get_entity(entity) {
+                entity_commands.despawn();
             }
-            let fresh = spawn_rows(&mut commands, &virtual_state.filtered, new_start..new_end);
-            commands.entity(container).insert_children(1, &fresh);
-            virtual_state.cards = fresh;
         }
     }
+
+    // 空位优先吃空闲池（改绑），池空了才新建
+    for (offset, slot) in slots.iter_mut().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let Some(&comic_index) = virtual_state.filtered.get(new_lo + offset) else {
+            continue;
+        };
+        let Some(comic) = comics_state.comics.get(comic_index) else {
+            continue;
+        };
+        if let Some(entity) = free.pop() {
+            virtual_state.pending_rebind.push((entity, comic_index));
+            *slot = Some(entity);
+        } else {
+            *slot = Some(
+                commands
+                    .spawn_scene(comic_card(comic, &image_cache, &downloaded, &selection))
+                    .id(),
+            );
+        }
+    }
+
+    // 窗口变小（缩窗/列数变化）才会有富余，此时才销毁
+    for entity in free {
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.despawn();
+        }
+    }
+
+    let cards: Vec<Entity> = slots.into_iter().flatten().collect();
+    // 子节点顺序 = 数据顺序（flex-wrap 按子序排版），复用后必须重排；
+    // 索引 1 = TopSpacer 之后
+    commands.entity(container).insert_children(1, &cards);
+    virtual_state.cards = cards;
+
     virtual_state.window = Some((new_start, new_end));
 
     // spacer 高度 = 窗口外行数 × 行距（近似含行间隙，误差 < 1 gap 不可感知）
@@ -706,6 +1167,34 @@ pub fn comics_virtual_scroll(
         &mut bottom_spacer,
         (total_rows - new_end) as f32 * row_pitch,
     );
+}
+
+/// 复用规划：旧窗口的卡片如何落到新窗口的槽位
+///
+/// 两个区间都是「过滤后列表里的数据位置」，且都是连续区间（窗口按行切）。
+/// 返回 `(keep, spare)`：
+/// - `keep[i]` = 新窗口第 i 个槽位可以直接沿用的旧卡片下标（None =
+///   需要改绑或新建）
+/// - `spare`   = 移出新窗口、可拿去改绑的旧卡片下标
+///
+/// 抽成纯函数是为了能单测——复用路径只在滚动时触发，跑起来靠肉眼很难覆盖到
+/// 「窗口缩小」「完全不重叠」这些边界。
+fn plan_recycle(
+    old_range: std::ops::Range<usize>,
+    new_range: std::ops::Range<usize>,
+) -> (Vec<Option<usize>>, Vec<usize>) {
+    let mut keep = vec![None; new_range.len()];
+    let mut spare = Vec::new();
+
+    for (offset, pos) in old_range.clone().enumerate() {
+        if new_range.contains(&pos) {
+            keep[pos - new_range.start] = Some(offset);
+        } else {
+            spare.push(offset);
+        }
+    }
+
+    (keep, spare)
 }
 
 /// 比较后写 spacer 高度（避免无谓布局标脏）
@@ -727,41 +1216,242 @@ fn set_spacer_height<F: bevy::ecs::query::QueryFilter>(
 pub fn update_comics_images(
     mut commands: Commands,
     image_cache: Res<ImageCache>,
-    placeholder_query: Query<
-        (Entity, &ChildOf, &ComicThumbnail),
-        (With<PlaceholderImage>, Without<ImageNode>),
-    >,
+    cover_query: Query<(Entity, &ComicThumbnail), (With<PlaceholderImage>, Without<ImageNode>)>,
 ) {
-    let mut replaced_count = 0;
-    for (placeholder_entity, child_of, thumb) in placeholder_query.iter() {
-        // 加载失败：摘掉占位标记，保留灰底方块，但不再每帧重扫
+    let mut bound = 0;
+    for (entity, thumb) in cover_query.iter() {
+        // 加载失败：摘掉占位标记与微光，保留灰底方块，但不再每帧重扫
+        //（微光必须停——一直脉动等于在骗用户"还在加载"）
         if image_cache.is_failed(&thumb.url) {
             commands
-                .entity(placeholder_entity)
-                .remove::<PlaceholderImage>();
+                .entity(entity)
+                .remove::<PlaceholderImage>()
+                .remove::<LoadingShimmer>();
             continue;
         }
 
-        // 检查图片是否已加载
         let Some(handle) = image_cache.get(&thumb.url) else {
             continue;
         };
 
-        // 删除占位符，添加实际图片
-        let parent_entity: Entity = child_of.parent();
-        commands.entity(placeholder_entity).despawn();
-        // 创建新的图片实体并插入到父卡片的第一个位置（在标题之前）
-        let image_entity = commands
-            .spawn_scene(comic_thumbnail(thumb.url.clone(), handle.clone()))
-            .id();
+        // 就地补 ImageNode——不再"销毁占位实体 + 新建图片实体 + insert_children"，
+        // 那套会打乱卡片子节点顺序，也和节点复用冲突（复用要求封面实体身份稳定）
         commands
-            .entity(parent_entity)
-            .insert_children(0, &[image_entity]);
-        replaced_count += 1;
+            .entity(entity)
+            .remove::<PlaceholderImage>()
+            .insert(ImageNode {
+                image: handle.clone(),
+                ..default()
+            });
+        bound += 1;
     }
 
-    if replaced_count > 0 {
-        tracing::trace!("[Comics] 替换了 {} 个封面图片", replaced_count);
+    if bound > 0 {
+        tracing::trace!("[Comics] 填入了 {} 个封面图片", bound);
+    }
+}
+
+/// 把复用来的卡片节点改绑到另一本漫画
+///
+/// 只改内容、不动结构：文字、颜色、显隐、封面 URL、角标绑定。卡片是固定形态
+/// （徽章/时间槽位常驻），所以"换一本漫画"退化成一串就地赋值。
+///
+/// **查询为什么长成这样**：卡片子节点全都有 `Node`，于是把 `Text`/`TextColor`/
+/// `BackgroundColor` 全做成 `Option<&mut>` 挤进**同一个** `node_query`——
+/// 拆成多个 `&mut Node` / `&mut Text` 查询会直接撞 B0001（同系统同组件多写），
+/// 而想证明不相交就得给每个查询挂一串 `Without`，可读性更差。
+pub fn comics_rebind_cards(
+    mut commands: Commands,
+    mut virtual_state: ResMut<ComicsVirtualState>,
+    comics_state: Res<ComicsListState>,
+    image_cache: Res<ImageCache>,
+    mut card_query: Query<(&mut ComicCard, &mut ContextMenuTarget, &Children)>,
+    children_query: Query<&Children>,
+    mut node_query: Query<(
+        &mut Node,
+        Option<&mut Text>,
+        Option<&mut TextColor>,
+        Option<&mut BackgroundColor>,
+        Option<&CardBadgeSlot>,
+        Option<&CardTimeSlot>,
+        Option<&CardBadgeRow>,
+        Has<CardTimeRow>,
+        Has<CardTitle>,
+        Has<CardAuthor>,
+    )>,
+    mut cover_query: Query<(&mut ComicThumbnail, Has<ImageNode>)>,
+    mut badge_query: Query<&mut DownloadStatusBadge>,
+    mut mark_query: Query<&mut ComicSelectionMark>,
+) {
+    if virtual_state.pending_rebind.is_empty() {
+        return;
+    }
+
+    let pending = std::mem::take(&mut virtual_state.pending_rebind);
+    for (entity, comic_index) in pending {
+        let Some(comic) = comics_state.comics.get(comic_index) else {
+            continue;
+        };
+        let Ok((mut card, mut menu_target, children)) = card_query.get_mut(entity) else {
+            continue;
+        };
+
+        card.comic_id = comic.id.clone();
+        menu_target.comic_id = comic.id.clone();
+        menu_target.comic_title = comic.title.clone();
+        menu_target.eps_count = comic.eps_count;
+
+        let child_list: Vec<Entity> = children.iter().collect();
+        for child in child_list {
+            // 封面：换 URL，并把旧图摘掉重新进入"等加载"状态
+            if let Ok((mut thumb, has_image)) = cover_query.get_mut(child) {
+                let url = comic.thumb.url();
+                if thumb.url != url {
+                    thumb.url = url.clone();
+                    match image_cache.get(&url) {
+                        Some(handle) => {
+                            commands
+                                .entity(child)
+                                .remove::<PlaceholderImage>()
+                                .insert(ImageNode {
+                                    image: handle.clone(),
+                                    ..default()
+                                });
+                        }
+                        None => {
+                            // 新 URL 还没缓存：撤掉旧图，挂回占位标记等 update_comics_images
+                            if has_image {
+                                commands.entity(child).remove::<ImageNode>();
+                            }
+                            commands.entity(child).insert((
+                                PlaceholderImage,
+                                BackgroundColor(AppColors::SURFACE_HOVER),
+                            ));
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // 下载角标：改绑后由 refresh_download_status_badges 按 Changed 刷外观
+            if let Ok(mut badge) = badge_query.get_mut(child) {
+                badge.comic_id = comic.id.clone();
+                badge.remote_episodes = comic.eps_count;
+                continue;
+            }
+
+            // 选中标记：同上，由 refresh_comics_selection_ui 刷显隐
+            if let Ok(mut mark) = mark_query.get_mut(child) {
+                mark.comic_id = comic.id.clone();
+                continue;
+            }
+
+            rebind_card_node(child, comic, &mut node_query);
+
+            // 徽章行 / 时间行的槽位在孙节点上
+            if let Ok(grandchildren) = children_query.get(child) {
+                let grandchild_list: Vec<Entity> = grandchildren.iter().collect();
+                for grandchild in grandchild_list {
+                    rebind_card_node(grandchild, comic, &mut node_query);
+                }
+            }
+        }
+    }
+}
+
+/// 就地重绑一个卡片子节点（标题/作者/徽章槽/时间槽/行容器，认不出的原样跳过）
+fn rebind_card_node(
+    entity: Entity,
+    comic: &picacg_api::models::Comic,
+    node_query: &mut Query<(
+        &mut Node,
+        Option<&mut Text>,
+        Option<&mut TextColor>,
+        Option<&mut BackgroundColor>,
+        Option<&CardBadgeSlot>,
+        Option<&CardTimeSlot>,
+        Option<&CardBadgeRow>,
+        Has<CardTimeRow>,
+        Has<CardTitle>,
+        Has<CardAuthor>,
+    )>,
+) {
+    let Ok((
+        mut node,
+        text,
+        _color,
+        _bg,
+        badge_slot,
+        time_slot,
+        badge_row,
+        is_time_row,
+        is_title,
+        is_author,
+    )) = node_query.get_mut(entity)
+    else {
+        return;
+    };
+
+    // 行容器：只管显隐
+    if let Some(row) = badge_row {
+        let has_content = if row.is_category {
+            !comic.categories.is_empty()
+        } else {
+            !comic.tags.is_empty()
+        };
+        set_display(&mut node, has_content);
+        return;
+    }
+    if is_time_row {
+        set_display(
+            &mut node,
+            comic.created_at.is_some() || comic.updated_at.is_some(),
+        );
+        return;
+    }
+
+    let Some(mut text) = text else {
+        return;
+    };
+
+    if is_title {
+        set_text(&mut text, &comic.title);
+        return;
+    }
+    if is_author {
+        set_text(&mut text, &comic.author);
+        return;
+    }
+    if let Some(slot) = badge_slot {
+        // 前 CARD_CATEGORY_SLOTS 个是分类槽，其后是标签槽
+        let value = if slot.index < CARD_CATEGORY_SLOTS {
+            comic.categories.get(slot.index)
+        } else {
+            comic.tags.get(slot.index - CARD_CATEGORY_SLOTS)
+        };
+        set_text(&mut text, value.map(String::as_str).unwrap_or_default());
+        set_display(&mut node, value.is_some());
+        return;
+    }
+    if let Some(slot) = time_slot {
+        let label = card_time_label(comic, slot.index);
+        set_text(&mut text, label.as_deref().unwrap_or_default());
+        set_display(&mut node, label.is_some());
+    }
+}
+
+/// 比较后写显隐（避免无谓的布局标脏）
+fn set_display(node: &mut Node, visible: bool) {
+    let target = row_display(visible);
+    if node.display != target {
+        node.display = target;
+    }
+}
+
+/// 比较后写文本
+fn set_text(text: &mut Text, value: &str) {
+    if text.as_str() != value {
+        **text = value.to_string();
     }
 }
 
@@ -777,5 +1467,92 @@ pub fn breadcrumb_back_to_categories(
         if *interaction == Interaction::Pressed {
             next_route.set(AppRoute::Categories);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::plan_recycle;
+
+    /// 向下滚一行（4 列）：顶部一行让位给底部一行，实体总数不变
+    #[test]
+    fn recycle_scroll_down_one_row() {
+        let (keep, spare) = plan_recycle(0..12, 4..16);
+        // 新窗口前 8 个槽位沿用旧的第 4..12 个
+        assert_eq!(
+            keep,
+            vec![
+                Some(4),
+                Some(5),
+                Some(6),
+                Some(7),
+                Some(8),
+                Some(9),
+                Some(10),
+                Some(11),
+                None,
+                None,
+                None,
+                None,
+            ]
+        );
+        // 移出的顶部一行拿去改绑
+        assert_eq!(spare, vec![0, 1, 2, 3]);
+    }
+
+    /// 向上滚一行：底部一行让位给顶部一行
+    #[test]
+    fn recycle_scroll_up_one_row() {
+        let (keep, spare) = plan_recycle(4..16, 0..12);
+        assert_eq!(keep[..4], [None, None, None, None]);
+        assert_eq!(
+            keep[4..],
+            [
+                Some(0),
+                Some(1),
+                Some(2),
+                Some(3),
+                Some(4),
+                Some(5),
+                Some(6),
+                Some(7)
+            ]
+        );
+        assert_eq!(spare, vec![8, 9, 10, 11]);
+    }
+
+    /// 完全不重叠（拖滚动条跳跃）：旧卡片全部转为空闲，全靠改绑
+    #[test]
+    fn recycle_disjoint_windows() {
+        let (keep, spare) = plan_recycle(0..8, 40..48);
+        assert!(keep.iter().all(Option::is_none));
+        assert_eq!(spare, (0..8).collect::<Vec<_>>());
+    }
+
+    /// 窗口变小（缩窗口/列数变化）：多出来的旧卡片进空闲池，由调用方销毁
+    #[test]
+    fn recycle_window_shrinks() {
+        let (keep, spare) = plan_recycle(0..12, 0..6);
+        assert_eq!(keep.len(), 6);
+        assert!(keep.iter().all(Option::is_some));
+        assert_eq!(spare, vec![6, 7, 8, 9, 10, 11]);
+    }
+
+    /// 窗口变大：沿用全部旧卡片，新增槽位留空待新建
+    #[test]
+    fn recycle_window_grows() {
+        let (keep, spare) = plan_recycle(0..6, 0..12);
+        assert_eq!(keep.len(), 12);
+        assert!(keep[..6].iter().all(Option::is_some));
+        assert!(keep[6..].iter().all(Option::is_none));
+        assert!(spare.is_empty());
+    }
+
+    /// 窗口不动：全部沿用，零空闲
+    #[test]
+    fn recycle_no_movement() {
+        let (keep, spare) = plan_recycle(8..20, 8..20);
+        assert_eq!(keep, (0..12).map(Some).collect::<Vec<_>>());
+        assert!(spare.is_empty());
     }
 }

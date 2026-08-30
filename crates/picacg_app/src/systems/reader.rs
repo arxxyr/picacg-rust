@@ -14,7 +14,10 @@ use bevy::{input::mouse::MouseWheel, prelude::*};
 use crate::{
     events::*,
     resources::{ComicDetailState, ImageCache, ReadMode, ReaderState},
-    systems::{downloads::get_download_base_path, login::AppColors, widgets::ButtonStyle},
+    systems::{
+        downloads::get_download_base_path, login::AppColors, ui_common::LoadingShimmer,
+        widgets::ButtonStyle,
+    },
     utils::icons::*,
 };
 
@@ -80,6 +83,24 @@ pub struct ReaderModeButton;
 #[derive(Component, Default, Clone)]
 pub struct ReaderScaleText;
 
+/// 缩放按钮动作
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ZoomAction {
+    /// 放大一档
+    #[default]
+    In,
+    /// 缩小一档
+    Out,
+    /// 复位到 100%
+    Reset,
+}
+
+/// 工具栏缩放按钮
+#[derive(Component, Default, Clone)]
+pub struct ReaderZoomButton {
+    pub action: ZoomAction,
+}
+
 // ---------- 单页模式三 slot ----------
 
 /// 单页模式的图片槽位类型
@@ -117,6 +138,8 @@ pub struct WebtoonSlot {
 // ==================== 常量 ====================
 
 mod consts {
+    use bevy::prelude::Color;
+
     pub const TOOLBAR_HEIGHT: f32 = 50.0;
     pub const BOTTOM_BAR_HEIGHT: f32 = 40.0;
     /// 最小缩放比例
@@ -133,6 +156,8 @@ mod consts {
     pub const WEBTOON_PRELOAD_RANGE: usize = 3;
     /// 条漫模式占位高度（未加载图片的默认高度）
     pub const WEBTOON_PLACEHOLDER_HEIGHT: f32 = 1000.0;
+    /// 条漫占位槽底色（骨架屏微光的静息色）
+    pub const SLOT_PLACEHOLDER: Color = Color::srgb(0.05, 0.05, 0.08);
     /// 条漫模式图片间距
     pub const WEBTOON_GAP: f32 = 8.0;
 }
@@ -197,10 +222,116 @@ fn single_page_image_style(scale: f32) -> Node {
     }
 }
 
-/// 条漫模式图片节点样式（宽度 80%，高度自动保持比例，底部间距）
-fn webtoon_image_style() -> Node {
+/// 工具栏缩放按钮场景
+fn zoom_button(action: ZoomAction, icon: &'static str) -> impl Scene + use<> {
+    let marker = ReaderZoomButton { action };
+    bsn! {
+        template_value(marker)
+        Button
+        template_value(ButtonStyle::ghost())
+        Node {
+            width: Val::Px(26.0),
+            height: Val::Px(26.0),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(Color::NONE)
+        Children [
+            (
+                Text(icon)
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(Color::WHITE)
+            )
+        ]
+    }
+}
+
+/// 应用新的缩放比例并同步工具栏百分比文字
+///
+/// 滚轮、键盘、按钮三条入口共用，避免各写一份钳位与文本刷新后走样。
+/// 返回是否真的改变了（用于跳过无谓的日志/刷新）。
+fn apply_scale(
+    reader_state: &mut ReaderState,
+    new_scale: f32,
+    scale_text_query: &mut Query<&mut Text, (With<ReaderScaleText>, Without<ReaderPageText>)>,
+) -> bool {
+    let clamped = new_scale.clamp(consts::MIN_SCALE, consts::MAX_SCALE);
+    if (clamped - reader_state.scale).abs() < 0.001 {
+        return false;
+    }
+    reader_state.scale = clamped;
+    let label = format!("{}%", (clamped * 100.0) as i32);
+    for mut text in scale_text_query.iter_mut() {
+        **text = label.clone();
+    }
+    true
+}
+
+// ==================== 条漫滚动：锚点 ↔ 像素 ====================
+//
+// 条漫的滚动位置以**锚点**（第几页 + 页内偏移）为唯一真相，每帧换算成
+// `ScrollPosition` 写下去。图片真实高度陆续就位时，锚定页**上方**的高度变化
+// 会被换算自然吸收——锚定页在屏幕上的位置纹丝不动，且与用户是否正在滚动无关。
+//
+// 反过来（把 ScrollPosition 当真相、事后纠正）就是旧实现，它的补偿只在
+// 「非用户滚动帧」执行，用户一路拖到底时每帧都是用户滚动帧，补偿全被跳过 →
+// 新图一加载就错位。这是本次重设计要根除的东西。
+//
+// 下面四个函数是纯函数，配有单测——滚动错位靠肉眼复现代价太高。
+
+/// 某页顶边的累计偏移（含页间距）
+fn page_top(heights: &[f32], page: usize) -> f32 {
+    heights
+        .iter()
+        .take(page.min(heights.len()))
+        .map(|h| h + consts::WEBTOON_GAP)
+        .sum()
+}
+
+/// 内容总高度（末页不计尾部间距）
+fn content_height(heights: &[f32]) -> f32 {
+    match heights.len() {
+        0 => 0.0,
+        n => page_top(heights, n) - consts::WEBTOON_GAP,
+    }
+}
+
+/// 锚点 → 滚动像素
+fn anchor_to_scroll(heights: &[f32], anchor: (usize, f32)) -> f32 {
+    (page_top(heights, anchor.0) + anchor.1).max(0.0)
+}
+
+/// 滚动像素 → 锚点
+///
+/// 取「视口顶边落在哪一页」：从头累加直到跨过 `scroll`。页间距算进前一页的
+/// 尾巴，落在间距里时归到前一页的末尾，避免锚点在间距处来回抖。
+fn scroll_to_anchor(heights: &[f32], scroll: f32) -> (usize, f32) {
+    let scroll = scroll.max(0.0);
+    let mut cumulative = 0.0_f32;
+    for (page, height) in heights.iter().enumerate() {
+        let next = cumulative + height + consts::WEBTOON_GAP;
+        if scroll < next {
+            return (page, scroll - cumulative);
+        }
+        cumulative = next;
+    }
+    // 超出末页：钉在最后一页尾部
+    match heights.len() {
+        0 => (0, 0.0),
+        n => (n - 1, scroll - page_top(heights, n - 1)),
+    }
+}
+
+/// 条漫模式图片宽度百分比（基准 80% × 缩放比例）
+fn webtoon_width_percent(scale: f32) -> f32 {
+    consts::WEBTOON_IMAGE_WIDTH_PERCENT * scale
+}
+
+/// 条漫模式图片节点样式（宽度随缩放，高度自动保持比例，底部间距）
+fn webtoon_image_style(scale: f32) -> Node {
     Node {
-        width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
+        width: Val::Percent(webtoon_width_percent(scale)),
         height: Val::Auto,
         margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
         ..default()
@@ -377,11 +508,28 @@ fn reader_toolbar(reader_state: &ReaderState) -> impl Scene + use<> {
                 }
                 Children [
                     (
-                        // 缩放显示
-                        ReaderScaleText
-                        Text({scale_label})
-                        TextFont { font_size: FontSize::Px(14.0) }
-                        TextColor(Color::srgb(0.7, 0.7, 0.7))
+                        // 缩放控件组：− / 百分比 / + / 复位
+                        Node {
+                            flex_direction: FlexDirection::Row,
+                            align_items: AlignItems::Center,
+                            column_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            zoom_button(ZoomAction::Out, ICON_MINUS),
+                            (
+                                // 缩放显示（键盘 +/-/0 与 Ctrl+滚轮也会改它）
+                                ReaderScaleText
+                                Text({scale_label})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(Color::srgb(0.8, 0.8, 0.8))
+                                Node {
+                                    min_width: Val::Px(44.0),
+                                    justify_content: JustifyContent::Center,
+                                }
+                            ),
+                            zoom_button(ZoomAction::In, ICON_PLUS),
+                            zoom_button(ZoomAction::Reset, ICON_REFRESH),
+                        ]
                     ),
                     (
                         // 模式切换按钮（芯片状，保持有底色 → secondary）
@@ -611,7 +759,11 @@ pub fn handle_pictures_loaded(
                     "条漫 Phase 1：当前章节 {} 张图片已就绪，创建视图",
                     reader_state.total_pages
                 );
-                reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
+                reader_state.webtoon_anchor = (reader_state.current_page, 0.0);
+                // 页高表随视图一起重置：换漫画时总页数可能恰好相同，
+                // 只靠 sync 里的长度判断会把上一本的高度留下来
+                reader_state.webtoon_page_heights =
+                    vec![consts::WEBTOON_PLACEHOLDER_HEIGHT; reader_state.total_pages];
                 create_webtoon_view(
                     &mut commands,
                     container,
@@ -694,7 +846,11 @@ pub fn handle_all_pictures_loaded(
         };
 
         // 用完整列表重建条漫视图
-        reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
+        reader_state.webtoon_anchor = (reader_state.current_page, 0.0);
+        // 页高表随视图一起重置：换漫画时总页数可能恰好相同，
+        // 只靠 sync 里的长度判断会把上一本的高度留下来
+        reader_state.webtoon_page_heights =
+            vec![consts::WEBTOON_PLACEHOLDER_HEIGHT; reader_state.total_pages];
         create_webtoon_view(
             &mut commands,
             container,
@@ -1024,12 +1180,14 @@ fn create_webtoon_view(
 
     let current = reader_state.current_page;
 
-    // 初始滚动到用户选择的章节位置
+    // 初始位置只需设锚点，像素值由 sync_webtoon_scroll 每帧算出来。
+    // 旧实现在这里按占位高度硬算一个 scroll_y，图片一加载高度就对不上，
+    // 得靠补偿慢慢"校正到位"——现在不存在这个过程。
     let initial_scroll_y =
         current as f32 * (consts::WEBTOON_PLACEHOLDER_HEIGHT + consts::WEBTOON_GAP);
 
     commands
-        .spawn_scene(webtoon_view(total, initial_scroll_y))
+        .spawn_scene(webtoon_view(total, initial_scroll_y, reader_state.scale))
         .insert(ChildOf(container));
 
     // 图片加载由 update_webtoon_window 每帧自动处理（±3 范围）
@@ -1043,11 +1201,11 @@ fn create_webtoon_view(
 }
 
 /// 条漫视图场景（滚动容器 + 每页一个占位槽位）
-fn webtoon_view(total: usize, initial_scroll_y: f32) -> impl Scene {
+fn webtoon_view(total: usize, initial_scroll_y: f32, scale: f32) -> impl Scene + use<> {
     // 上下留出工具栏高度 + 10px 的余量
     let scroll_padding = UiRect::vertical(Val::Px(consts::TOOLBAR_HEIGHT + 10.0));
     let initial_scroll = Vec2::new(0.0, initial_scroll_y);
-    let slots: Vec<_> = (0..total).map(webtoon_slot).collect();
+    let slots: Vec<_> = (0..total).map(|page| webtoon_slot(page, scale)).collect();
 
     bsn! {
         WebtoonScrollContainer
@@ -1056,7 +1214,8 @@ fn webtoon_view(total: usize, initial_scroll_y: f32) -> impl Scene {
             height: Val::Percent(100.0),
             flex_direction: FlexDirection::Column,
             align_items: AlignItems::Center,
-            overflow: Overflow::scroll_y(),
+            // 双向滚动：缩放 > 125% 时图片宽于视口，需要横向平移（Shift+滚轮）
+            overflow: Overflow::scroll(),
             padding: {scroll_padding},
         }
         BackgroundColor(Color::BLACK)
@@ -1068,19 +1227,107 @@ fn webtoon_view(total: usize, initial_scroll_y: f32) -> impl Scene {
 }
 
 /// 条漫单页槽位场景（占位背景，图片按需懒加载）
-fn webtoon_slot(page: usize) -> impl Scene {
+fn webtoon_slot(page: usize, scale: f32) -> impl Scene + use<> {
+    let width = Val::Percent(webtoon_width_percent(scale));
     bsn! {
         WebtoonSlot { page_index: {Some(page)} }
+        template_value(LoadingShimmer::new(consts::SLOT_PLACEHOLDER))
         Node {
-            width: Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT),
+            width: {width},
             height: Val::Px(consts::WEBTOON_PLACEHOLDER_HEIGHT),
             margin: UiRect::bottom(Val::Px(consts::WEBTOON_GAP)),
         }
-        BackgroundColor(Color::srgb(0.05, 0.05, 0.08))
+        BackgroundColor(consts::SLOT_PLACEHOLDER)
     }
 }
 
-/// 条漫模式：根据滚动位置懒加载当前页 ±3 范围内的图片
+/// 条漫滚动同步：实测页高 → 由锚点算出 `ScrollPosition`
+///
+/// 每帧无条件执行，**不读 `ScrollPosition` 作输入**——本容器没有挂
+/// `ScrollArea`，上游不会写它，所以这里是唯一写者，可以放心地把它当成
+/// 「锚点的投影」而非状态。
+///
+/// 这就是修掉「拉到底加载新图会错位」的关键：锚定页上方的高度一变，
+/// 换算结果同步变，视觉位置自然不动；旧实现要在「非用户滚动帧」才补偿，
+/// 而一路拖动时每帧都是用户滚动帧，补偿永远轮不到。
+pub fn sync_webtoon_scroll(
+    mut reader_state: ResMut<ReaderState>,
+    slot_query: Query<(&WebtoonSlot, &ComputedNode, Has<ImageNode>)>,
+    mut scroll_query: Query<(&mut ScrollPosition, &ComputedNode), With<WebtoonScrollContainer>>,
+) {
+    if reader_state.read_mode != ReadMode::Webtoon || reader_state.pictures.is_empty() {
+        return;
+    }
+    let Ok((mut scroll_pos, container)) = scroll_query.single_mut() else {
+        return;
+    };
+
+    // 页高表按总页数对齐（换章/换漫画后 pictures 变了）
+    let total = reader_state.total_pages;
+    if reader_state.webtoon_page_heights.len() != total {
+        reader_state.webtoon_page_heights = vec![consts::WEBTOON_PLACEHOLDER_HEIGHT; total];
+    }
+
+    // 实测已加载图片的真实高度，覆盖占位值
+    //
+    // 只认带 ImageNode 的槽位：没加载的槽位高度就是占位值本身，
+    // 回写它没有意义，还会把首帧 ComputedNode 尚为 0 的噪声写进去。
+    for (slot, computed, has_image) in slot_query.iter() {
+        if !has_image {
+            continue;
+        }
+        let Some(page) = slot.page_index else {
+            continue;
+        };
+        let measured = computed.size().y * computed.inverse_scale_factor;
+        if measured <= 1.0 {
+            continue;
+        }
+        if let Some(height) = reader_state.webtoon_page_heights.get_mut(page)
+            && (*height - measured).abs() > 0.5
+        {
+            *height = measured;
+        }
+    }
+
+    // 上界优先用引擎实测的内容尺寸——padding、间距的口径以引擎为准，
+    // 两边各算一套迟早对不上，钳位处就会互相打架。
+    //
+    // ⚠️ 但**首帧 ComputedNode 还没布局，content_size 是 0**，直接拿它算上界
+    // 会得到 max_scroll = 0，把「恢复上次阅读页」的锚点当场钳回第 1 页。
+    // 引擎值不可信时退回页高表自算的总高。
+    let inv = container.inverse_scale_factor;
+    let viewport_h = container.size().y * inv;
+    let engine_content_h = container.content_size().y * inv;
+    let content_h = if engine_content_h > 1.0 {
+        engine_content_h
+    } else {
+        content_height(&reader_state.webtoon_page_heights)
+    };
+    let max_scroll = (content_h - viewport_h).max(0.0);
+
+    let raw = anchor_to_scroll(
+        &reader_state.webtoon_page_heights,
+        reader_state.webtoon_anchor,
+    );
+    let desired = raw.min(max_scroll);
+
+    // 被上界钳住时把锚点拉回来，免得锚点越飘越远、反向滚动要空转一段才动
+    if raw - desired > 0.5 {
+        reader_state.webtoon_anchor = scroll_to_anchor(&reader_state.webtoon_page_heights, desired);
+    }
+
+    // 比较后写：避免每帧把 ScrollPosition 标脏，拖累变更检测
+    if (scroll_pos.y - desired).abs() > 0.5 {
+        scroll_pos.y = desired;
+    }
+}
+
+/// 条漫模式：按锚点懒加载当前页 ±3 范围内的图片
+///
+/// 滚动位置本身由 `sync_webtoon_scroll` 负责，这里只管"加载哪些图"。
+/// 两件事拆开之后，本系统不再碰 `ScrollPosition`，也就不存在
+/// 「补偿写入被误判成用户滚动」那类时序问题。
 ///
 /// 所有章节的图片列表已在初始化时全部获取完毕（仅 URL），
 /// 此系统只负责按需下载实际图片数据。不做卸载、不做锚点补偿。
@@ -1090,104 +1337,19 @@ pub fn update_webtoon_window(
     slot_query: Query<(
         Entity,
         &WebtoonSlot,
-        &ComputedNode,
         Option<&ImageNode>,
         Option<&ReaderImageLoading>,
     )>,
-    slot_changed: Query<(), (With<WebtoonSlot>, Changed<ComputedNode>)>,
-    mut scroll_query: Query<(&mut ScrollPosition, &ComputedNode), With<WebtoonScrollContainer>>,
-    mut just_compensated: Local<bool>,
     image_cache: Res<ImageCache>,
     asset_server: Res<AssetServer>,
     mut load_image_messages: MessageWriter<LoadImageRequest>,
-    window_query: Query<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     if reader_state.read_mode != ReadMode::Webtoon || reader_state.pictures.is_empty() {
         return;
     }
 
-    let Ok((mut scroll_pos, _scroll_computed)) = scroll_query.single_mut() else {
-        return;
-    };
-
-    // Mut 的变更检测替代独立的 Changed 探针查询——同系统内
-    // 「Changed<ScrollPosition> 过滤 + &mut ScrollPosition」是 B0001 读写冲突
-    let scroll_is_changed = scroll_pos.is_changed();
-
-    // 只在滚动或槽位布局变化时重算窗口（此前每帧全量收集+排序全部槽位）
-    if !scroll_is_changed && slot_changed.is_empty() {
-        return;
-    }
-
-    // 本帧滚动是否来自用户（锚定补偿写入会在下帧触发变更检测，用标志消费掉）
-    let user_scrolled = scroll_is_changed && !*just_compensated;
-    *just_compensated = false;
-
-    let scale_factor = window_query
-        .single()
-        .ok()
-        .map(|w| w.scale_factor())
-        .unwrap_or(1.0);
-
-    let gap = consts::WEBTOON_GAP;
-
-    // 收集所有槽位的 (page, 高度)，按页码排序
-    // 注意：首帧 ComputedNode 可能返回 0，用占位高度兜底
-    let placeholder_h = consts::WEBTOON_PLACEHOLDER_HEIGHT;
-    let mut slot_infos: Vec<(usize, f32)> = slot_query
-        .iter()
-        .filter_map(|(_, slot, cn, _, _)| {
-            slot.page_index.map(|p| {
-                let h = cn.size().y / scale_factor;
-                (p, if h > 1.0 { h } else { placeholder_h })
-            })
-        })
-        .collect();
-    slot_infos.sort_unstable_by_key(|(p, _)| *p);
-
-    // 指定页的顶边累计偏移（含间距）
-    let top_of = |target: usize| -> f32 {
-        let mut cumulative = 0.0_f32;
-        for &(page, height) in &slot_infos {
-            if page >= target {
-                break;
-            }
-            cumulative += height + gap;
-        }
-        cumulative
-    };
-
-    // 滚动锚定：图片真实高度陆续就位时，占位高度→真实高度的差会把同一滚动偏移
-    // 映射到更早的页（级联漂移回第 1 页）。非用户滚动帧按锚点补偿滚动量，
-    // 保持锚定页的视觉位置不动；恢复上次阅读页也靠它逐步校正到位。
-    if !user_scrolled && let Some((anchor_page, offset)) = reader_state.webtoon_anchor {
-        let desired = (top_of(anchor_page) + offset).max(0.0);
-        if (scroll_pos.y - desired).abs() > 0.5 {
-            scroll_pos.y = desired;
-            *just_compensated = true;
-        }
-    }
-    let scroll_y = scroll_pos.y;
-
-    // 当前页 = 视口顶边所在页（顶边规则：开屏 scroll=0 恒为第 1 页；
-    // 原「视口中心」规则在占位高度下会把页码指到中间值）
-    let mut current_page = 0_usize;
-    let mut cumulative = 0.0_f32;
-    for &(page, height) in &slot_infos {
-        let bottom = cumulative + height;
-        if scroll_y + 2.0 < bottom {
-            current_page = page;
-            break;
-        }
-        cumulative += height + gap;
-        current_page = page;
-    }
-
-    // 用户滚动 → 重锚到当前页（记录页内偏移）
-    if user_scrolled {
-        reader_state.webtoon_anchor = Some((current_page, scroll_y - top_of(current_page)));
-    }
-
+    // 当前页直接取锚点——锚点就是真相，不必再从滚动像素反推
+    let current_page = reader_state.webtoon_anchor.0;
     if reader_state.current_page != current_page {
         reader_state.current_page = current_page;
     }
@@ -1197,7 +1359,7 @@ pub fn update_webtoon_window(
     let load_end = (current_page + consts::WEBTOON_PRELOAD_RANGE + 1).min(reader_state.total_pages);
 
     // 只遍历需要加载的槽位
-    for (entity, slot, _cn, existing_img, loading_marker) in slot_query.iter() {
+    for (entity, slot, existing_img, loading_marker) in slot_query.iter() {
         let Some(page) = slot.page_index else {
             continue;
         };
@@ -1214,6 +1376,12 @@ pub fn update_webtoon_window(
             continue;
         };
         let url = picture.media.url();
+
+        // 终局失败：停掉微光，留一个静止的暗块——一直脉动等于在骗用户"还在加载"
+        if image_cache.is_failed(&url) {
+            commands.entity(entity).remove::<LoadingShimmer>();
+            continue;
+        }
 
         // 用 page_metas 获取正确的章节 order 和章内页码
         let (ep_order, page_in_chapter) = reader_state
@@ -1235,7 +1403,7 @@ pub fn update_webtoon_window(
                     image: handle,
                     ..default()
                 },
-                webtoon_image_style(),
+                webtoon_image_style(reader_state.scale),
             ));
         } else if let Some(handle) = image_cache.get(&url) {
             commands.entity(entity).remove::<BackgroundColor>();
@@ -1244,7 +1412,7 @@ pub fn update_webtoon_window(
                     image: handle.clone(),
                     ..default()
                 },
-                webtoon_image_style(),
+                webtoon_image_style(reader_state.scale),
             ));
         } else if !image_cache.is_loading(&url) {
             load_image_messages.write(LoadImageRequest { url: url.clone() });
@@ -1273,7 +1441,7 @@ pub fn update_webtoon_images_from_cache(
                     image: handle.clone(),
                     ..default()
                 },
-                webtoon_image_style(),
+                webtoon_image_style(reader_state.scale),
             ));
         }
     }
@@ -1288,10 +1456,14 @@ pub fn update_webtoon_scale(
         return;
     }
 
-    // 所有已加载图片的宽度设为 80%
+    // 图片按缩放比例改宽度；未加载的槽位也要跟着改，否则放大后
+    // 已载入的图和占位槽宽度不一致，滚动条与锚定都会跳
+    let width = Val::Percent(webtoon_width_percent(reader_state.scale));
     for (mut node, _slot, img) in webtoon_images_query.iter_mut() {
-        if img.is_some() {
-            node.width = Val::Percent(consts::WEBTOON_IMAGE_WIDTH_PERCENT);
+        if node.width != width {
+            node.width = width;
+        }
+        if img.is_some() && node.height != Val::Auto {
             node.height = Val::Auto;
         }
     }
@@ -1509,7 +1681,12 @@ pub fn reader_mouse_wheel_control(
     mut webtoon_scroll_query: Query<&mut ScrollPosition, With<WebtoonScrollContainer>>,
 ) {
     let ctrl_pressed = keyboard_input.pressed(KeyCode::ControlLeft)
-        || keyboard_input.pressed(KeyCode::ControlRight);
+        || keyboard_input.pressed(KeyCode::ControlRight)
+        // macOS 上 ⌘ 更顺手，且不会被系统缩放手势抢走
+        || keyboard_input.pressed(KeyCode::SuperLeft)
+        || keyboard_input.pressed(KeyCode::SuperRight);
+    let shift_pressed =
+        keyboard_input.pressed(KeyCode::ShiftLeft) || keyboard_input.pressed(KeyCode::ShiftRight);
 
     for event in mouse_wheel_events.read() {
         let scroll_delta = match event.unit {
@@ -1519,18 +1696,21 @@ pub fn reader_mouse_wheel_control(
 
         if ctrl_pressed {
             // Ctrl + 滚轮：缩放
-            let new_scale = if scroll_delta > 0.0 {
-                (reader_state.scale + consts::SCALE_STEP).min(consts::MAX_SCALE)
+            //
+            // ⚠️ macOS 会把 Ctrl+滚轮吃掉当系统缩放手势，触控板上多半到不了这里，
+            // 故工具栏另配了 − / + / ⟲ 按钮和键盘 +/-/0 两条等价入口
+            let step = if scroll_delta > 0.0 {
+                consts::SCALE_STEP
             } else {
-                (reader_state.scale - consts::SCALE_STEP).max(consts::MIN_SCALE)
+                -consts::SCALE_STEP
             };
-
-            if (new_scale - reader_state.scale).abs() > 0.001 {
-                reader_state.scale = new_scale;
-                // 更新缩放文本
-                for mut text in scale_text_query.iter_mut() {
-                    **text = format!("{}%", (reader_state.scale * 100.0) as i32);
-                }
+            let target = reader_state.scale + step;
+            apply_scale(&mut reader_state, target, &mut scale_text_query);
+        } else if shift_pressed && reader_state.read_mode == ReadMode::Webtoon {
+            // Shift + 滚轮：条漫横向平移（放大到宽于视口时用）
+            for mut scroll_pos in webtoon_scroll_query.iter_mut() {
+                scroll_pos.x =
+                    (scroll_pos.x - scroll_delta * consts::WEBTOON_SCROLL_SPEED).max(0.0);
             }
         } else {
             match reader_state.read_mode {
@@ -1542,10 +1722,18 @@ pub fn reader_mouse_wheel_control(
                     }
                 }
                 ReadMode::Webtoon => {
-                    // 不手动限制 max_scroll，让 Bevy 的 overflow: scroll_y() 自然处理上限
-                    for mut scroll_pos in webtoon_scroll_query.iter_mut() {
+                    // 滚轮改的是**锚点**，不是 ScrollPosition：
+                    // 先按当前页高把锚点换算成像素，加上滚动量，再换算回锚点。
+                    // 换算全在同一帧、用同一份页高完成，所以是自洽的；
+                    // 跨帧的高度变化由 sync_webtoon_scroll 吸收。
+                    let heights = &reader_state.webtoon_page_heights;
+                    if !heights.is_empty() {
                         let scroll_amount = -scroll_delta * consts::WEBTOON_SCROLL_SPEED;
-                        scroll_pos.y = (scroll_pos.y + scroll_amount).max(0.0);
+                        let current = anchor_to_scroll(heights, reader_state.webtoon_anchor);
+                        let target = (current + scroll_amount).max(0.0);
+                        // 上界交给 sync_webtoon_scroll 用引擎实测内容高度钳，
+                        // 这里只挡负数，避免两处各算一套上界
+                        reader_state.webtoon_anchor = scroll_to_anchor(heights, target);
                     }
                 }
             }
@@ -1559,31 +1747,44 @@ pub fn reader_zoom_keyboard_control(
     mut reader_state: ResMut<ReaderState>,
     mut scale_text_query: Query<&mut Text, (With<ReaderScaleText>, Without<ReaderPageText>)>,
 ) {
-    let mut scale_changed = false;
-
-    if keyboard_input.just_pressed(KeyCode::Equal)
+    let target = if keyboard_input.just_pressed(KeyCode::Equal)
         || keyboard_input.just_pressed(KeyCode::NumpadAdd)
     {
-        reader_state.scale = (reader_state.scale + consts::SCALE_STEP).min(consts::MAX_SCALE);
-        scale_changed = true;
-    }
-
-    if keyboard_input.just_pressed(KeyCode::Minus)
+        Some(reader_state.scale + consts::SCALE_STEP)
+    } else if keyboard_input.just_pressed(KeyCode::Minus)
         || keyboard_input.just_pressed(KeyCode::NumpadSubtract)
     {
-        reader_state.scale = (reader_state.scale - consts::SCALE_STEP).max(consts::MIN_SCALE);
-        scale_changed = true;
-    }
-
-    if keyboard_input.just_pressed(KeyCode::Digit0) || keyboard_input.just_pressed(KeyCode::Numpad0)
+        Some(reader_state.scale - consts::SCALE_STEP)
+    } else if keyboard_input.just_pressed(KeyCode::Digit0)
+        || keyboard_input.just_pressed(KeyCode::Numpad0)
     {
-        reader_state.scale = 1.0;
-        scale_changed = true;
-    }
+        Some(1.0)
+    } else {
+        None
+    };
 
-    if scale_changed {
-        for mut text in scale_text_query.iter_mut() {
-            **text = format!("{}%", (reader_state.scale * 100.0) as i32);
+    if let Some(target) = target {
+        apply_scale(&mut reader_state, target, &mut scale_text_query);
+    }
+}
+
+/// 工具栏缩放按钮交互（− / + / 复位）
+pub fn reader_zoom_button_interaction(
+    interaction_query: Query<(&Interaction, &ReaderZoomButton), Changed<Interaction>>,
+    mut reader_state: ResMut<ReaderState>,
+    mut scale_text_query: Query<&mut Text, (With<ReaderScaleText>, Without<ReaderPageText>)>,
+) {
+    for (interaction, button) in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        let target = match button.action {
+            ZoomAction::In => reader_state.scale + consts::SCALE_STEP,
+            ZoomAction::Out => reader_state.scale - consts::SCALE_STEP,
+            ZoomAction::Reset => 1.0,
+        };
+        if apply_scale(&mut reader_state, target, &mut scale_text_query) {
+            tracing::debug!("缩放: {}%", (reader_state.scale * 100.0) as i32);
         }
     }
 }
@@ -1681,7 +1882,11 @@ pub fn handle_read_mode_change(
 
             // 如果没有条漫容器，创建
             if webtoon_container_query.is_empty() {
-                reader_state.webtoon_anchor = Some((reader_state.current_page, 0.0));
+                reader_state.webtoon_anchor = (reader_state.current_page, 0.0);
+                // 页高表随视图一起重置：换漫画时总页数可能恰好相同，
+                // 只靠 sync 里的长度判断会把上一本的高度留下来
+                reader_state.webtoon_page_heights =
+                    vec![consts::WEBTOON_PLACEHOLDER_HEIGHT; reader_state.total_pages];
                 create_webtoon_view(
                     &mut commands,
                     container,
@@ -1880,4 +2085,105 @@ pub fn save_reading_history(
         last_eps_title: eps_title,
         last_page: (reader_state.current_page + 1) as i32,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{anchor_to_scroll, consts, content_height, page_top, scroll_to_anchor};
+
+    const GAP: f32 = consts::WEBTOON_GAP;
+
+    /// 页顶偏移 = 前面所有页的高度 + 间距
+    #[test]
+    fn page_top_accumulates_with_gaps() {
+        let heights = [100.0, 200.0, 300.0];
+        assert_eq!(page_top(&heights, 0), 0.0);
+        assert_eq!(page_top(&heights, 1), 100.0 + GAP);
+        assert_eq!(page_top(&heights, 2), 300.0 + 2.0 * GAP);
+    }
+
+    /// 总高度不含末页尾部间距
+    #[test]
+    fn content_height_excludes_trailing_gap() {
+        assert_eq!(content_height(&[]), 0.0);
+        assert_eq!(content_height(&[100.0]), 100.0);
+        assert_eq!(content_height(&[100.0, 200.0]), 300.0 + GAP);
+    }
+
+    /// 锚点 ↔ 像素 往返一致
+    #[test]
+    fn anchor_scroll_round_trip() {
+        let heights = [100.0, 200.0, 300.0, 400.0];
+        for (page, offset) in [(0, 0.0), (0, 50.0), (1, 0.0), (2, 150.0), (3, 399.0)] {
+            let scroll = anchor_to_scroll(&heights, (page, offset));
+            let back = scroll_to_anchor(&heights, scroll);
+            assert_eq!(back.0, page, "page 往返不一致 @ ({page}, {offset})");
+            assert!(
+                (back.1 - offset).abs() < 0.001,
+                "offset 往返不一致 @ ({page}, {offset}) -> {back:?}"
+            );
+        }
+    }
+
+    /// **本次重设计的核心不变量**：锚定页**上方**的页高变化，不改变
+    /// 「锚定页顶边相对滚动位置的距离」——即视觉位置不动。
+    ///
+    /// 旧实现在用户持续滚动时会跳过补偿，正是这条不变量被破坏，
+    /// 表现为"拉到底加载新图就错位"。
+    #[test]
+    fn anchor_absorbs_height_growth_above() {
+        let before = [1000.0, 1000.0, 1000.0, 1000.0];
+        // 第 0、1 页图片加载完，高度由占位 1000 变成真实值
+        let after = [1450.0, 780.0, 1000.0, 1000.0];
+
+        let anchor = (2, 120.0);
+        let scroll_before = anchor_to_scroll(&before, anchor);
+        let scroll_after = anchor_to_scroll(&after, anchor);
+
+        // 滚动像素本身变了（上方内容长高/变矮了）
+        assert_ne!(scroll_before, scroll_after);
+        // 但锚定页顶边到视口顶边的距离没变 —— 视觉上纹丝不动
+        assert!((scroll_before - page_top(&before, 2) - 120.0).abs() < 0.001);
+        assert!((scroll_after - page_top(&after, 2) - 120.0).abs() < 0.001);
+    }
+
+    /// 落在页间距里时归到前一页尾部，不会在间距处左右横跳
+    #[test]
+    fn scroll_in_gap_sticks_to_previous_page() {
+        let heights = [100.0, 200.0];
+        let in_gap = 100.0 + GAP / 2.0;
+        let (page, offset) = scroll_to_anchor(&heights, in_gap);
+        assert_eq!(page, 0);
+        assert!(offset > 100.0 && offset < 100.0 + GAP);
+    }
+
+    /// 越过末页时钉在最后一页，不会跑出数组
+    #[test]
+    fn scroll_past_end_clamps_to_last_page() {
+        let heights = [100.0, 200.0];
+        let (page, offset) = scroll_to_anchor(&heights, 99_999.0);
+        assert_eq!(page, 1);
+        assert!(offset > 0.0);
+    }
+
+    /// 负数滚动归零，空列表不 panic
+    #[test]
+    fn scroll_edges_are_safe() {
+        assert_eq!(scroll_to_anchor(&[100.0], -50.0), (0, 0.0));
+        assert_eq!(scroll_to_anchor(&[], 10.0), (0, 0.0));
+        assert_eq!(anchor_to_scroll(&[], (5, 10.0)), 10.0);
+    }
+
+    /// 滚动量叠加：连续滚动应跨页推进，而不是卡在同一页
+    #[test]
+    fn repeated_scroll_advances_pages() {
+        let heights = [100.0, 100.0, 100.0, 100.0];
+        let mut anchor = (0, 0.0);
+        for _ in 0..3 {
+            let scroll = anchor_to_scroll(&heights, anchor) + (100.0 + GAP);
+            anchor = scroll_to_anchor(&heights, scroll);
+        }
+        assert_eq!(anchor.0, 3);
+        assert!(anchor.1.abs() < 0.001);
+    }
 }

@@ -32,6 +32,8 @@ pub const ICON_PLUS: &str = "\u{F0415}";
 pub const ICON_MINUS: &str = "\u{F0374}";
 /// 󰑐 refresh - 刷新/更新
 pub const ICON_REFRESH: &str = "\u{F0450}";
+/// 󰚰 sync - 强制同步/强制更新
+pub const ICON_SYNC: &str = "\u{F06B0}";
 /// 󰁍 delete - 删除
 pub const ICON_DELETE: &str = "\u{F01B4}";
 

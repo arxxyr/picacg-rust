@@ -373,6 +373,7 @@ fn like_record_card(
 
     bsn! {
         LikeRecordCard { comic_id: {card_comic_id} }
+        // 点赞记录来自本地库，没有服务端章节数，eps_count 留 0 = 未知
         ContextMenuTarget { comic_id: {menu_comic_id}, comic_title: {menu_comic_title} }
         Button
         template_value(ButtonStyle::card())

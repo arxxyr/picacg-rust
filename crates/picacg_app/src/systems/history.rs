@@ -348,6 +348,8 @@ fn history_card(record: &picacg_db::DbHistory, image_cache: &ImageCache) -> impl
     let menu_target = ContextMenuTarget {
         comic_id: record.book_id.clone(),
         comic_title: comic_title.to_string(),
+        // 历史记录来自本地库，没有服务端章节数，留 0 = 未知
+        eps_count: 0,
     };
     let delete_button = HistoryDeleteButton {
         comic_id: record.book_id.clone(),

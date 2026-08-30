@@ -40,12 +40,17 @@ impl Plugin for UiPlugin {
             .init_resource::<GlobalMessageState>()
             .init_resource::<ImageCache>()
             .init_resource::<NavigationHistory>()
+            .init_resource::<DownloadedComicsIndex>()
             .add_systems(
                 Update,
                 (
                     crate::systems::pagination::refresh_pagination_widgets,
                     crate::systems::scrollbar::update_scrollbar_thumb_colors,
                     crate::systems::widgets::apply_button_interaction,
+                    // 封面下载角标：索引变化时全局刷新，卡片无需重建
+                    crate::systems::ui_common::refresh_download_status_badges,
+                    // 图片占位块的骨架屏微光（图片就位后自动退出查询）
+                    crate::systems::ui_common::animate_loading_shimmer,
                 ),
             )
             .init_resource::<SearchState>()
@@ -53,6 +58,7 @@ impl Plugin for UiPlugin {
             .init_resource::<RankingsCardCreationState>()
             .init_resource::<CategoriesCardCreationState>()
             .init_resource::<crate::systems::ComicsVirtualState>()
+            .init_resource::<ComicsSelectionState>()
             .init_resource::<SearchCardCreationState>()
             .init_resource::<FavoritesState>()
             .init_resource::<FavoritesCardCreationState>()
@@ -60,6 +66,7 @@ impl Plugin for UiPlugin {
             .init_resource::<HomeCardCreationState>()
             .init_resource::<PunchInState>()
             .init_resource::<DownloadSectionCollapseState>()
+            .init_resource::<DownloadsToastState>()
             .init_resource::<RegisterFormState>()
             .init_resource::<ForgotPasswordState>()
             .init_resource::<HistoryState>()
@@ -222,9 +229,15 @@ impl Plugin for UiPlugin {
                     breadcrumb_back_to_categories,
                     auto_load_more_comics,
                     refresh_comics_list_ui,
-                    comics_virtual_scroll,
+                    // 顺序要紧：滚动系统排出待改绑清单，重绑系统紧接着消费
+                    (comics_virtual_scroll, comics_rebind_cards).chain(),
                     update_comics_images,
-                    // 滚动条系统
+                    // 批量选择
+                    comics_select_mode_interaction,
+                    comics_select_all_interaction,
+                    comics_clear_selection_interaction,
+                    comics_download_selected_interaction,
+                    refresh_comics_selection_ui,
                 )
                     .run_if(in_state(AppRoute::ComicsList)),
             )
@@ -272,18 +285,22 @@ impl Plugin for UiPlugin {
                     update_single_page_slots,
                     update_reader_image_from_cache,
                     // 条漫模式
-                    update_webtoon_window,
+                    // 顺序要紧：先按锚点定位滚动，再据当前页决定加载哪些图
+                    (sync_webtoon_scroll, update_webtoon_window).chain(),
                     update_webtoon_images_from_cache,
                     update_webtoon_scale,
-                    // 交互
-                    reader_back_button_interaction,
-                    reader_prev_button_interaction,
-                    reader_next_button_interaction,
-                    reader_keyboard_input,
-                    reader_mouse_wheel_control,
-                    reader_zoom_keyboard_control,
-                    reader_mode_button_interaction,
-                    handle_read_mode_change,
+                    // 交互（元组超过 20 项会撞上 bevy 的 tuple impl 上限，故分组嵌套）
+                    (
+                        reader_back_button_interaction,
+                        reader_prev_button_interaction,
+                        reader_next_button_interaction,
+                        reader_keyboard_input,
+                        reader_mouse_wheel_control,
+                        reader_zoom_keyboard_control,
+                        reader_zoom_button_interaction,
+                        reader_mode_button_interaction,
+                        handle_read_mode_change,
+                    ),
                     // 章节切换
                     handle_chapter_switch,
                     // 页码更新
@@ -331,6 +348,12 @@ impl Plugin for UiPlugin {
                     log_level_button_interaction,
                     // 自动恢复下载交互
                     auto_resume_downloads_checkbox_interaction,
+                    exit_after_downloads_checkbox_interaction,
+                    // 性能追踪分组
+                    perf_overlay_checkbox_interaction,
+                    profiling_checkbox_interaction,
+                    refresh_timings_button_interaction,
+                    open_profiling_log_interaction,
                     // 最大并发下载数交互
                     max_concurrent_downloads_decrease_interaction,
                     max_concurrent_downloads_increase_interaction,
@@ -415,6 +438,11 @@ impl Plugin for UiPlugin {
                     redownload_button_interaction,
                     open_completed_folder_button_interaction,
                     move_completed_button_interaction,
+                    // 更新结果反馈（Toast + 已下载列表项摘除）
+                    handle_redownload_skipped,
+                    remove_completed_item_on_redownload,
+                    display_downloads_toast,
+                    auto_hide_downloads_toast,
                 )
                     .run_if(in_state(AppRoute::Downloads)),
             )

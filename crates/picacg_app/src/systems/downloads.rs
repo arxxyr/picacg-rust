@@ -11,14 +11,19 @@ use crate::{
     components::ContentArea,
     events::{
         DownloadCompletedEvent, NavigateToComicDetailEvent, NavigateToComicsListEvent,
-        RedownloadRequest, ResumeDownloadRequest, SearchComicsRequestEvent,
+        RedownloadConfirmed, RedownloadRequest, RedownloadSkipped, ResumeDownloadRequest,
+        SearchComicsRequestEvent,
     },
-    resources::{AppRoute, ComicDownloadStatus, DownloadManagerState, DownloadState, SearchState},
+    resources::{
+        AppRoute, ComicDownloadStatus, DownloadManagerState, DownloadState, DownloadedComicsIndex,
+        SearchState,
+    },
     systems::{
         login::AppColors,
         navigation::NavigationHistory,
         scrollbar::{ScrollArea, scrollbar},
         theme::Scale,
+        ui_common::truncate_text,
         widgets::ButtonStyle,
     },
     utils::{icons::*, tokio_tasks::TokioTasksRuntime},
@@ -71,7 +76,10 @@ pub struct DownloadingTitleText;
 
 /// "全部更新" 按钮标记（检查已下载漫画的新章节）
 #[derive(Component, Default, Clone)]
-pub struct UpdateAllDownloadsButton;
+pub struct UpdateAllDownloadsButton {
+    /// true = 全部强制更新（逐图校验），false = 普通更新（章节数一致即跳过）
+    pub force: bool,
+}
 
 /// "开始全部下载" 按钮标记
 #[derive(Component, Default, Clone)]
@@ -207,6 +215,9 @@ pub struct FloatingHeaderButton {
 #[derive(Component, Default, Clone)]
 pub struct RedownloadButton {
     pub comic_id: String,
+    /// true = 强制更新（逐章拉图片列表、逐图补全），false = 普通更新
+    /// （只比对章节数，一致即跳过）
+    pub force: bool,
 }
 
 /// 打开已下载漫画文件夹按钮
@@ -1129,6 +1140,7 @@ fn styled_header_button<T: Component + Default + Clone + Unpin>(
 fn downloads_header() -> impl Scene {
     let title = format!("{ICON_DOWNLOAD} 下载管理");
     let update_all_label = format!("{ICON_REFRESH} 全部更新");
+    let force_update_all_label = format!("{ICON_SYNC} 全部强制更新");
     let start_all_label = format!("{ICON_PLAY} 全部开始");
     let pause_all_label = format!("{ICON_PAUSE} 全部暂停");
     let open_images_label = format!("{ICON_FOLDER_OPEN} 原图");
@@ -1159,13 +1171,21 @@ fn downloads_header() -> impl Scene {
                     column_gap: Val::Px(8.0),
                 }
                 Children [
-                    // 全部更新按钮
+                    // 全部更新按钮（章节数一致即跳过）
                     styled_header_button(
-                        UpdateAllDownloadsButton,
+                        UpdateAllDownloadsButton { force: false },
                         update_all_label,
                         ButtonStyle::primary(),
                         AppColors::PRIMARY,
                         AppColors::PRIMARY,
+                    ),
+                    // 全部强制更新按钮（逐图校验，慢）
+                    styled_header_button(
+                        UpdateAllDownloadsButton { force: true },
+                        force_update_all_label,
+                        ButtonStyle::card(),
+                        AppColors::SURFACE,
+                        FORCE_REDOWNLOAD_COLOR,
                     ),
                     // 全部开始按钮
                     header_button(StartAllHeaderButton, start_all_label, START_ALL_COLOR),
@@ -1246,6 +1266,8 @@ const FOLDER_COLOR: Color = Color::srgb(0.5, 0.5, 0.6);
 const MOVE_COLOR: Color = Color::srgb(0.5, 0.6, 0.8);
 /// 更新 / 重新下载按钮（青绿）
 const REDOWNLOAD_COLOR: Color = Color::srgb(0.3, 0.7, 0.4);
+/// 强制更新按钮（琥珀——与普通更新区分，提示这是慢路径）
+const FORCE_REDOWNLOAD_COLOR: Color = Color::srgb(0.85, 0.6, 0.25);
 /// 全部开始按钮（深绿）
 const START_ALL_COLOR: Color = Color::srgb(0.2, 0.5, 0.3);
 
@@ -1592,14 +1614,24 @@ fn completed_download_item(download: &CompletedDownload) -> impl Scene + use<> {
 
     // 按钮组
     let mut buttons: Vec<Box<dyn Scene>> = Vec::new();
-    // 重新下载/更新按钮（只有有 comic_id 的才能重新下载）
+    // 更新按钮（快：只比对章节数，一致即跳过）
     if has_comic_id {
         buttons.push(Box::new(labeled_button(
             format!("{ICON_REFRESH} 更新"),
             RedownloadButton {
                 comic_id: download.comic_id.clone(),
+                force: false,
             },
             REDOWNLOAD_COLOR,
+        )));
+        // 强制更新按钮（慢：逐章拉图片列表、逐图补全缺失）
+        buttons.push(Box::new(labeled_button(
+            format!("{ICON_SYNC} 强制更新"),
+            RedownloadButton {
+                comic_id: download.comic_id.clone(),
+                force: true,
+            },
+            FORCE_REDOWNLOAD_COLOR,
         )));
     }
     // 设置按钮（独立下载设置）
@@ -2787,31 +2819,39 @@ pub fn retry_download_button_interaction(
     }
 }
 
-/// 重新下载按钮交互
+/// 重新下载按钮交互（普通更新 / 强制更新共用，按 `RedownloadButton.force`
+/// 分流）
 ///
 /// 点击更新时检查原下载目录是否存在：
 /// - 存在 → 直接发送重新下载请求（原地更新/补全）
 /// - 不存在 → 弹出文件选择对话框让用户选择新目录，从新目录开始下载
+///
+/// **不在这里摘除已下载列表项**：普通更新可能被前置检查判定为「已是最新」，
+/// 摘了就要再补回来。摘除统一交给 `remove_completed_item_on_redownload`
+/// （只在下载真正启动时触发）。
 pub fn redownload_button_interaction(
-    mut commands: Commands,
     mut interaction_query: Query<
         (&Interaction, &mut BackgroundColor, &RedownloadButton),
         Changed<Interaction>,
     >,
-    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
     runtime: ResMut<TokioTasksRuntime>,
 ) {
     use crate::resources::DownloadTaskMeta;
 
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
-        let redownload_color = REDOWNLOAD_COLOR;
+        let base_color = if btn.force {
+            FORCE_REDOWNLOAD_COLOR
+        } else {
+            REDOWNLOAD_COLOR
+        };
         match *interaction {
             Interaction::Pressed => {
-                *bg_color = BackgroundColor(redownload_color.with_alpha(0.4));
+                *bg_color = BackgroundColor(base_color.with_alpha(0.4));
 
                 // 检查路径是否存在，不存在时在后台弹对话框选择
                 let comic_id = btn.comic_id.clone();
+                let force = btn.force;
                 let need_pick =
                     if let Ok(old_meta) = DownloadTaskMeta::load_by_comic_id(&btn.comic_id) {
                         let path = std::path::Path::new(old_meta.effective_download_path());
@@ -2838,6 +2878,7 @@ pub fn redownload_button_interaction(
                             ctx.world.write_message(RedownloadRequest {
                                 comic_id,
                                 new_base_path: Some(new_base),
+                                force,
                             });
                         })
                         .await;
@@ -2847,24 +2888,24 @@ pub fn redownload_button_interaction(
                     redownload_messages.write(RedownloadRequest {
                         comic_id: comic_id.clone(),
                         new_base_path: None,
+                        force,
                     });
-                    tracing::info!("请求重新下载/检查更新: {}", comic_id);
-                }
-
-                // 从已下载列表中移除该项目（避免重复）
-                for (entity, item) in completed_item_query.iter() {
-                    if item.comic_id == btn.comic_id {
-                        commands.entity(entity).despawn();
-                        tracing::debug!("已从已下载列表移除: {}", btn.comic_id);
-                        break;
-                    }
+                    tracing::info!(
+                        "请求{}: {}",
+                        if force {
+                            "强制更新"
+                        } else {
+                            "检查更新"
+                        },
+                        comic_id
+                    );
                 }
             }
             Interaction::Hovered => {
-                *bg_color = BackgroundColor(redownload_color.with_alpha(0.3));
+                *bg_color = BackgroundColor(base_color.with_alpha(0.3));
             }
             Interaction::None => {
-                *bg_color = BackgroundColor(redownload_color.with_alpha(0.2));
+                *bg_color = BackgroundColor(base_color.with_alpha(0.2));
             }
         }
     }
@@ -3884,6 +3925,7 @@ pub fn confirm_delete_button_interaction(
     >,
     checkbox_query: Query<&DeleteFilesCheckbox>,
     completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+    mut downloaded_index: ResMut<DownloadedComicsIndex>,
 ) {
     for (interaction, mut bg_color, btn) in interaction_query.iter_mut() {
         let confirm_color = AppColors::ERROR;
@@ -3923,6 +3965,9 @@ pub fn confirm_delete_button_interaction(
                         }
                     }
                 }
+
+                // 同步封面角标索引（各列表页的对号随之消失）
+                downloaded_index.remove(comic_id);
 
                 // 从 UI 中移除整个项
                 for (entity, item) in completed_item_query.iter() {
@@ -3973,13 +4018,18 @@ pub fn cancel_delete_button_interaction(
     }
 }
 
-/// "全部更新"按钮交互：对所有已下载漫画发送重新下载请求（检查新章节）
+/// "全部更新" / "全部强制更新"按钮交互：对所有已下载漫画发起更新
+///
+/// 两个按钮共用本系统，由 `UpdateAllDownloadsButton.force` 区分：
+/// - `false`：逐个走前置检查，章节数与本地一致的直接跳过（每本 1 个请求）
+/// - `true`：跳过前置检查，逐章拉图片列表补全缺失文件（慢，用于修本地损坏）
 pub fn update_all_downloads_button_interaction(
-    interaction_query: Query<&Interaction, (Changed<Interaction>, With<UpdateAllDownloadsButton>)>,
+    interaction_query: Query<(&Interaction, &UpdateAllDownloadsButton), Changed<Interaction>>,
     download_state: Res<DownloadManagerState>,
     mut redownload_messages: MessageWriter<RedownloadRequest>,
+    mut toast_state: ResMut<DownloadsToastState>,
 ) {
-    for interaction in interaction_query.iter() {
+    for (interaction, btn) in interaction_query.iter() {
         if *interaction != Interaction::Pressed {
             continue;
         }
@@ -3992,12 +4042,203 @@ pub fn update_all_downloads_button_interaction(
             redownload_messages.write(RedownloadRequest {
                 comic_id: dl.comic_id.clone(),
                 new_base_path: None,
+                force: btn.force,
             });
         }
-        tracing::info!(
-            "全部更新：已对 {} 个已下载漫画发送检查更新请求",
-            completed.len()
+
+        let action = if btn.force {
+            "全部强制更新"
+        } else {
+            "全部更新"
+        };
+        tracing::info!("{}：已对 {} 个已下载漫画发起请求", action, completed.len());
+        toast_state.show(
+            format!("{}：已提交 {} 本漫画", action, completed.len()),
+            false,
         );
+    }
+}
+
+// ==================== 更新结果反馈 ====================
+
+/// 下载页 Toast 状态（更新检查结果提示）
+#[derive(Resource, Default)]
+pub struct DownloadsToastState {
+    /// 待显示的消息（None = 无新消息）
+    pub message: Option<String>,
+    /// 是否为错误提示（红底）
+    pub is_error: bool,
+}
+
+impl DownloadsToastState {
+    /// 提交一条待显示的提示
+    pub fn show(&mut self, message: impl Into<String>, is_error: bool) {
+        self.message = Some(message.into());
+        self.is_error = is_error;
+    }
+}
+
+/// 下载页 Toast 标记
+#[derive(Component, Default, Clone)]
+pub struct DownloadsToast;
+
+/// 下载页 Toast 自动消失计时器
+#[derive(Resource)]
+pub struct DownloadsToastTimer(pub Timer);
+
+/// Toast 成功背景色（绿）
+const TOAST_SUCCESS_COLOR: Color = Color::srgb(0.2, 0.55, 0.3);
+/// Toast 失败背景色（红）
+const TOAST_ERROR_COLOR: Color = Color::srgb(0.65, 0.2, 0.2);
+
+/// 「已是最新 / 检查失败」→ 汇总成 Toast 文案
+///
+/// 「全部更新」会一次涌入几十条 `RedownloadSkipped`，逐条弹提示没法看，
+/// 故按帧聚合：同一帧内多条只出一条汇总。
+pub fn handle_redownload_skipped(
+    mut messages: MessageReader<RedownloadSkipped>,
+    mut toast_state: ResMut<DownloadsToastState>,
+) {
+    let mut up_to_date: Vec<String> = Vec::new();
+    let mut failed: Vec<String> = Vec::new();
+
+    for event in messages.read() {
+        if event.error.is_some() {
+            failed.push(event.comic_title.clone());
+        } else {
+            up_to_date.push(event.comic_title.clone());
+        }
+    }
+
+    if up_to_date.is_empty() && failed.is_empty() {
+        return;
+    }
+
+    // 单本时报书名，多本时报数量
+    let describe = |titles: &[String], suffix: &str| -> String {
+        match titles {
+            [only] => format!("《{}》{}", truncate_text(only, 16), suffix),
+            _ => format!("{} 本漫画{}", titles.len(), suffix),
+        }
+    };
+
+    let message = match (up_to_date.as_slice(), failed.as_slice()) {
+        ([], f) => describe(f, "更新检查失败"),
+        (u, []) => describe(u, "已是最新"),
+        (u, f) => format!("{}，{}", describe(u, "已是最新"), describe(f, "检查失败")),
+    };
+    toast_state.show(message, !failed.is_empty());
+}
+
+/// 更新确认后从「已下载」列表摘除该项（避免与新建的下载任务重复显示）
+pub fn remove_completed_item_on_redownload(
+    mut commands: Commands,
+    mut confirmed: MessageReader<RedownloadConfirmed>,
+    mut forced: MessageReader<RedownloadRequest>,
+    completed_item_query: Query<(Entity, &CompletedDownloadItem)>,
+) {
+    let ids: Vec<String> = confirmed
+        .read()
+        .map(|event| event.comic_id.clone())
+        .chain(
+            forced
+                .read()
+                .filter(|event| event.force)
+                .map(|event| event.comic_id.clone()),
+        )
+        .collect();
+
+    if ids.is_empty() {
+        return;
+    }
+
+    for (entity, item) in completed_item_query.iter() {
+        if ids.contains(&item.comic_id) {
+            commands.entity(entity).despawn();
+            tracing::debug!("已从已下载列表移除: {}", item.comic_id);
+        }
+    }
+}
+
+/// 显示下载页 Toast（结构照搬首页签到 Toast）
+pub fn display_downloads_toast(
+    mut commands: Commands,
+    mut toast_state: ResMut<DownloadsToastState>,
+    toast_query: Query<Entity, With<DownloadsToast>>,
+    root_query: Query<Entity, With<DownloadsRoot>>,
+) {
+    let Some(message) = toast_state.message.take() else {
+        return;
+    };
+
+    // 旧 Toast 与计时器先清掉，避免叠加
+    for entity in toast_query.iter() {
+        commands.entity(entity).despawn();
+    }
+    commands.remove_resource::<DownloadsToastTimer>();
+
+    let Ok(root) = root_query.single() else {
+        return;
+    };
+
+    let bg_color = if toast_state.is_error {
+        TOAST_ERROR_COLOR
+    } else {
+        TOAST_SUCCESS_COLOR
+    };
+
+    let toast = commands
+        .spawn_scene(downloads_toast(message.as_str(), bg_color))
+        .id();
+    commands.entity(root).insert_children(0, &[toast]);
+    commands.insert_resource(DownloadsToastTimer(Timer::from_seconds(
+        3.0,
+        TimerMode::Once,
+    )));
+}
+
+/// 下载页 Toast 场景
+fn downloads_toast(message: &str, bg_color: Color) -> impl Scene + use<> {
+    let message = message.to_string();
+
+    bsn! {
+        DownloadsToast
+        Node {
+            width: Val::Percent(100.0),
+            padding: UiRect::all(Val::Px(10.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+        }
+        BackgroundColor(bg_color)
+        ZIndex(100)
+        Children [
+            (
+                Text({message})
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(Color::WHITE)
+            )
+        ]
+    }
+}
+
+/// 计时器到期后移除下载页 Toast
+pub fn auto_hide_downloads_toast(
+    mut commands: Commands,
+    time: Res<Time>,
+    timer: Option<ResMut<DownloadsToastTimer>>,
+    toast_query: Query<Entity, With<DownloadsToast>>,
+) {
+    let Some(mut timer) = timer else {
+        return;
+    };
+
+    timer.0.tick(time.delta());
+    if timer.0.just_finished() {
+        for entity in toast_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        commands.remove_resource::<DownloadsToastTimer>();
     }
 }
 

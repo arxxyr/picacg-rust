@@ -10,6 +10,20 @@ description = "PicACG 漫画客户端 - Rust Bevy 版"
 name = "picacg"
 path = "src/main.rs"
 
+[features]
+default = ["profiling"]
+
+# 系统耗时追踪：打开 bevy_ecs 的 trace，让每个系统的每次执行都带上
+# `info_span!("system", name = ...)`，由 utils::profiling 的 Layer 聚合。
+#
+# 这些 span 在 bevy_ecs 里是 `#[cfg(feature = "trace")]` 门控的，不编进来
+# 就压根不存在，光靠运行时开关拿不到数据——所以**默认开启**，让设置页的
+# 开关有东西可管。真正的开销由「装不装聚合 Layer」决定：不装时没有订阅者对
+# 这个 callsite 感兴趣，tracing 把它缓存成禁用态，`.enter()` 退化成一次分支。
+#
+# 要一个连 span 都不编的构建：`cargo build --no-default-features`
+profiling = ["bevy/trace"]
+
 [dependencies]
 # === 本地 crate ===
 picacg_core = { path = "../picacg_core" }
@@ -75,4 +89,13 @@ futures-util.workspace = true
 
 # === 内存分配器 ===
 mimalloc.workspace = true
+
+# === 窗口图标（bevy 未暴露 winit::window::Icon，需直接依赖 winit）===
+winit.workspace = true
+
+# === macOS dock 图标（AppKit）===
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit.workspace = true
+objc2-foundation.workspace = true
 
