@@ -209,10 +209,12 @@ jobs:
 
       - name: Build release
         env:
-          # release profile 是 lto="fat" + codegen-units=1，单个 rustc 编译
-          # bevy 巨型 crate 峰值约 7GB；16GB 的 runner 上只能跑 1~2 路。
-          # 这里保留 release（产物需要小而快的二进制），用并行度换内存余量
-          CARGO_BUILD_JOBS: 2
+          # release profile 是 lto="fat" + codegen-units=1，后者强制整个 crate
+          # 的代码生成塞进单个单元，bevy_core_pipeline / bevy_render 这类巨型
+          # crate 单个 rustc 峰值约 7GB。16GB 的 runner 上 2 路（≈14GB）实测
+          # 仍会被杀，只能串行。
+          # 产物需要 lto=fat 的小体积二进制，所以不动 profile，用时间换内存
+          CARGO_BUILD_JOBS: 1
         run: cargo build --release -p picacg --target ${{ matrix.target }}
 
       - name: Verify build artifacts
