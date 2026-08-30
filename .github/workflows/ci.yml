@@ -100,14 +100,18 @@ jobs:
           echo "== 磁盘 =="; df -h /
           echo "== CPU =="; nproc
 
+      # ⚠️ 不加 --release，原因不是省时间，是**内存**：
+      # 根 Cargo.toml 的 release profile 是 `lto = "fat"` + `codegen-units = 1`，
+      # 后者强制把整个 crate 的代码生成塞进单个单元，峰值内存 = 整个 crate 一次性
+      # 展开——bevy_core_pipeline / bevy_render 这类巨型 crate 单个 rustc 就要 ~7GB。
+      # 实测即便 CARGO_BUILD_JOBS=2，两个进程也能把 16GB 的 runner 吃穿
+      # （可用内存 80 秒内从 14GB 掉到 28MB，runner 整个被杀）。
+      #
+      # 而单测全是纯函数（内容过滤 / 复用规划 / 条漫锚点换算），release 对它们
+      # 零额外覆盖；debug profile 是 opt-level=0、无 LTO、codegen-units 默认 256，
+      # 内存占用低一个量级。release 的编译覆盖由下面的 build job（三平台）承担。
+      # 附带好处：debug 默认开溢出检查，对算术逻辑比 release 更严
       - name: Run tests
-        env:
-          # 峰值内存 ≈ 并行 rustc 数 × 单进程占用。public runner 是 4 核 / 16GB，
-          # 跑满 4 路编译 bevy 大 crate 会把内存吃穿——实测可用内存 80 秒内
-          # 从 12.8GB 掉到 37MB，runner 整个被杀（日志只有一句
-          # "received a shutdown signal"，没有任何现场）。
-          # 砍到 2 路后峰值减半，16GB 上留出充足余量
-          CARGO_BUILD_JOBS: 2
         run: |
           # 后台每 20 秒记一次余量，死前最后一条即为现场
           ( while true; do
@@ -116,7 +120,7 @@ jobs:
             done ) &
           MONITOR_PID=$!
           trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT
-          cargo test --all --release
+          cargo test --all
 
   # ============ 构建 ============
   build:
@@ -205,7 +209,9 @@ jobs:
 
       - name: Build release
         env:
-          # 同 test job：限制并行度压住编译峰值内存（见那边的说明）
+          # release profile 是 lto="fat" + codegen-units=1，单个 rustc 编译
+          # bevy 巨型 crate 峰值约 7GB；16GB 的 runner 上只能跑 1~2 路。
+          # 这里保留 release（产物需要小而快的二进制），用并行度换内存余量
           CARGO_BUILD_JOBS: 2
         run: cargo build --release -p picacg --target ${{ matrix.target }}
 

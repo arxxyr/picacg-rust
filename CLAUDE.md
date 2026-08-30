@@ -1269,11 +1269,19 @@ fn auto_resume_downloads_on_startup(
 |-----|---------|------|
 | `fmt` | push/PR | `cargo fmt --all -- --check` |
 | `clippy` | push/PR | `cargo clippy --all --all-targets` |
-| `test` | clippy 通过后 | `cargo test --all --release` |
+| `test` | clippy 通过后 | `cargo test --all`（**不用 release**，见下） |
 | `build` | test 通过后 | Linux x64 + Windows x64 + macOS ARM64 矩阵构建 |
 | `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
 | `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |
 
+> ⚠️ **test job 不能加 `--release`**：根 `Cargo.toml` 的 release profile 是
+> `lto = "fat"` + `codegen-units = 1`，后者强制把整个 crate 的代码生成塞进单个
+> 单元，**峰值内存 = 整个 crate 一次性展开**——`bevy_core_pipeline` / `bevy_render`
+> 这类巨型 crate 单个 rustc 就要约 **7GB**。实测即便 `CARGO_BUILD_JOBS=2`，
+> 两个进程也能把 16GB 的 runner 吃穿（可用内存 80 秒内从 14GB 掉到 28MB）。
+> 单测全是纯函数，release 零额外覆盖；release 的编译覆盖由 `build` job 承担。
+> **这个 profile 是为产物刻意配的，不要为了 CI 去改它。**
+>
 > ⚠️ **仓库必须保持 public**：私有仓库的免费 runner 只有 **2 核 / 7.8GB**，
 > 编译 `bevy_ui` / `bevy_render` 会把内存吃穿，runner 直接被杀
 > （`The runner has received a shutdown signal` + exit 143，日志停在编译中途、
