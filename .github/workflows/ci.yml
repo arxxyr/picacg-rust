@@ -108,12 +108,13 @@ jobs:
       # 附带好处：debug 默认开溢出检查，对算术逻辑反而比 release 更严
       - name: Run tests
         env:
-          # 峰值内存 ≈ 并行 rustc 进程数 × 单进程占用。4 路并行啃 bevy_ui 这类
-          # 大 crate 会把 16GB 的 runner 打爆，表现为 runner 直接被杀
+          # runner 实测只有 7.8GB 内存（可用 6.7GB），而 bevy_ui 这类巨型 crate
+          # 单个 rustc 就要吃掉数 GB——并行 2 路仍会打爆，表现为 runner 整个被杀
           # （"received a shutdown signal" + exit 143，日志停在编译中途）。
           # 判据：同样编译整棵依赖树的 clippy job 从没挂过——它只做元数据分析、
-          # 不做代码生成，正是 codegen 阶段吃内存
-          CARGO_BUILD_JOBS: 2
+          # 不做代码生成，正是 codegen 阶段吃内存。
+          # 串行编译换稳定性，CI 时间可接受
+          CARGO_BUILD_JOBS: 1
           # 单测不需要调试符号，关掉同时省内存和磁盘
           CARGO_PROFILE_DEV_DEBUG: "0"
           CARGO_PROFILE_TEST_DEBUG: "0"
