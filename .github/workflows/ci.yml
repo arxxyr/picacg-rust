@@ -91,8 +91,25 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
+      # 诊断步骤，长期保留：runner 被杀时日志里只有一句
+      # "received a shutdown signal"，没有任何现场。曾因缺这几行连挂 7 次 CI、
+      # 先后错怪 release 编译/并行度/bevy_trace/Cargo.lock——先看数据，别猜
+      - name: Show runner resources
+        run: |
+          echo "== 内存 =="; free -h
+          echo "== 磁盘 =="; df -h /
+          echo "== CPU =="; nproc
+
       - name: Run tests
-        run: cargo test --all --release
+        run: |
+          # 后台每 20 秒记一次余量，死前最后一条即为现场
+          ( while true; do
+              echo "[res] $(date -u +%H:%M:%S) 可用内存=$(free -m | awk 'NR==2{print $7}')MB 可用磁盘=$(df -m / | awk 'NR==2{print $4}')MB"
+              sleep 20
+            done ) &
+          MONITOR_PID=$!
+          trap 'kill $MONITOR_PID 2>/dev/null || true' EXIT
+          cargo test --all --release
 
   # ============ 构建 ============
   build:
