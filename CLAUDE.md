@@ -1269,10 +1269,17 @@ fn auto_resume_downloads_on_startup(
 |-----|---------|------|
 | `fmt` | push/PR | `cargo fmt --all -- --check` |
 | `clippy` | push/PR | `cargo clippy --all --all-targets` |
-| `test` | clippy 通过后 | `cargo test --all --release` |
+| `test` | clippy 通过后 | `cargo test --all`（**不用 release**，见下） |
 | `build` | test 通过后 | Linux x64 + Windows x64 + macOS ARM64 矩阵构建 |
 | `release` | 推送 `v*` 标签 | 下载产物、创建 GitHub Release |
 | `dev-build-summary` | master/main/develop 推送 | 生成构建摘要 |
+
+> **test job 不用 `--release`**：单测全是纯函数（内容过滤 / 复用规划 / 条漫锚点换算），
+> release 对它们零额外覆盖，却要把 bevy 整棵依赖树做优化编译——实测两次都在
+> release 编译依赖的第 8~12 分钟被 runner 杀掉
+> （`The runner has received a shutdown signal` + exit 143，资源耗尽的典型形态）。
+> release 的编译覆盖交给 `build` job（三平台）。附带好处：debug 默认开溢出检查，
+> 对算术逻辑比 release 更严。
 
 **版本号格式：**
 - Release（标签触发）：`v{版本号}+{commit短哈希}`
