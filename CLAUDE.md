@@ -1019,7 +1019,7 @@ pub struct ChannelSettings {
 不必改动那 120+ 个系统的注册代码。
 
 **为什么开关要重启**：两层门。① 编译期，那对 span 在 bevy_ecs 里是
-`#[cfg(feature = "trace")]` 门控的，不编进来就不存在——所以 `profiling` 是**默认 feature**；
+`#[cfg(feature = "trace")]` 门控的，不编进来就不存在——需 `--features profiling`；
 ② 启动期，bevy 在系统初始化时**一次性**建好 Span 对象，那一刻没有订阅者感兴趣就
 永远是禁用态，运行中再装 Layer 也救不回来。反过来这也是关掉时几乎零成本的原因：
 tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次分支。
@@ -1027,6 +1027,12 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
 **踩过的坑**：
 
 - 只做运行时开关不开 feature → 榜单恒空（曾照着"不受 feature 门控"的错误判断写过一版）
+- ⚠️ **`profiling` 不能设成默认 feature**：`bevy/trace` 直接插桩 bevy_render 等巨型
+  crate，编译峰值内存随之上涨。GitHub 的 ubuntu runner 实测只有 **7.8GB 内存 + 3GB
+  swap**，开了之后单个 rustc 编译 bevy_render 陷入交换抖动——实测卡死 35 分钟零输出、
+  runner 被整个杀掉（`received a shutdown signal` + exit 143），把 `CARGO_BUILD_JOBS`
+  降到 1 也无济于事（不是并行度问题，是单 crate 峰值就超了）。
+  曾为了让设置页开关在普通构建里可用而设成默认，连挂 5 次 CI 才定位到
 - span 是 `info` 级：日志等级低于 info，tracing 会把 span 整个滤掉，榜单同样是空的
 - `Extensions::insert` 撞到同类型已存在会 **panic**；同一 span 每帧重新进入，
   记录进入时刻必须用 `replace`（第一版在登录页直接崩）
