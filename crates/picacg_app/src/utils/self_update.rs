@@ -88,15 +88,52 @@ pub fn run_update(
 
 /// 下载产物，返回 (内容, 文件名)
 fn download(url: &str) -> Result<(Vec<u8>, String), String> {
-    let file_name = url
+    let file_name = file_name_from_url(url);
+    let response = http_get(url)?;
+    Ok((response, file_name))
+}
+
+/// 从下载直链取出落盘用的文件名
+///
+/// ⚠️ 必须**百分号解码**：本项目的发版格式是 `v{version}+{commit}`，GitHub 在
+/// `browser_download_url` 里把 `+` 转义成 `%2B`，直接取 URL 末段会让文件名带上
+/// 字面量 `%2B`（`…v0.5.0%2B20260830.c43f411-macos-arm64.dmg`）——落盘名和弹给
+/// 用户的提示都会是这个样子。发版格式决定了这一定会中，不是偶发。
+fn file_name_from_url(url: &str) -> String {
+    let tail = url
         .rsplit('/')
         .next()
         .filter(|s| !s.is_empty())
-        .unwrap_or("picacg-update")
-        .to_string();
+        .unwrap_or("picacg-update");
+    percent_decode(tail)
+}
 
-    let response = http_get(url)?;
-    Ok((response, file_name))
+/// 最小百分号解码
+///
+/// 只处理 `%XX`：文件名里不会出现 `+` 代表空格那套 form 编码语义
+/// （那是 query string 的规则，用在这里反而会把版本号里的 `+` 吃掉）。
+/// 非法转义原样保留——宁可留个怪名字，也不能把文件名解坏。
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = (i + 2 < bytes.len() && bytes[i] == b'%')
+            .then(|| std::str::from_utf8(&bytes[i + 1..i + 3]).ok())
+            .flatten()
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
+        match hex {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 取 URL 内容（阻塞）
@@ -252,7 +289,7 @@ fn install(bytes: Vec<u8>, file_name: &str) -> Result<UpdateOutcome, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_from_targz;
+    use super::{extract_from_targz, file_name_from_url, percent_decode};
 
     /// 造一个内存里的 tar.gz，验证能按文件名取出内容
     fn make_targz(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -295,5 +332,43 @@ mod tests {
         let gz = make_targz(&[("./VERSION", b"v0.5.0")]);
         let err = extract_from_targz(&gz, "picacg").unwrap_err();
         assert!(err.contains("picacg"), "错误信息应指出缺什么: {err}");
+    }
+
+    /// 取自 v0.5.0 的真实直链：GitHub 把版本号里的 `+` 转义成了 `%2B`
+    #[test]
+    fn decodes_plus_in_real_release_url() {
+        let url = "https://github.com/arxxyr/picacg-rust/releases/download/v0.5.0/\
+                   picacg-v0.5.0%2B20260830.c43f411-macos-arm64.dmg";
+        assert_eq!(
+            file_name_from_url(url),
+            "picacg-v0.5.0+20260830.c43f411-macos-arm64.dmg"
+        );
+    }
+
+    /// 没有转义的直链原样返回
+    #[test]
+    fn plain_url_is_unchanged() {
+        let url = "https://example.com/a/b/picacg-v0.5.0-linux-x64.tar.gz";
+        assert_eq!(file_name_from_url(url), "picacg-v0.5.0-linux-x64.tar.gz");
+    }
+
+    /// `+` 不能按 form 编码当成空格——版本号里的 `+` 必须原样留着
+    #[test]
+    fn plus_is_not_treated_as_space() {
+        assert_eq!(percent_decode("v0.5.0+abc"), "v0.5.0+abc");
+    }
+
+    /// 残缺/非法转义原样保留，不能把文件名解坏
+    #[test]
+    fn malformed_escapes_are_kept_verbatim() {
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("a%2"), "a%2");
+        assert_eq!(percent_decode("a%ZZb"), "a%ZZb");
+    }
+
+    /// 多字节 UTF-8 按字节拼回来
+    #[test]
+    fn decodes_multibyte_utf8() {
+        assert_eq!(percent_decode("%E6%BC%AB%E7%94%BB"), "漫画");
     }
 }

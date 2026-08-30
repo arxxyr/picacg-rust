@@ -1070,6 +1070,12 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
   下载是 `reqwest::blocking`），**任一处漏配代理，症状都是「提示有新版本但下不下来」**
 - `extract_from_targz` 抽成**平台无关的纯函数 + 单测**：它只有 Linux 分支用得到，
   写在 `#[cfg(target_os = "linux")]` 里就只有 CI 的 Linux 构建才编译，写错要等一轮 CI
+- ⚠️ **产物文件名要百分号解码**：发版格式含 `+`，GitHub 在
+  `browser_download_url` 里把它转义成 `%2B`。直接取 URL 末段当文件名，落盘名与
+  弹给用户的提示都会带字面量 `%2B`（`…v0.5.0%2B20260830.c43f411-…dmg`）。
+  `file_name_from_url` 先解码；解码只认 `%XX`，**不能把 `+` 当空格**
+  （那是 query string 的 form 编码规则，用在这里会吃掉版本号里的 `+`）。
+  发版格式决定了这一定会中，不是偶发——有单测，样本取自 v0.5.0 的真实直链
 - ⚠️ `compare_versions` 必须先切掉 `+build` / `-prerelease` 后缀再比数字段。
   本项目发版格式就是 `v{version}+{commit}`，旧实现用
   `filter_map(parse::<u64>)` 把 `0+abc1234` 这种段**静默丢掉**，
@@ -1325,6 +1331,12 @@ fn auto_resume_downloads_on_startup(
 **版本号格式：**
 - Release（标签触发）：`v{版本号}+{commit短哈希}`
 - Dev（分支推送）：`v{版本号}+{日期}.{commit短哈希}`
+
+> ⚠️ **命名判据不能只看 `refs/tags/v*`**：master 推送走的是 `auto-release`，
+> **tag 是在产物构建完之后才创建的**，`build` job 永远看不到它——v0.5.0 因此被
+> 打成 Dev 格式（`picacg-v0.5.0+20260830.c43f411-…`）发了出去。现在 master/main
+> 上复用 auto-release 的同一判据：`git ls-remote` 查该版本 tag 是否已存在，
+> 不存在 = 本次推送会被发布 → 按 Release 命名。两条发布路径由此对齐。
 
 **构建平台：**
 - Linux x64（Ubuntu 22.04 LTS，glibc 2.35）

@@ -186,7 +186,24 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
 
+          # 命名分 Release / Dev 两档（见 CLAUDE.md §9）。判据不能只看
+          # `refs/tags/v*`：master 推送走的是 auto-release，tag 是在**产物构建完
+          # 之后**才创建的，build job 永远看不到它——v0.5.0 就因此被打成了
+          # Dev 格式（picacg-v0.5.0+20260830.c43f411-…）发了出去。
+          # 故 master/main 上复用 auto-release 的同一判据：该版本 tag 尚不存在
+          # = 本次推送会被发布 → 按 Release 命名。
+          IS_RELEASE=false
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            IS_RELEASE=true
+          elif [[ "${{ github.ref }}" == refs/heads/master || "${{ github.ref }}" == refs/heads/main ]]; then
+            # ls-remote 失败会因 `set -e` 直接中止本步骤，不会静默误判
+            EXISTING_TAG=$(git ls-remote --tags origin "refs/tags/v${BASE_VERSION}")
+            if [ -z "$EXISTING_TAG" ]; then
+              IS_RELEASE=true
+            fi
+          fi
+
+          if [ "$IS_RELEASE" = true ]; then
             BUILD_META="${SHORT_SHA}"
             BUILD_TYPE="release"
           else
