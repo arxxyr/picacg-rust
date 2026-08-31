@@ -2,7 +2,6 @@
 //!
 //! 应用配置管理
 
-#![allow(dead_code)]
 #![allow(unused_imports)]
 
 mod settings;

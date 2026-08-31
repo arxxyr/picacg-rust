@@ -1,6 +1,5 @@
 //! API 端点定义
 
-#![allow(dead_code)]
 #![allow(unused_imports)]
 
 pub mod auth;

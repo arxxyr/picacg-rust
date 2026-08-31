@@ -3,8 +3,6 @@
 //! 基于键值对的轻量级翻译系统，支持简体中文、繁体中文、英文。
 //! 使用 `I18n` 资源在 Bevy ECS 系统中获取翻译文本。
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -17,7 +15,6 @@ use picacg_config::Language;
 #[derive(Resource)]
 pub struct I18n {
     translations: HashMap<&'static str, &'static str>,
-    pub language: Language,
 }
 
 impl I18n {
@@ -28,25 +25,12 @@ impl I18n {
             Language::ZhTW => Self::zh_tw(),
             Language::En => Self::en(),
         };
-        Self {
-            translations,
-            language,
-        }
+        Self { translations }
     }
 
     /// 获取翻译文本，key 不存在时返回 key 本身
     pub fn t<'a>(&'a self, key: &'a str) -> &'a str {
         self.translations.get(key).copied().unwrap_or(key)
-    }
-
-    /// 切换语言（重建翻译表）
-    pub fn switch(&mut self, language: Language) {
-        self.language = language;
-        self.translations = match language {
-            Language::ZhCN => Self::zh_cn(),
-            Language::ZhTW => Self::zh_tw(),
-            Language::En => Self::en(),
-        };
     }
 
     /// 简体中文翻译表

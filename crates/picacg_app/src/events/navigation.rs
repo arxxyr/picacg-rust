@@ -43,21 +43,8 @@ pub struct NavigateForwardEvent;
 #[derive(Message)]
 pub struct NavigateToLoginEvent;
 
-/// 导航到评论页面
-#[derive(Message)]
-pub struct NavigateToCommentsEvent {
-    pub comic_id: String,
-}
-
 /// 导航到游戏详情
 #[derive(Message)]
 pub struct NavigateToGameDetailEvent {
     pub game_id: String,
-}
-
-/// 导航到聊天室
-#[derive(Message)]
-pub struct NavigateToChatRoomEvent {
-    pub room_id: String,
-    pub room_title: String,
 }

@@ -811,8 +811,6 @@ pub fn handle_nas_upload_progress(
         } else {
             nas_state.upload_tasks.push(NasUploadTask {
                 comic_title: event.comic_title.clone(),
-                local_path: String::new(),
-                remote_path: String::new(),
                 status: NasUploadStatus::Uploading,
                 uploaded_files: event.uploaded_files,
                 total_files: event.total_files,

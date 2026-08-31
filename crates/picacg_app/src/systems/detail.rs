@@ -2,8 +2,6 @@
 //!
 //! 实现漫画详情页面的 UI 和交互
 
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use picacg_api::models::{Comic, Episode};
 
@@ -30,10 +28,6 @@ mod episode_layout {
     pub const COLUMN_GAP: f32 = 10.0;
     /// 行间距
     pub const ROW_GAP: f32 = 10.0;
-    /// 左内边距
-    pub const PADDING_LEFT: f32 = 20.0;
-    /// 右内边距
-    pub const PADDING_RIGHT: f32 = 20.0;
     /// 上内边距
     pub const PADDING_TOP: f32 = 15.0;
     /// 下内边距
@@ -57,10 +51,6 @@ pub struct AuthorButton {
 /// 详情页点赞数文本
 #[derive(Component, Default, Clone)]
 pub struct DetailLikesText;
-
-/// 详情页收藏按钮文本
-#[derive(Component, Default, Clone)]
-pub struct DetailFavoriteText;
 
 /// 分类标签组件（可点击）
 #[derive(Component, Default, Clone)]

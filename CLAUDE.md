@@ -477,7 +477,7 @@ width:100% 独占整行）撑起总高度——引擎 `content_size()` 与上游
   （`api_plugin::process_image_queue` 每帧调 `requeue_ready_retries()`，无待重试项 O(1) 直返）
 - `is_failed()` 只对终局失败返回真——重试期间消费系统保持占位符存活，成功后图片正常落位；
   终局失败才摘除占位标记（实体退出每帧扫描集）
-- `enqueue()` 对任何已有状态的 URL 不重复入队（防重复请求）；手动强制重来用 `retry()`（计数归零）
+- `enqueue()` 对任何已有状态的 URL 不重复入队（防重复请求）。曾有的手动 `retry()` 无任何调用者，2026-08-31 死代码清扫时已删——需要「强制重来」语义时再加回并接线
 - 下载并发上限 15；解码走 `spawn_blocking`（不占 tokio worker）；显存单份（RENDER_WORLD）
 
 ### 瀑布式系统与 refresh 函数的职责分离
@@ -1123,9 +1123,12 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
     它每次都能打出来正是没人处理的证据）
   - **根因**：`api_plugin.rs` 顶部曾有 `#![allow(dead_code)]`，模块级，
     把整个 4500 行文件的死代码警告全静音了——三个私有 fn 零引用，
-    编译器本该直接报出来。**该行已删**（实测只遮着 1 个真死代码，
-    即已删除的 `get_download_base_path_public`）。往这个文件加系统时，
-    编译器现在是站在你这边的，别再把那行加回去
+    编译器本该直接报出来
+  - **2026-08-31 已全项目根治**：14 处模块级 `#![allow(dead_code)]`（合计静音
+    约 1.8 万行）全部移除，暴露的 67 项死代码已清干净（净删约 450 行，含整个
+    `events/ui_events.rs`、`error.rs` 与一批影子重复组件）。**纪律：任何文件都
+    不准再加模块级 `#![allow(dead_code)]`**；个别确需保留的项用单项
+    `#[allow(dead_code)]` 并写明保留理由。clippy `-D warnings` 现在是真闸门
   - 自查手法：`grep -rn '^pub fn ' | 逐个查全项目引用数`，
     零引用即可疑（对私有 fn 则靠编译器）
 

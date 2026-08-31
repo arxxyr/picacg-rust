@@ -1,8 +1,6 @@
 //! UI 组件标记
 //!
-//! 定义用于标识 UI 实体的组件，部分预留
-
-#![allow(dead_code)]
+//! 定义用于标识 UI 实体的组件
 
 use bevy::prelude::*;
 
@@ -28,23 +26,7 @@ pub struct ComicsListRoot;
 #[derive(Component, Default, Clone)]
 pub struct ComicDetailRoot;
 
-/// 阅读器根节点
-#[derive(Component, Default, Clone)]
-pub struct ReaderRoot;
-
-/// 代理设置根节点
-#[derive(Component, Default, Clone)]
-pub struct ProxySettingsRoot;
-
 // ==================== 登录页面组件 ====================
-
-/// 用户名输入框
-#[derive(Component, Default, Clone)]
-pub struct UsernameInput;
-
-/// 密码输入框
-#[derive(Component, Default, Clone)]
-pub struct PasswordInput;
 
 /// 登录按钮
 #[derive(Component, Default, Clone)]
@@ -205,22 +187,6 @@ pub struct ComicThumbnail {
     pub url: String,
 }
 
-/// 分页控件
-#[derive(Component, Default, Clone)]
-pub struct PaginationControl;
-
-/// 上一页按钮
-#[derive(Component, Default, Clone)]
-pub struct PrevPageButton;
-
-/// 下一页按钮
-#[derive(Component, Default, Clone)]
-pub struct NextPageButton;
-
-/// 页码文本
-#[derive(Component, Default, Clone)]
-pub struct PageNumberText;
-
 // ==================== 漫画详情组件 ====================
 
 /// 漫画封面（`url` 供图片替换系统直接取用，避免每帧回查详情状态重算 URL）
@@ -247,39 +213,6 @@ pub struct FavoriteButton;
 #[derive(Component, Default, Clone)]
 pub struct StartReadButton;
 
-// ==================== 阅读器组件 ====================
-
-/// 阅读器图片
-#[derive(Component, Default, Clone)]
-pub struct ReaderImage;
-
-/// 阅读器工具栏
-#[derive(Component, Default, Clone)]
-pub struct ReaderToolbar;
-
-/// 上一页按钮（阅读器）
-#[derive(Component, Default, Clone)]
-pub struct PrevPictureButton;
-
-/// 下一页按钮（阅读器）
-#[derive(Component, Default, Clone)]
-pub struct NextPictureButton;
-
-/// 缩放按钮
-#[derive(Component, Default, Clone)]
-pub struct ZoomButton {
-    pub zoom_type: ZoomType,
-}
-
-/// 缩放类型
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ZoomType {
-    #[default]
-    In,
-    Out,
-    Reset,
-}
-
 // ==================== 右键菜单目标 ====================
 
 /// 右键菜单目标（添加到所有漫画卡片上，供全局右键菜单系统使用）
@@ -305,10 +238,6 @@ pub struct LoadingIndicator;
 #[derive(Component, Default, Clone)]
 pub struct ErrorMessage;
 
-/// 成功消息
-#[derive(Component, Default, Clone)]
-pub struct SuccessMessage;
-
 /// 占位符图片
 #[derive(Component, Default, Clone)]
 pub struct PlaceholderImage;
@@ -326,10 +255,6 @@ pub struct ComicsScrollContainer;
 /// 漫画详情滚动容器
 #[derive(Component, Default, Clone)]
 pub struct DetailScrollContainer;
-
-// 注意：滚动条组件（ScrollbarContainer, ScrollbarTrack, ScrollbarThumb,
-// ScrollbarDragState, ContentSizeInfo） 定义于 systems/scrollbar
-// crate，在文件顶部通过 pub use 重新导出
 
 // ==================== 忘记密码页面组件 ====================
 

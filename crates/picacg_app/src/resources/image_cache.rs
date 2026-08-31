@@ -48,8 +48,6 @@ pub enum ImageLoadState {
     Loaded(Handle<Image>),
     /// 加载失败
     Failed {
-        /// 错误信息
-        error: String,
         /// 已尝试次数
         attempts: u32,
         /// 下次重试时刻；`None` = 尝试耗尽，终局失败
@@ -69,11 +67,6 @@ pub struct ImageCache {
 }
 
 impl ImageCache {
-    /// 检查图片是否已加载
-    pub fn is_loaded(&self, url: &str) -> bool {
-        matches!(self.states.get(url), Some(ImageLoadState::Loaded(_)))
-    }
-
     /// 检查图片是否正在加载
     pub fn is_loading(&self, url: &str) -> bool {
         matches!(self.states.get(url), Some(ImageLoadState::Loading { .. }))
@@ -107,22 +100,9 @@ impl ImageCache {
     /// 添加到待处理队列
     ///
     /// 任何已有状态（含失败）的 URL 都不会重复入队；
-    /// 失败重试由内部退避机制自动安排，外部强制重来用 `retry`。
+    /// 失败重试由内部退避机制自动安排。
     pub fn enqueue(&mut self, url: String) {
         if !self.states.contains_key(&url) {
-            self.states
-                .insert(url.clone(), ImageLoadState::Pending { attempts: 0 });
-            self.pending_queue.push_back(url);
-        }
-    }
-
-    /// 清除既有状态并重新入队（手动强制重试入口，尝试计数归零）
-    #[allow(dead_code)]
-    pub fn retry(&mut self, url: String) {
-        if let Some(ImageLoadState::Failed { retry_at, .. }) = self.states.get(&url) {
-            if retry_at.is_some() {
-                self.retrying_count = self.retrying_count.saturating_sub(1);
-            }
             self.states
                 .insert(url.clone(), ImageLoadState::Pending { attempts: 0 });
             self.pending_queue.push_back(url);
@@ -213,22 +193,8 @@ impl ImageCache {
             );
             None
         };
-        self.states.insert(
-            url,
-            ImageLoadState::Failed {
-                error,
-                attempts,
-                retry_at,
-            },
-        );
-    }
-
-    /// 获取已加载图片数量
-    pub fn loaded_count(&self) -> usize {
         self.states
-            .values()
-            .filter(|s| matches!(s, ImageLoadState::Loaded(_)))
-            .count()
+            .insert(url, ImageLoadState::Failed { attempts, retry_at });
     }
 
     /// 获取正在加载的图片数量
@@ -237,10 +203,5 @@ impl ImageCache {
             .values()
             .filter(|s| matches!(s, ImageLoadState::Loading { .. }))
             .count()
-    }
-
-    /// 获取待处理队列长度
-    pub fn pending_count(&self) -> usize {
-        self.pending_queue.len()
     }
 }

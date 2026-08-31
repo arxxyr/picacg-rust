@@ -8,7 +8,6 @@
 static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod components;
-mod error;
 mod events;
 mod plugins;
 mod resources;

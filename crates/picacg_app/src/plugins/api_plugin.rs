@@ -1196,7 +1196,6 @@ fn handle_load_pictures(
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(PicturesLoadedEvent {
                             pictures: response.pages.docs,
-                            total_pages: response.pages.pages,
                         });
                     })
                     .await;
@@ -1308,7 +1307,6 @@ fn handle_load_all_chapter_pictures(
                 ctx.world.write_message(AllChapterPicturesLoadedEvent {
                     pictures: all_pictures,
                     page_metas: all_metas,
-                    start_page: 0,
                 });
             })
             .await;
@@ -1898,7 +1896,6 @@ async fn execute_download_task(
             ctx.world.write_message(DownloadProgressEvent {
                 comic_id: comic_id_clone,
                 current_episode: ep_idx as i32 + 1,
-                total_episodes,
                 current_page: 0,
                 total_pages: 0,
                 status: format!(
@@ -2020,7 +2017,6 @@ async fn execute_download_task(
                 ctx.world.write_message(DownloadProgressEvent {
                     comic_id: comic_id_clone,
                     current_episode: ep_idx as i32 + 1,
-                    total_episodes,
                     current_page: total_pages,
                     total_pages,
                     status: format!("第{}/{}章 本地已完整，跳过", episode_order, total_episodes),
@@ -2089,7 +2085,6 @@ async fn execute_download_task(
             ctx.world.write_message(DownloadProgressEvent {
                 comic_id: comic_id_clone,
                 current_episode: ep_idx as i32 + 1,
-                total_episodes,
                 current_page: 0,
                 total_pages,
                 status: format!(
@@ -2183,7 +2178,6 @@ async fn execute_download_task(
                     ctx.world.write_message(DownloadProgressEvent {
                         comic_id: comic_id_clone,
                         current_episode: ep_idx as i32 + 1,
-                        total_episodes,
                         current_page,
                         total_pages,
                         status: format!(
@@ -2262,7 +2256,6 @@ async fn execute_download_task(
                 ctx.world.write_message(DownloadProgressEvent {
                     comic_id: comic_id_clone,
                     current_episode: ep_idx as i32 + 1,
-                    total_episodes,
                     current_page: total_pages,
                     total_pages,
                     status: retry_status,
@@ -2777,9 +2770,7 @@ fn handle_redownload_precheck(
                     tracing::error!("[{}] 更新检查失败: {}", comic_title, error);
                     $ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(RedownloadSkipped {
-                            comic_id,
                             comic_title,
-                            episodes: local_episodes,
                             error: Some(error),
                         });
                     })
@@ -2809,9 +2800,7 @@ fn handle_redownload_precheck(
                 );
                 ctx.run_on_main_thread(move |ctx| {
                     ctx.world.write_message(RedownloadSkipped {
-                        comic_id,
                         comic_title,
-                        episodes: local_episodes,
                         error: None,
                     });
                 })
@@ -2866,11 +2855,9 @@ fn handle_redownload_precheck(
                 ctx.run_on_main_thread(move |ctx| {
                     ctx.world
                         .resource_mut::<DownloadedComicsIndex>()
-                        .insert(comic_id.clone(), Some(remote_episodes));
+                        .insert(comic_id, Some(remote_episodes));
                     ctx.world.write_message(RedownloadSkipped {
-                        comic_id,
                         comic_title,
-                        episodes: local_episodes,
                         error: None,
                     });
                 })
@@ -2888,8 +2875,6 @@ fn handle_redownload_precheck(
                 ctx.world.write_message(RedownloadConfirmed {
                     comic_id,
                     new_base_path,
-                    remote_episodes,
-                    local_episodes,
                 });
             })
             .await;
@@ -3202,7 +3187,6 @@ fn handle_search_request(
                         ctx.world.write_message(SearchResultsLoadedEvent {
                             comics: response.comics.docs,
                             total_pages: response.comics.pages,
-                            keyword,
                         });
                     })
                     .await;
@@ -4317,7 +4301,6 @@ fn handle_check_update(
                 Ok(info) => {
                     ctx.world.write_message(CheckUpdateResponse {
                         latest_version: info.latest_version,
-                        current_version: info.current_version,
                         has_update: info.has_update,
                         release_notes: info.release_notes,
                         download_url: info.download_url,
@@ -4337,7 +4320,6 @@ fn handle_check_update(
 /// 版本更新信息
 struct UpdateInfo {
     latest_version: String,
-    current_version: String,
     has_update: bool,
     release_notes: Option<String>,
     download_url: Option<String>,
@@ -4412,7 +4394,6 @@ async fn check_github_latest_release(current_version: &str) -> Result<UpdateInfo
 
     Ok(UpdateInfo {
         latest_version,
-        current_version: current_version.to_string(),
         has_update,
         release_notes,
         download_url,

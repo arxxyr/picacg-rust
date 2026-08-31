@@ -2,8 +2,6 @@
 //!
 //! 支持浏览器风格的前进/后退导航
 
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use bevy::prelude::*;
@@ -124,16 +122,6 @@ impl NavigationHistory {
         } else {
             None
         }
-    }
-
-    /// 能否后退
-    pub fn can_go_back(&self) -> bool {
-        !self.back_stack.is_empty()
-    }
-
-    /// 能否前进
-    pub fn can_go_forward(&self) -> bool {
-        !self.forward_stack.is_empty()
     }
 }
 

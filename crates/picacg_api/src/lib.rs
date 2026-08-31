@@ -2,7 +2,6 @@
 //!
 //! 与 PicACG 后端 API 通信的客户端实现
 
-#![allow(dead_code)]
 #![allow(unused_imports)]
 
 pub mod channel;

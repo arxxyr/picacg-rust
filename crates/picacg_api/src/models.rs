@@ -1,7 +1,5 @@
 //! API 数据模型
 
-#![allow(dead_code)]
-
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// 兼容 API 返回数字或字符串格式的 i64

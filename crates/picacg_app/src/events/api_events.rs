@@ -163,7 +163,6 @@ pub struct LoadPicturesRequest {
 #[derive(Message)]
 pub struct PicturesLoadedEvent {
     pub pictures: Vec<Picture>,
-    pub total_pages: i32,
 }
 
 /// 图片列表加载失败
@@ -197,8 +196,6 @@ pub struct AllChapterPicturesLoadedEvent {
     pub pictures: Vec<Picture>,
     /// 每张图片的章节元数据（与 pictures 平行）
     pub page_metas: Vec<WebtoonPageMeta>,
-    /// 用户选择的章节的起始页码（全局 0-indexed）
-    pub start_page: usize,
 }
 
 // ==================== 搜索消息 ====================
@@ -218,7 +215,6 @@ pub struct SearchComicsRequestEvent {
 pub struct SearchResultsLoadedEvent {
     pub comics: Vec<Comic>,
     pub total_pages: i32,
-    pub keyword: String,
 }
 
 /// 搜索失败
@@ -360,8 +356,6 @@ pub struct DownloadProgressEvent {
     pub comic_id: String,
     /// 当前章节
     pub current_episode: i32,
-    /// 总章节数
-    pub total_episodes: i32,
     /// 当前章节已下载图片数
     pub current_page: i32,
     /// 当前章节总图片数
@@ -417,19 +411,12 @@ pub struct RedownloadRequest {
 pub struct RedownloadConfirmed {
     pub comic_id: String,
     pub new_base_path: Option<String>,
-    /// 服务端章节数（仅用于日志/提示）
-    pub remote_episodes: i32,
-    /// 本地已记录的章节数（仅用于日志/提示）
-    pub local_episodes: i32,
 }
 
 /// 更新前置检查判定「已是最新」，本次不下载
 #[derive(Message)]
 pub struct RedownloadSkipped {
-    pub comic_id: String,
     pub comic_title: String,
-    /// 章节数（服务端与本地一致）
-    pub episodes: i32,
     /// 检查失败时的错误信息（None 表示确实已是最新）
     pub error: Option<String>,
 }
@@ -692,8 +679,6 @@ pub struct CheckUpdateRequest;
 pub struct CheckUpdateResponse {
     /// 最新版本号
     pub latest_version: String,
-    /// 当前版本号
-    pub current_version: String,
     /// 是否有更新
     pub has_update: bool,
     /// 更新说明（如果有）

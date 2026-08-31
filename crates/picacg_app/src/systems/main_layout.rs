@@ -2,8 +2,6 @@
 //!
 //! 实现侧边栏 + 内容区域的主布局，模仿 Python 版本的界面结构
 
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 
 use crate::{
@@ -42,7 +40,6 @@ pub struct SidebarMenuArea;
 pub enum SidebarSection {
     User,       // 用户
     Navigation, // 导航
-    Tools,      // 工具
     Other,      // 其他
 }
 
@@ -440,13 +437,6 @@ fn sidebar_avatar_image(handle: Handle<Image>) -> impl Scene + use<> {
             height: Val::Px(76.0),
             border_radius: BorderRadius::all(Val::Percent(50.0)),
         }
-    }
-}
-
-/// 清理主布局
-pub fn cleanup_main_layout(mut commands: Commands, query: Query<Entity, With<MainLayoutRoot>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
     }
 }
 

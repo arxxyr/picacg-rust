@@ -459,11 +459,6 @@ impl RankingsTabType {
         }
     }
 
-    /// 是否为漫画排行标签
-    pub fn is_comics(&self) -> bool {
-        matches!(self, RankingsTabType::Comics(_))
-    }
-
     /// 是否为骑士榜标签
     pub fn is_knight(&self) -> bool {
         matches!(self, RankingsTabType::Knight)
@@ -607,8 +602,6 @@ pub struct ComicDetailState {
     pub comic: Option<Comic>,
     /// 章节列表
     pub episodes: Vec<Episode>,
-    /// 章节页码
-    pub episodes_page: i32,
     /// 章节总页数
     pub episodes_total_pages: i32,
     /// 是否正在加载
@@ -712,36 +705,6 @@ impl Default for ReaderState {
     }
 }
 
-impl ReaderState {
-    /// 获取下一章的 episode（如果存在）
-    pub fn next_episode(&self) -> Option<&Episode> {
-        if self.current_episode_idx + 1 < self.episodes.len() {
-            Some(&self.episodes[self.current_episode_idx + 1])
-        } else {
-            None
-        }
-    }
-
-    /// 获取上一章的 episode（如果存在）
-    pub fn prev_episode(&self) -> Option<&Episode> {
-        if self.current_episode_idx > 0 {
-            Some(&self.episodes[self.current_episode_idx - 1])
-        } else {
-            None
-        }
-    }
-
-    /// 是否为当前章节的最后一页
-    pub fn is_last_page(&self) -> bool {
-        self.total_pages == 0 || self.current_page >= self.total_pages.saturating_sub(1)
-    }
-
-    /// 是否为当前章节的第一页
-    pub fn is_first_page(&self) -> bool {
-        self.current_page == 0
-    }
-}
-
 /// 代理设置状态
 #[derive(Resource)]
 pub struct ProxySettingsState {
@@ -753,16 +716,6 @@ pub struct ProxySettingsState {
     pub host: String,
     /// 端口
     pub port: String,
-    /// 是否使用认证
-    pub use_auth: bool,
-    /// 用户名
-    pub username: String,
-    /// 密码
-    pub password: String,
-    /// 是否正在测试
-    pub is_testing: bool,
-    /// 测试消息
-    pub test_message: Option<String>,
 }
 
 impl Default for ProxySettingsState {
@@ -773,22 +726,8 @@ impl Default for ProxySettingsState {
             proxy_type: settings.proxy.proxy_type,
             host: settings.proxy.host.clone(),
             port: settings.proxy.port.to_string(),
-            use_auth: settings.proxy.use_auth,
-            username: settings.proxy.username.clone(),
-            password: settings.proxy.password.clone(),
-            is_testing: false,
-            test_message: None,
         }
     }
-}
-
-/// 全局消息状态（用于显示提示）
-#[derive(Resource, Default)]
-pub struct GlobalMessageState {
-    /// 错误消息
-    pub error: Option<String>,
-    /// 成功消息
-    pub success: Option<String>,
 }
 
 /// 下载任务状态（用于 UI 显示）
@@ -840,14 +779,6 @@ impl DownloadState {
             DownloadState::Completed => ComicDownloadStatus::Completed,
             DownloadState::Failed(err) => ComicDownloadStatus::Failed(err.clone()),
         }
-    }
-
-    /// 是否可以暂停
-    pub fn can_pause(&self) -> bool {
-        matches!(
-            self,
-            DownloadState::Queued | DownloadState::Downloading { .. }
-        )
     }
 
     /// 是否可以恢复
@@ -1084,29 +1015,6 @@ impl DownloadTaskMeta {
         })
     }
 
-    /// 从数据库加载元数据
-    pub fn load(save_path: &str) -> Result<Self, String> {
-        use picacg_db::{get_all_download_tasks_async, get_pool, run_db_operation};
-
-        let save_path_owned = save_path.to_string();
-        let pool = get_pool();
-
-        // 从数据库加载（通过 save_path 查找）
-        run_db_operation(async move {
-            let tasks = get_all_download_tasks_async(&pool)
-                .await
-                .map_err(|e| format!("数据库查询失败: {}", e))?;
-
-            // 通过 save_path 查找
-            for task in tasks {
-                if task.save_path == save_path_owned {
-                    return Ok(Self::from_db_task(&task));
-                }
-            }
-            Err("下载任务不存在".to_string())
-        })
-    }
-
     /// 从数据库加载元数据（通过 comic_id）
     pub fn load_by_comic_id(comic_id: &str) -> Result<Self, String> {
         use picacg_db::{get_download_task_async, get_pool, run_db_operation};
@@ -1212,15 +1120,12 @@ pub fn repair_save_path(meta: &mut DownloadTaskMeta) {
 pub struct SharedTaskControl {
     /// 暂停请求标志
     pub pause_requested: std::sync::atomic::AtomicBool,
-    /// 取消请求标志
-    pub cancel_requested: std::sync::atomic::AtomicBool,
 }
 
 impl SharedTaskControl {
     pub fn new() -> Self {
         Self {
             pause_requested: std::sync::atomic::AtomicBool::new(false),
-            cancel_requested: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -1229,25 +1134,13 @@ impl SharedTaskControl {
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    pub fn request_cancel(&self) {
-        self.cancel_requested
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-    }
-
     pub fn is_pause_requested(&self) -> bool {
         self.pause_requested
             .load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    pub fn is_cancel_requested(&self) -> bool {
-        self.cancel_requested
-            .load(std::sync::atomic::Ordering::SeqCst)
-    }
-
     pub fn reset(&self) {
         self.pause_requested
-            .store(false, std::sync::atomic::Ordering::SeqCst);
-        self.cancel_requested
             .store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }
@@ -1277,12 +1170,6 @@ impl DownloadTaskFSM {
             control: std::sync::Arc::new(SharedTaskControl::new()),
             current_episode_total_pages: 0,
         }
-    }
-
-    /// 从元数据文件加载任务
-    pub fn load(save_path: &str) -> Result<Self, String> {
-        let meta = DownloadTaskMeta::load(save_path)?;
-        Ok(Self::new(meta))
     }
 
     /// 转换为 UI 显示的 ComicDownloadTask
@@ -1358,11 +1245,6 @@ impl DownloadTaskFSM {
     /// 请求暂停（线程安全）
     pub fn request_pause(&self) {
         self.control.request_pause();
-    }
-
-    /// 检查是否应该暂停
-    pub fn should_pause(&self) -> bool {
-        self.control.is_pause_requested()
     }
 
     /// 获取控制器的克隆（用于传递给后台任务）
@@ -1831,14 +1713,10 @@ impl Default for ChatRoomState {
 /// NAS 上传任务状态
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NasUploadStatus {
-    /// 等待中
-    Waiting,
     /// 上传中
     Uploading,
     /// 已完成
     Completed,
-    /// 失败
-    Failed(String),
 }
 
 /// NAS 上传任务条目
@@ -1846,10 +1724,6 @@ pub enum NasUploadStatus {
 pub struct NasUploadTask {
     /// 漫画标题
     pub comic_title: String,
-    /// 本地文件路径
-    pub local_path: String,
-    /// 远程目标路径
-    pub remote_path: String,
     /// 上传状态
     pub status: NasUploadStatus,
     /// 已上传文件数
@@ -1975,12 +1849,6 @@ impl DownloadedComicsIndex {
             }
             _ => Some(DownloadBadgeState::Downloaded),
         }
-    }
-
-    /// 是否已下载
-    #[must_use]
-    pub fn contains(&self, comic_id: &str) -> bool {
-        self.snapshots.contains_key(comic_id)
     }
 
     /// 记录/更新一本漫画的 `epsCount` 快照

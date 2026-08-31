@@ -2,7 +2,6 @@
 //!
 //! 本地数据库和缓存管理
 
-#![allow(dead_code)]
 #![allow(unused_imports)]
 
 pub mod cache;

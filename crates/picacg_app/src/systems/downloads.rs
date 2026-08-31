@@ -2,8 +2,6 @@
 //!
 //! 实现下载任务列表和进度显示
 
-#![allow(dead_code)]
-
 use bevy::prelude::*;
 use picacg_config::AppSettings;
 
@@ -42,16 +40,6 @@ pub fn get_download_base_path() -> std::path::PathBuf {
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("Downloads")
-}
-
-/// 清理文件名中的非法字符（与 api_plugin.rs 中的 sanitize_filename 保持一致）
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => c,
-        })
-        .collect()
 }
 
 /// 下载页面根标记
@@ -461,7 +449,6 @@ pub struct DeleteCompletedDownloadButton {
 #[derive(Component, Default, Clone)]
 pub struct DeleteConfirmPanel {
     pub comic_id: String,
-    pub path: String,
 }
 
 /// "同时删除磁盘文件" 勾选框标记
@@ -1208,37 +1195,6 @@ fn downloads_header() -> impl Scene {
                         AppColors::BORDER,
                     ),
                 ]
-            ),
-        ]
-    }
-}
-
-/// 空状态提示场景
-fn empty_state() -> impl Scene {
-    bsn! {
-        Node {
-            width: Val::Percent(100.0),
-            height: Val::Px(200.0),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(10.0),
-        }
-        Children [
-            (
-                Text(ICON_INBOX)
-                TextFont { font_size: FontSize::Px(48.0) }
-                TextColor(AppColors::TEXT_SECONDARY)
-            ),
-            (
-                Text("暂无下载任务")
-                TextFont { font_size: FontSize::Px(16.0) }
-                TextColor(AppColors::TEXT_SECONDARY)
-            ),
-            (
-                Text("在漫画详情页点击下载按钮开始下载")
-                TextFont { font_size: FontSize::Px(12.0) }
-                TextColor(AppColors::TEXT_SECONDARY)
             ),
         ]
     }
@@ -2416,8 +2372,6 @@ pub fn update_floating_header(
         .map(|w| w.scale_factor())
         .unwrap_or(1.0);
 
-    // 滚动容器的 padding
-    const SCROLL_PADDING: f32 = 20.0;
     // 标题行高度（大约）
     const HEADER_HEIGHT: f32 = 36.0;
 
@@ -3766,7 +3720,6 @@ pub fn delete_completed_download_interaction(
 fn delete_confirm_panel(comic_id: &str, path: &str) -> impl Scene + use<> {
     let panel_marker = DeleteConfirmPanel {
         comic_id: comic_id.to_string(),
-        path: path.to_string(),
     };
     let checkbox_marker = DeleteFilesCheckbox {
         comic_id: comic_id.to_string(),
