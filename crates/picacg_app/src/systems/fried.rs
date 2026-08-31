@@ -242,6 +242,15 @@ fn fried_content(fried_state: &FriedState) -> Vec<Box<dyn Scene>> {
             TextFont { font_size: FontSize::Px(16.0) }
             TextColor(AppColors::ERROR)
         }));
+        // 逃生门：原地重试 + 分页控件翻离坏页
+        items.push(Box::new(crate::systems::ui_common::error_retry_button()));
+        let total_pages = calculate_total_pages(fried_state);
+        if total_pages > 1 {
+            items.push(Box::new(pagination_controls::<FriedPage>(
+                (fried_state.page + 1).max(1) as u32,
+                total_pages.max(0) as u32,
+            )));
+        }
     } else if fried_state.posts.is_empty() {
         items.push(Box::new(bsn! {
             Text("暂无帖子")

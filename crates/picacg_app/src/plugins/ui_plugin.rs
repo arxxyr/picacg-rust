@@ -50,6 +50,10 @@ impl Plugin for UiPlugin {
                     crate::systems::ui_common::refresh_download_status_badges,
                     // 图片占位块的骨架屏微光（图片就位后自动退出查询）
                     crate::systems::ui_common::animate_loading_shimmer,
+                    // 错误页重试按钮（games/fried/comments 共用，按路由分发）
+                    crate::systems::ui_common::error_retry_button_interaction,
+                    // 下载飞行动画（右键下载 → 圆点飞向侧边栏下载按钮）
+                    crate::systems::ui_common::animate_download_fly,
                 ),
             )
             .init_resource::<SearchState>()
@@ -284,6 +288,7 @@ impl Plugin for UiPlugin {
                     // 顺序要紧：先按锚点定位滚动，再据当前页决定加载哪些图
                     (sync_webtoon_scroll, update_webtoon_window).chain(),
                     webtoon_failed_slot_retry,
+                    webtoon_failed_chapters_retry,
                     update_webtoon_images_from_cache,
                     update_webtoon_scale,
                     // 交互（元组超过 20 项会撞上 bevy 的 tuple impl 上限，故分组嵌套）
@@ -920,6 +925,8 @@ impl Plugin for UiPlugin {
                     handle_window_close,
                     save_window_position,
                     ensure_primary_window,
+                    // 首启按屏幕 78% 设定窗口并居中（等 Monitor 信息就位）
+                    apply_first_launch_geometry,
                 ),
             );
     }

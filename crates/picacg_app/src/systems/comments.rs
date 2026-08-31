@@ -504,12 +504,21 @@ fn comments_content(state: &CommentsStateSnapshot) -> Vec<Box<dyn Scene>> {
 
     if let Some(ref error) = state.error {
         let error_text = format!("加载失败: {}", error);
-        return vec![Box::new(bsn! {
+        let mut items: Vec<Box<dyn Scene>> = vec![Box::new(bsn! {
             ErrorMessage
             Text({error_text})
             TextFont { font_size: FontSize::Px(16.0) }
             TextColor(AppColors::ERROR)
         })];
+        // 逃生门：原地重试 + 分页控件翻离坏页（标题栏返回按钮常驻）
+        items.push(Box::new(crate::systems::ui_common::error_retry_button()));
+        if state.total_pages > 1 {
+            items.push(Box::new(pagination_controls::<CommentsPage>(
+                state.page.max(1) as u32,
+                state.total_pages.max(0) as u32,
+            )));
+        }
+        return items;
     }
 
     if state.comments.is_empty() {

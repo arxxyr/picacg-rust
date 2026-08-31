@@ -199,6 +199,14 @@ fn games_content(games_state: &GamesState) -> Vec<Box<dyn Scene>> {
             TextFont { font_size: FontSize::Px(16.0) }
             TextColor(AppColors::ERROR)
         }));
+        // 逃生门：原地重试 + 分页控件翻离坏页（错误前的页数信息还在）
+        items.push(Box::new(crate::systems::ui_common::error_retry_button()));
+        if games_state.total_pages > 1 {
+            items.push(Box::new(pagination_controls::<GamesPage>(
+                games_state.page.max(1) as u32,
+                games_state.total_pages.max(0) as u32,
+            )));
+        }
     } else if games_state.games.is_empty() {
         items.push(Box::new(bsn! {
             Text("暂无游戏")

@@ -554,7 +554,7 @@ fn handle_load_comics(
             use picacg_api::endpoints::comic::GetComicsRequest;
 
             let request = GetComicsRequest {
-                category,
+                category: category.clone(),
                 page,
                 sort,
             };
@@ -563,6 +563,7 @@ fn handle_load_comics(
                 Ok(response) => {
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(ComicsLoadedEvent {
+                            category,
                             comics: response.comics.docs,
                             total_pages: response.comics.pages,
                             page,
@@ -590,6 +591,15 @@ fn handle_comics_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
+        // 过期响应丢弃：切分类后旧分类的响应不能灌进新列表
+        if event.category != comics_state.category {
+            tracing::debug!(
+                "丢弃过期的漫画列表响应: 响应分类={}, 当前={}",
+                event.category,
+                comics_state.category
+            );
+            continue;
+        }
         comics_state.total_pages = event.total_pages;
         let filtered = apply_block_filter(&event.comics);
         let added = filtered.len();
@@ -1436,7 +1446,7 @@ fn handle_load_all_chapter_pictures(
 
             let mut all_pictures = Vec::new();
             let mut all_metas = Vec::new();
-            let mut failed_chapters = 0_usize;
+            let mut failed_chapters: Vec<i32> = Vec::new();
 
             for (ep, handle) in episodes.iter().zip(handles) {
                 match handle.await {
@@ -1450,11 +1460,11 @@ fn handle_load_all_chapter_pictures(
                         }
                     }
                     Ok(Err(e)) => {
-                        failed_chapters += 1;
+                        failed_chapters.push(ep.order);
                         tracing::error!("加载第 {} 章图片列表失败: {}", ep.order, e);
                     }
                     Err(e) => {
-                        failed_chapters += 1;
+                        failed_chapters.push(ep.order);
                         tracing::error!("加载第 {} 章图片列表任务异常: {}", ep.order, e);
                     }
                 }
@@ -1464,7 +1474,7 @@ fn handle_load_all_chapter_pictures(
                 "全章节图片列表加载完成: {} 章, {} 张图片（失败 {} 章）",
                 episodes.len(),
                 all_pictures.len(),
-                failed_chapters,
+                failed_chapters.len(),
             );
 
             ctx.run_on_main_thread(move |ctx| {
@@ -1472,6 +1482,7 @@ fn handle_load_all_chapter_pictures(
                     comic_id,
                     pictures: all_pictures,
                     page_metas: all_metas,
+                    failed_chapters,
                 });
             })
             .await;
@@ -1622,6 +1633,7 @@ fn handle_load_favorites(
                 Ok(response) => {
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(FavoritesLoadedEvent {
+                            page,
                             comics: response.comics.docs,
                             total_pages: response.comics.pages,
                         });
@@ -1648,6 +1660,15 @@ fn handle_favorites_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
+        // 过期响应丢弃：快速翻页时旧页响应不能覆盖新页
+        if event.page != favorites_state.page {
+            tracing::debug!(
+                "丢弃过期的收藏列表响应: 响应页={}, 当前页={}",
+                event.page,
+                favorites_state.page
+            );
+            continue;
+        }
         let filtered = apply_block_filter(&event.comics);
         favorites_state.comics = filtered;
         favorites_state.total_pages = event.total_pages;
@@ -3379,6 +3400,8 @@ fn handle_search_request(
                     );
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(SearchResultsLoadedEvent {
+                            keyword,
+                            page,
                             comics: response.comics.docs,
                             total_pages: response.comics.pages,
                         });
@@ -3491,6 +3514,18 @@ fn handle_search_response(
     mut image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in loaded_messages.read() {
+        // 过期响应丢弃：快速翻页时旧页响应不能覆盖新页。
+        // ⚠️ 不校验 keyword：state.keyword 是输入框实时内容，搜完继续打字
+        // 会让合法响应被误杀；换词竞态由新响应最终覆盖，风险可接受
+        if event.page != search_state.page {
+            tracing::debug!(
+                "丢弃过期的搜索响应: 响应第{}页, 当前第{}页 (keyword={})",
+                event.page,
+                search_state.page,
+                event.keyword
+            );
+            continue;
+        }
         search_state.is_loading = false;
         search_state.has_searched = true;
         let filtered = apply_block_filter(&event.comics);

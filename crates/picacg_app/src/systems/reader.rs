@@ -57,6 +57,14 @@ pub struct WebtoonFailedSlot {
     pub hint: Entity,
 }
 
+/// 条漫全章节列表的失败章节横幅（点击重试整批重拉）
+///
+/// Phase 2 某些章列表拉取失败时这些章在条漫里整章缺失——没有提示等于
+/// 静默吞章。横幅由 `handle_all_pictures_loaded` 挂出，点击后重发
+/// 全章节请求（成功章走缓存瞬回，只有失败章真正走网络）。
+#[derive(Component, Default, Clone)]
+pub struct WebtoonFailedChaptersBanner;
+
 // ---------- 工具栏 ----------
 
 /// 阅读器顶部工具栏
@@ -846,6 +854,78 @@ pub fn handle_pictures_loaded(
     }
 }
 
+/// 失败章节横幅场景（挂在阅读器根节点，工具栏下方居中）
+fn failed_chapters_banner(failed: &[i32]) -> impl Scene + use<> {
+    let listed = failed
+        .iter()
+        .take(3)
+        .map(|o| o.to_string())
+        .collect::<Vec<_>>()
+        .join("、");
+    let text = if failed.len() > 3 {
+        format!(
+            "第 {} 等 {} 章列表加载失败 · 点击重试",
+            listed,
+            failed.len()
+        )
+    } else {
+        format!("第 {} 章列表加载失败 · 点击重试", listed)
+    };
+
+    bsn! {
+        WebtoonFailedChaptersBanner
+        Button
+        Node {
+            position_type: PositionType::Absolute,
+            top: {Val::Px(consts::TOOLBAR_HEIGHT + 10.0)},
+            left: Val::Percent(25.0),
+            right: Val::Percent(25.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+        }
+        BackgroundColor(Color::srgba(0.55, 0.15, 0.15, 0.92))
+        Children [
+            (
+                Text({text})
+                TextFont { font_size: FontSize::Px(13.0) }
+                TextColor(Color::WHITE)
+            )
+        ]
+    }
+}
+
+/// 点击失败章节横幅 → 重发全章节列表请求
+///
+/// 成功章的列表已进 DB 缓存，重拉时瞬间命中，只有失败章真正走网络。
+pub fn webtoon_failed_chapters_retry(
+    mut commands: Commands,
+    interaction_query: Query<
+        (Entity, &Interaction),
+        (Changed<Interaction>, With<WebtoonFailedChaptersBanner>),
+    >,
+    mut reader_state: ResMut<ReaderState>,
+    mut load_all_messages: MessageWriter<LoadAllChapterPicturesRequest>,
+) {
+    for (entity, interaction) in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        commands.entity(entity).despawn();
+        if reader_state.is_loading_all_chapters {
+            continue;
+        }
+        tracing::info!("重试拉取全章节图片列表");
+        reader_state.is_loading_all_chapters = true;
+        load_all_messages.write(LoadAllChapterPicturesRequest {
+            comic_id: reader_state.comic_id.clone(),
+            comic_title: reader_state.comic_title.clone(),
+            episodes: reader_state.episodes.clone(),
+        });
+    }
+}
+
 /// 处理全章节图片列表加载完成（条漫模式 Phase 2）
 ///
 /// 销毁当前视图，用完整列表重建，保持在对应的全局页码位置
@@ -856,6 +936,8 @@ pub fn handle_all_pictures_loaded(
     loading_query: Query<Entity, With<ReaderLoadingIndicator>>,
     container_query: Query<Entity, With<ReaderImageContainer>>,
     webtoon_container_query: Query<Entity, With<WebtoonScrollContainer>>,
+    reader_root_query: Query<Entity, With<ReaderRoot>>,
+    banner_query: Query<Entity, With<WebtoonFailedChaptersBanner>>,
     asset_server: Res<AssetServer>,
     mut page_text_query: Query<&mut Text, With<ReaderPageText>>,
     image_cache: Res<ImageCache>,
@@ -872,6 +954,18 @@ pub fn handle_all_pictures_loaded(
             continue;
         }
         reader_state.is_loading_all_chapters = false;
+
+        // 失败章节横幅：先清旧的（重试后再失败会重挂），有失败才挂新的
+        for entity in banner_query.iter() {
+            commands.entity(entity).despawn();
+        }
+        if !event.failed_chapters.is_empty()
+            && let Ok(root) = reader_root_query.single()
+        {
+            commands
+                .spawn_scene(failed_chapters_banner(&event.failed_chapters))
+                .insert(ChildOf(root));
+        }
 
         // 计算用户选择章节的起始页码 + 当前在章节内的偏移
         let target_order = reader_state.episode_order;

@@ -4,16 +4,18 @@
 
 use bevy::{
     prelude::*,
-    ui::{FocusPolicy, RelativeCursorPosition},
+    ui::{FocusPolicy, RelativeCursorPosition, UiGlobalTransform},
     window::PrimaryWindow,
 };
 
 use crate::{
-    components::ContextMenuTarget,
-    events::DownloadComicRequest,
-    resources::{DownloadBadgeState, DownloadedComicsIndex},
-    systems::{login::AppColors, scrollbar::scrollbar_config::*},
-    utils::icons::{ICON_CHECK, ICON_SYNC},
+    components::{ContextMenuTarget, SidebarButton, SidebarRoute},
+    events::{DownloadComicRequest, LoadCommentsRequest, LoadFriedPostsRequest, LoadGamesRequest},
+    resources::{
+        AppRoute, CommentsState, DownloadBadgeState, DownloadedComicsIndex, FriedState, GamesState,
+    },
+    systems::{login::AppColors, scrollbar::scrollbar_config::*, widgets::ButtonStyle},
+    utils::icons::{ICON_CHECK, ICON_DOWNLOAD, ICON_REFRESH, ICON_SYNC},
 };
 
 // ==================== 标签徽章 ====================
@@ -567,6 +569,8 @@ pub fn comic_context_menu_interaction(
         Changed<Interaction>,
     >,
     menu_query: Query<Entity, With<ComicContextMenu>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    sidebar_query: Query<(&ComputedNode, &UiGlobalTransform, &SidebarButton)>,
     mut download_messages: MessageWriter<DownloadComicRequest>,
 ) {
     for (interaction, mut bg_color, item) in interaction_query.iter_mut() {
@@ -580,6 +584,7 @@ pub fn comic_context_menu_interaction(
                             episodes: vec![], // 空 = 下载全部
                             remote_eps_count: (item.eps_count > 0).then_some(item.eps_count),
                         });
+                        spawn_download_fly_animation(&mut commands, &window_query, &sidebar_query);
                         tracing::info!("右键菜单：下载漫画 {}", item.comic_title);
                     }
                     ContextMenuAction::Block => {
@@ -632,5 +637,239 @@ pub fn dismiss_context_menu(
     // 关闭所有菜单
     for entity in menu_query.iter() {
         commands.entity(entity).despawn();
+    }
+}
+
+// ==================== 错误页重试按钮 ====================
+
+/// 错误页重试按钮标记（games / fried / comments 共用）
+///
+/// 这三页加载失败后内容区只剩错误文本，没有任何逃生门——重试按钮按
+/// 当前路由分发重载请求；配合错误分支同时渲染的分页控件，用户既能
+/// 原地重试也能翻离坏页。
+#[derive(Component, Default, Clone)]
+pub struct ErrorRetryButton;
+
+/// 错误页重试按钮场景（放进各页错误分支的内容列表）
+pub fn error_retry_button() -> impl Scene {
+    bsn! {
+        ErrorRetryButton
+        Button
+        template_value(ButtonStyle::secondary())
+        Node {
+            margin: UiRect::top(Val::Px(12.0)),
+            padding: UiRect::axes(Val::Px(16.0), Val::Px(8.0)),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+        }
+        BackgroundColor(AppColors::SECONDARY)
+        Children [
+            (
+                Text(ICON_REFRESH)
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+            (
+                Text("重试")
+                TextFont { font_size: FontSize::Px(14.0) }
+                TextColor(AppColors::TEXT)
+            ),
+        ]
+    }
+}
+
+/// 重试按钮交互：按当前路由清错误并重发加载请求
+///
+/// games/fried 的自动加载触发只在 OnEnter（setup）里跑，光清 error 不会
+/// 重发——必须在这里显式补发请求。
+pub fn error_retry_button_interaction(
+    interaction_query: Query<&Interaction, (Changed<Interaction>, With<ErrorRetryButton>)>,
+    current_route: Res<State<AppRoute>>,
+    mut games_state: ResMut<GamesState>,
+    mut fried_state: ResMut<FriedState>,
+    mut comments_state: ResMut<CommentsState>,
+    mut load_games: MessageWriter<LoadGamesRequest>,
+    mut load_fried: MessageWriter<LoadFriedPostsRequest>,
+    mut load_comments: MessageWriter<LoadCommentsRequest>,
+) {
+    for interaction in interaction_query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        match current_route.get() {
+            AppRoute::Games => {
+                games_state.error = None;
+                games_state.is_loading = true;
+                load_games.write(LoadGamesRequest {
+                    page: games_state.page.max(1),
+                });
+            }
+            AppRoute::Fried => {
+                fried_state.error = None;
+                fried_state.is_loading = true;
+                let page = fried_state.page;
+                load_fried.write(LoadFriedPostsRequest { page });
+            }
+            AppRoute::Comments => {
+                comments_state.error = None;
+                comments_state.is_loading = true;
+                load_comments.write(LoadCommentsRequest {
+                    comic_id: comments_state.comic_id.clone(),
+                    page: comments_state.page.max(1),
+                });
+            }
+            _ => {}
+        }
+        tracing::info!("错误页重试: route={:?}", current_route.get());
+    }
+}
+
+// ==================== 下载飞行动画 ====================
+
+/// 飞行时长（秒）
+const FLY_DURATION: f32 = 0.55;
+/// 圆点起始直径
+const FLY_SIZE_START: f32 = 36.0;
+/// 圆点终点直径
+const FLY_SIZE_END: f32 = 14.0;
+/// 飞行弧线的上拱高度（逻辑像素）
+const FLY_ARC_LIFT: f32 = 80.0;
+
+/// 下载飞行动画：从触发点飞向侧边栏下载按钮、边飞边缩小的圆点
+#[derive(Component)]
+pub struct DownloadFlyAnimation {
+    /// 起点（窗口逻辑坐标，圆点中心）
+    start: Vec2,
+    /// 终点（侧边栏下载按钮中心，逻辑坐标）
+    end: Vec2,
+    /// 已播放时长
+    elapsed: f32,
+}
+
+/// 二次贝塞尔飞行曲线（纯函数）：控制点在两端点上方，轨迹上拱
+///
+/// UI 坐标系 Y 向下，「上拱」= 控制点 y 取两端较小值再减 `FLY_ARC_LIFT`
+fn fly_curve(start: Vec2, end: Vec2, k: f32) -> Vec2 {
+    let control = Vec2::new((start.x + end.x) / 2.0, start.y.min(end.y) - FLY_ARC_LIFT);
+    let a = start.lerp(control, k);
+    let b = control.lerp(end, k);
+    a.lerp(b, k)
+}
+
+/// 在光标处生成飞向侧边栏下载按钮的动画圆点
+///
+/// 拿不到光标或下载按钮位置（如按钮不在场）时静默跳过——动画是锦上添花，
+/// 不能因此挡住下载动作本身。
+fn spawn_download_fly_animation(
+    commands: &mut Commands,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+    sidebar_query: &Query<(&ComputedNode, &UiGlobalTransform, &SidebarButton)>,
+) {
+    let Some(start) = window_query.single().ok().and_then(Window::cursor_position) else {
+        return;
+    };
+    // UiGlobalTransform 的平移是节点中心的物理像素，换算成逻辑像素
+    let Some(end) = sidebar_query
+        .iter()
+        .find_map(|(computed, transform, button)| {
+            (button.route == SidebarRoute::Downloads)
+                .then(|| transform.translation * computed.inverse_scale_factor)
+        })
+    else {
+        return;
+    };
+
+    commands
+        .spawn((
+            DownloadFlyAnimation {
+                start,
+                end,
+                elapsed: 0.0,
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(start.x - FLY_SIZE_START / 2.0),
+                top: Val::Px(start.y - FLY_SIZE_START / 2.0),
+                width: Val::Px(FLY_SIZE_START),
+                height: Val::Px(FLY_SIZE_START),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                overflow: Overflow::clip(),
+                border_radius: BorderRadius::all(Val::Percent(50.0)),
+                ..default()
+            },
+            GlobalZIndex(200),
+            BackgroundColor(AppColors::PRIMARY),
+        ))
+        .with_children(|dot| {
+            dot.spawn((
+                Text::new(ICON_DOWNLOAD),
+                TextFont {
+                    font_size: FontSize::Px(12.0),
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ));
+        });
+}
+
+/// 播放下载飞行动画（全局注册一次）
+///
+/// smoothstep 缓动 + 贝塞尔弧线，圆点从 36px 缩到 14px，落点即销毁。
+/// 下载计数徽章随队列变化自行点亮，接住落点。
+pub fn animate_download_fly(
+    time: Res<Time>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut DownloadFlyAnimation, &mut Node)>,
+) {
+    for (entity, mut anim, mut node) in query.iter_mut() {
+        anim.elapsed += time.delta_secs();
+        let t = (anim.elapsed / FLY_DURATION).min(1.0);
+        // smoothstep：起步缓、中段快、落点缓
+        let k = t * t * (3.0 - 2.0 * t);
+
+        let pos = fly_curve(anim.start, anim.end, k);
+        let size = FLY_SIZE_START + (FLY_SIZE_END - FLY_SIZE_START) * k;
+        node.width = Val::Px(size);
+        node.height = Val::Px(size);
+        node.left = Val::Px(pos.x - size / 2.0);
+        node.top = Val::Px(pos.y - size / 2.0);
+
+        if t >= 1.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+#[cfg(test)]
+mod fly_tests {
+    use bevy::prelude::Vec2;
+
+    use super::fly_curve;
+
+    /// 端点必须精确命中：k=0 在起点，k=1 在终点
+    #[test]
+    fn curve_hits_endpoints() {
+        let start = Vec2::new(100.0, 400.0);
+        let end = Vec2::new(40.0, 120.0);
+        assert_eq!(fly_curve(start, end, 0.0), start);
+        assert_eq!(fly_curve(start, end, 1.0), end);
+    }
+
+    /// 中点必须高于两端连线中点（UI 坐标 Y 向下，「高」= y 更小），
+    /// 且全程不低于两端点中较低的一侧——轨迹只上拱、不下坠
+    #[test]
+    fn curve_arcs_upward() {
+        let start = Vec2::new(300.0, 500.0);
+        let end = Vec2::new(60.0, 200.0);
+        let mid = fly_curve(start, end, 0.5);
+        let chord_mid_y = (start.y + end.y) / 2.0;
+        assert!(mid.y < chord_mid_y);
+        for i in 0..=10 {
+            let k = i as f32 / 10.0;
+            assert!(fly_curve(start, end, k).y <= start.y.max(end.y));
+        }
     }
 }

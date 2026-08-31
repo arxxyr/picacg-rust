@@ -96,6 +96,8 @@ pub struct LoadComicsRequest {
 /// 漫画列表加载完成
 #[derive(Message)]
 pub struct ComicsLoadedEvent {
+    /// 请求的分类（回填前校验，防止切分类后旧响应灌进新列表）
+    pub category: String,
     pub comics: Vec<Comic>,
     pub total_pages: i32,
     /// 当前加载的页码（用于区分首次加载和追加）
@@ -211,6 +213,8 @@ pub struct AllChapterPicturesLoadedEvent {
     pub pictures: Vec<Picture>,
     /// 每张图片的章节元数据（与 pictures 平行）
     pub page_metas: Vec<WebtoonPageMeta>,
+    /// 列表拉取失败的章节 order（阅读器显示重试横幅；空 = 全部成功）
+    pub failed_chapters: Vec<i32>,
 }
 
 // ==================== 搜索消息 ====================
@@ -228,6 +232,9 @@ pub struct SearchComicsRequestEvent {
 /// 搜索结果加载完成
 #[derive(Message)]
 pub struct SearchResultsLoadedEvent {
+    /// 请求的关键词与页码（回填前校验，防止改词/翻页后旧响应覆盖）
+    pub keyword: String,
+    pub page: i32,
     pub comics: Vec<Comic>,
     pub total_pages: i32,
 }
@@ -295,6 +302,8 @@ pub struct LoadFavoritesRequest {
 /// 收藏列表加载完成
 #[derive(Message)]
 pub struct FavoritesLoadedEvent {
+    /// 请求的页码（回填前校验，防止快速翻页时旧页响应覆盖新页）
+    pub page: i32,
     pub comics: Vec<Comic>,
     pub total_pages: i32,
 }

@@ -17,7 +17,7 @@ mod utils;
 use bevy::{
     asset::{AssetPlugin, UnapprovedPathMode},
     prelude::*,
-    window::{ExitCondition, WindowPosition},
+    window::{ExitCondition, MonitorSelection, WindowPosition},
 };
 use picacg_config::{AppSettings, set_log_level_handle};
 use picacg_db::{Database, db_runtime};
@@ -111,20 +111,25 @@ fn main() {
                     primary_window: Some(Window {
                         title: "PicACG - Rust Bevy 版".to_string(),
                         resolution: {
-                            // 恢复保存的窗口大小，默认 1024x768
+                            // 恢复保存的窗口大小；首启占位值，真正的尺寸
+                            // （屏幕 78%）等显示器信息就位后由
+                            // apply_first_launch_geometry 设定
                             let w = saved_window_width.unwrap_or(1024.0);
                             let h = saved_window_height.unwrap_or(768.0);
                             (w as u32, h as u32).into()
                         },
                         position: {
-                            // 恢复保存的窗口位置
+                            // 恢复保存的窗口位置；首启居中
                             match (saved_window_x, saved_window_y) {
                                 (Some(x), Some(y)) => {
                                     WindowPosition::At(IVec2::new(x as i32, y as i32))
                                 }
-                                _ => WindowPosition::default(),
+                                _ => WindowPosition::Centered(MonitorSelection::Primary),
                             }
                         },
+                        // 首启（无保存几何）先隐身，按屏幕 78% 调好再现身，
+                        // 避免 1024x768 闪一下再跳变
+                        visible: saved_window_width.is_some() && saved_window_height.is_some(),
                         ime_enabled: false, // 输入法在输入框获得焦点时动态启用
                         ..default()
                     }),

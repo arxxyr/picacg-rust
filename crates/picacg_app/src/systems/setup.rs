@@ -4,13 +4,71 @@
 
 use bevy::{
     prelude::*,
-    window::{ClosingWindow, PrimaryWindow, WindowCloseRequested, WindowPosition},
+    window::{
+        ClosingWindow, Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow,
+        WindowCloseRequested, WindowPosition,
+    },
 };
 use picacg_config::{AppSettings, CloseBehavior};
 
 /// 设置 2D 相机
 pub fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2d);
+}
+
+/// 首次启动窗口占屏幕的比例（无保存几何时的默认观感）
+const FIRST_LAUNCH_SCREEN_RATIO: f32 = 0.78;
+
+/// 首次启动：按主屏逻辑尺寸的 78% 设定窗口并居中
+///
+/// 窗口创建时拿不到显示器分辨率，所以无保存几何的首启窗口以
+/// `visible: false` 出生（main.rs），待 winit 注入 `Monitor` 实体后在这里
+/// 一次性调好尺寸/位置再现身——用户看到的第一眼就是终态，不闪不跳。
+/// 有保存几何的启动路径窗口直接可见，本系统首帧即完成判定退出。
+pub fn apply_first_launch_geometry(
+    mut window_query: Query<&mut Window, With<PrimaryWindow>>,
+    monitor_query: Query<(&Monitor, Has<PrimaryMonitor>)>,
+    mut frames_waited: Local<u32>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let Ok(mut window) = window_query.single_mut() else {
+        return;
+    };
+    // 可见 = 有保存几何的常规启动，无需处理
+    if window.visible {
+        *done = true;
+        return;
+    }
+
+    // 主显示器优先，没标记时退回任意一台
+    let monitor = monitor_query
+        .iter()
+        .find_map(|(m, is_primary)| is_primary.then_some(m))
+        .or_else(|| monitor_query.iter().next().map(|(m, _)| m));
+
+    if let Some(monitor) = monitor {
+        let logical_w = monitor.physical_width as f64 / monitor.scale_factor;
+        let logical_h = monitor.physical_height as f64 / monitor.scale_factor;
+        let w = (logical_w as f32 * FIRST_LAUNCH_SCREEN_RATIO).round();
+        let h = (logical_h as f32 * FIRST_LAUNCH_SCREEN_RATIO).round();
+        window.resolution.set(w, h);
+        window.position = WindowPosition::Centered(MonitorSelection::Primary);
+        window.visible = true;
+        *done = true;
+        tracing::info!("首次启动窗口: {}x{}（屏幕 78%，居中）", w, h);
+        return;
+    }
+
+    // 显示器信息迟迟不就位的兜底：别让窗口永远隐身
+    *frames_waited += 1;
+    if *frames_waited > 120 {
+        window.visible = true;
+        *done = true;
+        tracing::warn!("等不到显示器信息，按默认尺寸显示窗口");
+    }
 }
 
 /// 用户显式关闭标记
