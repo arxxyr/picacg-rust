@@ -322,6 +322,18 @@ jobs:
             echo "警告: 未找到内置字体 $FONT_SRC"
           fi
 
+          # 应用图标：Finder /「应用程序」/ 启动台读的是 bundle 里的 icns。
+          # 运行时那套 AppKit setApplicationIconImage 只管进程活着时的 dock 图标，
+          # 补不了这里——缺了 icns，装进 /Applications 就是白板图标。
+          ICNS_SRC="assets/icons/icon.icns"
+          if [ -f "$ICNS_SRC" ]; then
+            cp "$ICNS_SRC" "${APP_DIR}/Contents/Resources/icon.icns"
+            echo "已打包应用图标: $(ls -lh "$ICNS_SRC" | awk '{print $5}')"
+          else
+            echo "错误: 缺少 $ICNS_SRC（用 scripts/make-icon.sh 生成）" >&2
+            exit 1
+          fi
+
           # 写入版本文件
           echo "${{ steps.version.outputs.full_version }}" > "${APP_DIR}/Contents/Resources/VERSION"
 
@@ -344,6 +356,8 @@ jobs:
             "    <string>${VERSION}</string>" \
             '    <key>CFBundleExecutable</key>' \
             '    <string>picacg</string>' \
+            '    <key>CFBundleIconFile</key>' \
+            '    <string>icon</string>' \
             '    <key>CFBundlePackageType</key>' \
             '    <string>APPL</string>' \
             '    <key>NSHighResolutionCapable</key>' \
@@ -359,13 +373,67 @@ jobs:
           cp -R "${APP_DIR}" "${DMG_STAGING}/"
           ln -s /Applications "${DMG_STAGING}/Applications"
 
-          # 生成 DMG
-          hdiutil create \
-            -volname "PicACG ${{ steps.version.outputs.full_version }}" \
-            -srcfolder "${DMG_STAGING}" \
-            -ov \
-            -format UDZO \
-            "${{ steps.version.outputs.package_name }}.dmg"
+          # 安装窗口的背景图（App → Applications 的箭头画在图里，不是控件）。
+          # 多分辨率 tiff：只给 1x 的话 Retina 上会糊。
+          mkdir -p "${DMG_STAGING}/.background"
+          tiffutil -cathidpicheck \
+            assets/dmg/background.png assets/dmg/background@2x.png \
+            -out "${DMG_STAGING}/.background/background.tiff"
+
+          DMG_OUT="${{ steps.version.outputs.package_name }}.dmg"
+          VOLNAME="PicACG ${{ steps.version.outputs.full_version }}"
+
+          # 排版要靠 Finder：先做可写 dmg → 挂载 → AppleScript 设窗口 → 压缩。
+          # ⚠️ runner 上没有登录的图形会话时 AppleScript 会失败，那时**退回朴素
+          # dmg**——安装窗口不好看是小事，发不出版本是大事。
+          styled_dmg() {
+            hdiutil create -srcfolder "${DMG_STAGING}" -volname "${VOLNAME}" \
+              -fs HFS+ -format UDRW -ov rw.dmg || return 1
+            # 必须挂到默认 /Volumes 且不加 -nobrowse，否则 Finder 看不到这个卷
+            #（表现为 AppleScript 报 -1728「不能获得 disk …」）
+            hdiutil attach rw.dmg || return 1
+            local vol="/Volumes/${VOLNAME}"
+
+            # 坐标与 assets/dmg 背景图里的箭头位置绑定，改一处要同步改
+            # scripts/make-dmg-background.sh
+            osascript <<APPLESCRIPT || { hdiutil detach "$vol" || true; return 1; }
+          tell application "Finder"
+            tell disk "${VOLNAME}"
+              open
+              set current view of container window to icon view
+              set toolbar visible of container window to false
+              set statusbar visible of container window to false
+              set the bounds of container window to {200, 120, 860, 520}
+              set opts to the icon view options of container window
+              set arrangement of opts to not arranged
+              set icon size of opts to 128
+              set text size of opts to 13
+              set background picture of opts to file ".background:background.tiff"
+              set position of item "PicACG.app" of container window to {165, 165}
+              set position of item "Applications" of container window to {495, 165}
+              update without registering applications
+              delay 1
+              close
+            end tell
+          end tell
+          APPLESCRIPT
+
+            sync; sleep 2
+            hdiutil detach "$vol" || return 1
+            hdiutil convert rw.dmg -format UDZO -o "${DMG_OUT}" || return 1
+            rm -f rw.dmg
+            return 0
+          }
+
+          if styled_dmg; then
+            echo "已生成带安装引导的 DMG"
+          else
+            echo "::warning::Finder 排版失败，退回朴素 DMG（功能不受影响）"
+            rm -f rw.dmg "${DMG_OUT}"
+            hdiutil detach "/Volumes/${VOLNAME}" 2>/dev/null || true
+            hdiutil create -volname "${VOLNAME}" -srcfolder "${DMG_STAGING}" \
+              -ov -format UDZO "${DMG_OUT}"
+          fi
 
           rm -rf "${DMG_STAGING}" package
 

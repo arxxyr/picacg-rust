@@ -7,5 +7,5 @@
 mod api_plugin;
 mod ui_plugin;
 
-pub use api_plugin::{ApiPlugin, get_download_base_path_public};
+pub use api_plugin::ApiPlugin;
 pub use ui_plugin::UiPlugin;

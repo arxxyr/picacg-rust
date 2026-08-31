@@ -2,8 +2,6 @@
 //!
 //! 处理与后端 API 的异步通信
 
-#![allow(dead_code)]
-
 use bevy::{asset::RenderAssetUsages, prelude::*};
 use picacg_api::{ApiClient, apply_image_dns_override, transform_image_url};
 use picacg_config::AppSettings;
@@ -311,6 +309,18 @@ impl Plugin for ApiPlugin {
             .add_systems(Update, (handle_load_games, handle_load_game_detail))
             // 注册系统 - 锅贴社区
             .add_systems(Update, (handle_load_apps, handle_load_fried_posts))
+            // 注册系统 - 版本更新检查
+            // ⚠️ 这三个 handler 曾整体漏注册：CheckUpdateRequest 发出去没人收，
+            // is_checking 永远是 false，表现为「点检查更新毫无反应、也不报错」。
+            // 本文件顶部的 `#![allow(dead_code)]` 让编译器不会提醒——改这里时留意
+            .add_systems(
+                Update,
+                (
+                    handle_check_update,
+                    handle_check_update_response,
+                    handle_check_update_failed,
+                ),
+            )
             // 注册系统 - 网络诊断
             .add_systems(
                 Update,
@@ -1577,11 +1587,6 @@ fn handle_recommendations_response(
 }
 
 // ==================== 下载处理 ====================
-
-/// 获取下载保存路径（公开版本，供其他模块调用）
-pub fn get_download_base_path_public() -> std::path::PathBuf {
-    get_download_base_path()
-}
 
 /// 获取下载根目录
 /// 优先使用设置中的自定义路径，否则使用程序目录下的 Downloads 文件夹

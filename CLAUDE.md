@@ -970,6 +970,12 @@ pub struct ChannelSettings {
 | `assets/icons/picacg-official-192.png` | **权威源**：官网 PWA 的 `logo_round`（192×192，粉底圆角 + 哔咔娘，自带 alpha），已入库，构建不依赖网络 |
 | `assets/icons/icon.png` | 512×512，macOS dock / ⌘Tab（由权威源 Catrom 放大，勿手改） |
 | `assets/icons/icon-256.png` | 256×256，Windows 任务栏 / Linux 标题栏（同上） |
+| `assets/icons/icon.icns` | macOS `.app` bundle 图标（Finder /「应用程序」/ 启动台） |
+
+⚠️ **运行时那套 AppKit 补不了 bundle 图标**：`setApplicationIconImage:` 只管
+**进程活着时**的 dock 图标；Finder、「应用程序」列表、启动台、以及 dmg 安装
+窗口里显示的都是 bundle 内的 `icon.icns` + `Info.plist` 的 `CFBundleIconFile`。
+两者缺一都会看到白板图标（实测：v0.5.0 的 dmg 里就是白板）。
 
 `scripts/make-icon.sh` 从权威源生成两个投放尺寸；`--fetch` 从官网重抓素材
 （走代理时设 `ALL_PROXY`）。官方只提供到 192，放大用 Catrom——Lanczos 会在
@@ -986,6 +992,33 @@ pub struct ChannelSettings {
   写 `NonSend<WinitWindows>` 会每帧报 "Non-send data not found"）；用 `NonSendMarker`
   把系统钉在主线程，与上游 `changed_windows` 同款
 - 系统常驻 `Update`：合盖等场景窗口会被销毁重建，新窗口要重新贴图标（已处理的记在 `Local` 集合里）
+
+## macOS dmg 安装窗口
+
+dmg 里「App → Applications」的箭头**是画在背景图上的**，不是控件；Finder 只负责
+把两个图标摆到指定坐标。三处数值必须一致，改一处就要同步另两处：
+
+| 位置 | 内容 |
+|------|------|
+| `scripts/make-dmg-background.sh` | 画布 660×400、箭头坐标 (330, 165) |
+| `ci.yml` 的 AppleScript | `bounds {200,120,860,520}`（= 660×400）、图标坐标 (165,165) / (495,165) |
+| `assets/dmg/background@2x.png` | Retina 用，与 1x 合成多分辨率 tiff；只给 1x 会糊 |
+
+**做法**：可写 dmg → 挂载 → AppleScript 设窗口 → 压缩成 UDZO。踩过的坑：
+
+- ⚠️ **挂载必须落在默认 `/Volumes` 且不加 `-nobrowse`**，否则 Finder 看不到这个卷，
+  AppleScript 报 `-1728「不能获得 disk …」`。自定义 `-mountpoint` 同样会中招
+- ⚠️ **Finder 按「卷名」记忆窗口几何**：同名卷开过一次默认大窗口后，即使
+  `.DS_Store` 写对了尺寸，再开还是旧尺寸——表现为背景图右/下露白。调试时每次换
+  卷名；正式产物的卷名带版本号，天然不重名
+- ⚠️ **判失败要看 `osascript` 的退出码**，别在它后面无条件 `echo 成功`
+  （第一版就这么误报过，AppleScript 已经挂了还在打 ✅）
+- **Finder 排版失败必须回退到朴素 `hdiutil create`**：runner 上没有登录的图形会话
+  时 AppleScript 会失败，安装窗口不好看是小事，发不出版本是大事。回退路径
+  已用「把 `osascript` 换成必失败的桩」实测过
+
+> 改 CI 打包步骤后，可把该 step 的 `run` 抽出来、填上真实值在本地直接跑
+>（先 `bash -n` 验语法，heredoc 终止符必须顶格），不必等一轮 CI。
 
 ## 下载全部完成后退出
 
@@ -1080,9 +1113,21 @@ tracing 把 callsite 缓存成 `Interest::never()`，每系统每帧只多一次
   本项目发版格式就是 `v{version}+{commit}`，旧实现用
   `filter_map(parse::<u64>)` 把 `0+abc1234` 这种段**静默丢掉**，
   `0.5.1+abc` 被解析成 `[0,5]`，patch 位一带后缀就误判为「无更新」。已加单测覆盖
-- ⚠️ 历史坑：`check_update_button_interaction` / `refresh_update_status`
-  **从未注册到调度**，按钮点了没有任何反应，而 CLAUDE.md 里已标记为完成。
-  新增页面系统后务必确认 `ui_plugin.rs` 里接线了
+- ⚠️ **漏注册在这个功能上栽过两次**，第二次是整条链路死的：
+  - 第一次：`check_update_button_interaction` / `refresh_update_status`
+    没进 `ui_plugin.rs`，按钮点了没反应
+  - 第二次：`handle_check_update` / `handle_check_update_response` /
+    `handle_check_update_failed` 三个 handler **全都没进 `api_plugin.rs`**。
+    `CheckUpdateRequest` 发出去没人收 → `is_checking` 恒为 false →
+    点一次打一条日志、**却连错误都不报**（那行日志只在 `!is_checking` 时打，
+    它每次都能打出来正是没人处理的证据）
+  - **根因**：`api_plugin.rs` 顶部曾有 `#![allow(dead_code)]`，模块级，
+    把整个 4500 行文件的死代码警告全静音了——三个私有 fn 零引用，
+    编译器本该直接报出来。**该行已删**（实测只遮着 1 个真死代码，
+    即已删除的 `get_download_base_path_public`）。往这个文件加系统时，
+    编译器现在是站在你这边的，别再把那行加回去
+  - 自查手法：`grep -rn '^pub fn ' | 逐个查全项目引用数`，
+    零引用即可疑（对私有 fn 则靠编译器）
 
 ## mimalloc 内存分配器
 

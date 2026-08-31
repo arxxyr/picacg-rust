@@ -7,8 +7,13 @@
 #   已入库，构建与本脚本默认都不依赖网络；官方换图时用 --fetch 重新拉取。
 #
 # 产物（由权威源放大而来，勿手改）：
-#   assets/icons/icon.png      512×512  macOS dock / ⌘Tab
+#   assets/icons/icon.png      512×512  macOS dock / ⌘Tab（运行时 AppKit 设置）
 #   assets/icons/icon-256.png  256×256  Windows 任务栏 / Linux 标题栏
+#   assets/icons/icon.icns              macOS .app bundle 图标（Finder / 应用程序 / 启动台）
+#
+# 为什么 .app 还要单独一份 icns：运行时 AppKit 那套只管**进程活着时**的 dock 图标，
+# Finder、「应用程序」列表、启动台读的是 bundle 里的 icns。缺了它，装进
+# /Applications 后就是一个白板图标——dmg 拖拽窗口里看到的也是白板。
 #
 # 依赖 ImageMagick 7（brew install imagemagick）。
 # 放大用 Catrom：官方素材只有 192，双三次类滤镜在这种平涂+网点的插画上
@@ -43,3 +48,27 @@ magick "$SRC" -filter Catrom -resize 256x256 "$ROOT/assets/icons/icon-256.png"
 
 echo "已生成: $ROOT/assets/icons/icon.png"
 echo "已生成: $ROOT/assets/icons/icon-256.png"
+
+# ---- macOS .app bundle 图标（icns）----
+# iconutil 只有 macOS 有；其他平台跳过，仓库里已入库的 icns 照样可用。
+if ! command -v iconutil >/dev/null 2>&1; then
+    echo "跳过 icon.icns：当前系统没有 iconutil（仅 macOS 提供）"
+    exit 0
+fi
+
+ICONSET="$(mktemp -d)/icon.iconset"
+mkdir -p "$ICONSET"
+
+# iconutil 认死这套文件名，少一个尺寸就会拒绝整个 iconset
+for spec in "16 icon_16x16" "32 icon_16x16@2x" "32 icon_32x32" "64 icon_32x32@2x" \
+            "128 icon_128x128" "256 icon_128x128@2x" "256 icon_256x256" \
+            "512 icon_256x256@2x" "512 icon_512x512" "1024 icon_512x512@2x"; do
+    size="${spec%% *}"
+    name="${spec#* }"
+    magick "$SRC" -filter Catrom -resize "${size}x${size}" "$ICONSET/${name}.png"
+done
+
+iconutil -c icns "$ICONSET" -o "$ROOT/assets/icons/icon.icns"
+rm -rf "$(dirname "$ICONSET")"
+
+echo "已生成: $ROOT/assets/icons/icon.icns"
