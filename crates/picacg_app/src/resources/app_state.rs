@@ -716,6 +716,12 @@ pub struct ProxySettingsState {
     pub host: String,
     /// 端口
     pub port: String,
+    /// 是否需要认证
+    pub use_auth: bool,
+    /// 用户名
+    pub username: String,
+    /// 密码
+    pub password: String,
 }
 
 impl Default for ProxySettingsState {
@@ -726,6 +732,9 @@ impl Default for ProxySettingsState {
             proxy_type: settings.proxy.proxy_type,
             host: settings.proxy.host.clone(),
             port: settings.proxy.port.to_string(),
+            use_auth: settings.proxy.use_auth,
+            username: settings.proxy.username.clone(),
+            password: settings.proxy.password.clone(),
         }
     }
 }
@@ -1710,22 +1719,11 @@ impl Default for ChatRoomState {
 
 // ==================== NAS 远程存储状态 ====================
 
-/// NAS 上传任务状态
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NasUploadStatus {
-    /// 上传中
-    Uploading,
-    /// 已完成
-    Completed,
-}
-
 /// NAS 上传任务条目
 #[derive(Debug, Clone)]
 pub struct NasUploadTask {
     /// 漫画标题
     pub comic_title: String,
-    /// 上传状态
-    pub status: NasUploadStatus,
     /// 已上传文件数
     pub uploaded_files: u32,
     /// 总文件数

@@ -32,6 +32,10 @@ pub struct SaveProxyButton;
 #[derive(Component, Default, Clone)]
 pub struct ProxyEnabledToggle;
 
+/// 代理认证切换按钮
+#[derive(Component, Default, Clone)]
+pub struct ProxyAuthToggle;
+
 /// 代理类型按钮
 #[derive(Component, Default, Clone)]
 pub struct ProxyTypeButton {
@@ -52,6 +56,8 @@ pub enum ProxyFieldType {
     #[default]
     Host,
     Port,
+    Username,
+    Password,
 }
 
 /// 创建代理设置界面
@@ -65,6 +71,9 @@ fn proxy_settings_page(proxy_state: &ProxySettingsState) -> impl Scene + use<> {
     let proxy_type = proxy_state.proxy_type;
     let host = proxy_state.host.clone();
     let port = proxy_state.port.clone();
+    let use_auth = proxy_state.use_auth;
+    let username = proxy_state.username.clone();
+    let password = proxy_state.password.clone();
 
     bsn! {
         ProxySettingsRoot
@@ -100,9 +109,13 @@ fn proxy_settings_page(proxy_state: &ProxySettingsState) -> impl Scene + use<> {
                     // 代理类型选择
                     proxy_type_row(proxy_type),
                     // 主机地址
-                    input_field_row("主机地址:", host, ProxyFieldType::Host, 1),
+                    input_field_row("主机地址:", host, ProxyFieldType::Host, 1, false),
                     // 端口
-                    input_field_row("端口:", port, ProxyFieldType::Port, 2),
+                    input_field_row("端口:", port, ProxyFieldType::Port, 2, false),
+                    // 代理认证（用户名/密码留空即匿名代理）
+                    auth_toggle_row(use_auth),
+                    input_field_row("用户名:", username, ProxyFieldType::Username, 3, false),
+                    input_field_row("密码:", password, ProxyFieldType::Password, 4, true),
                     (
                         // 按钮行
                         Node {
@@ -214,6 +227,54 @@ fn toggle_row(label: &str, enabled: bool) -> impl Scene + use<> {
     }
 }
 
+/// 认证开关行场景（与 `toggle_row` 同款外观，标记组件不同）
+///
+/// 认证凭据的**生效**由 config 层 `to_proxy_url` 决定（`use_auth &&
+/// username 非空` 才拼 `user:pass@`），这里只管把三个值收进状态。
+fn auth_toggle_row(use_auth: bool) -> impl Scene + use<> {
+    let toggle_bg = if use_auth {
+        AppColors::PRIMARY
+    } else {
+        AppColors::SURFACE_SUNKEN
+    };
+    let toggle_text = if use_auth { "开启" } else { "关闭" };
+
+    bsn! {
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+        }
+        Children [
+            (
+                Text("代理认证:")
+                TextFont { font_size: FontSize::Px(16.0) }
+                TextColor(AppColors::TEXT)
+                Node { width: Val::Px(100.0) }
+            ),
+            (
+                ProxyAuthToggle
+                Button
+                template_value(ButtonStyle::segment(use_auth))
+                Node {
+                    width: Val::Px(80.0),
+                    height: Val::Px(36.0),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                BackgroundColor({toggle_bg})
+                Children [
+                    (
+                        Text({toggle_text})
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    )
+                ]
+            ),
+        ]
+    }
+}
+
 /// 代理类型选择行场景（标签 + 三个类型按钮）
 fn proxy_type_row(current: ProxyType) -> impl Scene {
     let type_buttons: Vec<_> = [ProxyType::Http, ProxyType::Https, ProxyType::Socks5]
@@ -283,16 +344,24 @@ fn input_field_row(
     value: String,
     field_type: ProxyFieldType,
     tab_index: i32,
+    password: bool,
 ) -> impl Scene + use<> {
     let label = label.to_string();
-    let text_input = TextInput::new("点击输入...").with_value(&value);
+    let mut text_input = TextInput::new("点击输入...").with_value(&value);
+    if password {
+        text_input = text_input.with_password();
+    }
     let display_color = if value.is_empty() {
         AppColors::TEXT_SECONDARY
     } else {
         AppColors::TEXT
     };
+    // 初始渲染与共享层 display_value() 的掩码规则保持一致，
+    // 否则第一帧密码会以明文闪现
     let display = if value.is_empty() {
         "点击输入...".to_string()
+    } else if password {
+        "*".repeat(value.chars().count())
     } else {
         value
     };
@@ -386,6 +455,9 @@ pub fn save_button_interaction(
         settings.proxy.proxy_type = proxy_state.proxy_type;
         settings.proxy.host = proxy_state.host.clone();
         settings.proxy.port = proxy_state.port.parse().unwrap_or(1080);
+        settings.proxy.use_auth = proxy_state.use_auth;
+        settings.proxy.username = proxy_state.username.clone();
+        settings.proxy.password = proxy_state.password.clone();
         drop(settings);
 
         tracing::info!("代理设置已保存");
@@ -419,6 +491,37 @@ pub fn proxy_toggle_interaction(
                         "关闭".to_string()
                     };
                 }
+            }
+        }
+    }
+}
+
+/// 代理认证切换交互（与启用开关同款）
+pub fn proxy_auth_toggle_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &Children),
+        (Changed<Interaction>, With<ProxyAuthToggle>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut proxy_state: ResMut<ProxySettingsState>,
+) {
+    for (interaction, mut style, children) in &mut interaction_query {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        proxy_state.use_auth = !proxy_state.use_auth;
+
+        if style.selected != proxy_state.use_auth {
+            style.selected = proxy_state.use_auth;
+        }
+
+        for child in children.iter() {
+            if let Ok(mut text) = text_query.get_mut(child) {
+                **text = if proxy_state.use_auth {
+                    "开启".to_string()
+                } else {
+                    "关闭".to_string()
+                };
             }
         }
     }
@@ -493,6 +596,16 @@ pub fn proxy_sync_text_values(
                 }
                 if proxy_state.port != input.value {
                     proxy_state.port.clone_from(&input.value);
+                }
+            }
+            ProxyFieldType::Username => {
+                if proxy_state.username != input.value {
+                    proxy_state.username.clone_from(&input.value);
+                }
+            }
+            ProxyFieldType::Password => {
+                if proxy_state.password != input.value {
+                    proxy_state.password.clone_from(&input.value);
                 }
             }
         }

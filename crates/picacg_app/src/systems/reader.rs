@@ -45,6 +45,18 @@ pub struct ReaderImageLoading {
     pub url: String,
 }
 
+/// 终局失败的条漫槽位标记（点击重试）
+///
+/// 由 `update_webtoon_window` 的失败分支挂上，`webtoon_failed_slot_retry`
+/// 在点击时摘除并恢复微光占位。
+#[derive(Component)]
+pub struct WebtoonFailedSlot {
+    /// 失败的图片 URL
+    pub url: String,
+    /// 「加载失败 · 点击重试」提示覆盖层实体（重试时销毁）
+    pub hint: Entity,
+}
+
 // ---------- 工具栏 ----------
 
 /// 阅读器顶部工具栏
@@ -1339,6 +1351,7 @@ pub fn update_webtoon_window(
         &WebtoonSlot,
         Option<&ImageNode>,
         Option<&ReaderImageLoading>,
+        Option<&WebtoonFailedSlot>,
     )>,
     image_cache: Res<ImageCache>,
     asset_server: Res<AssetServer>,
@@ -1359,7 +1372,7 @@ pub fn update_webtoon_window(
     let load_end = (current_page + consts::WEBTOON_PRELOAD_RANGE + 1).min(reader_state.total_pages);
 
     // 只遍历需要加载的槽位
-    for (entity, slot, existing_img, loading_marker) in slot_query.iter() {
+    for (entity, slot, existing_img, loading_marker, failed_marker) in slot_query.iter() {
         let Some(page) = slot.page_index else {
             continue;
         };
@@ -1377,9 +1390,46 @@ pub fn update_webtoon_window(
         };
         let url = picture.media.url();
 
-        // 终局失败：停掉微光，留一个静止的暗块——一直脉动等于在骗用户"还在加载"
+        // 终局失败：停掉微光，把槽位标记为可点击重试——一直脉动等于在骗用户
+        // "还在加载"，而没有重试入口等于给这一页判死刑（enqueue 对已失败的
+        // URL 不会重复入队，不重启应用就永远加载不出来）
         if image_cache.is_failed(&url) {
-            commands.entity(entity).remove::<LoadingShimmer>();
+            if failed_marker.is_none() {
+                // 提示覆盖层单独一个实体：Absolute 铺满槽位 + flex 居中，
+                // 不动槽位自身布局；重试时随标记一起销毁
+                let hint = commands
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: Val::Px(0.0),
+                            right: Val::Px(0.0),
+                            top: Val::Px(0.0),
+                            bottom: Val::Px(0.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        ChildOf(entity),
+                    ))
+                    .with_children(|overlay| {
+                        overlay.spawn((
+                            Text::new("加载失败 · 点击重试"),
+                            TextFont {
+                                font_size: FontSize::Px(14.0),
+                                ..default()
+                            },
+                            TextColor(AppColors::TEXT_SECONDARY),
+                        ));
+                    })
+                    .id();
+                commands.entity(entity).remove::<LoadingShimmer>().insert((
+                    WebtoonFailedSlot {
+                        url: url.clone(),
+                        hint,
+                    },
+                    Interaction::default(),
+                ));
+            }
             continue;
         }
 
@@ -1418,6 +1468,29 @@ pub fn update_webtoon_window(
             load_image_messages.write(LoadImageRequest { url: url.clone() });
             commands.entity(entity).insert(ReaderImageLoading { url });
         }
+    }
+}
+
+/// 点击终局失败的条漫槽位 → 计数归零强制重试
+///
+/// 与 `update_webtoon_window` 的失败分支配对：那边判死刑时挂上
+/// `WebtoonFailedSlot` + `Interaction`，这里赦免——清掉失败态、恢复微光占位，
+/// 下一帧窗口系统会照常重新发起加载。
+pub fn webtoon_failed_slot_retry(
+    mut commands: Commands,
+    mut image_cache: ResMut<ImageCache>,
+    query: Query<(Entity, &Interaction, &WebtoonFailedSlot), Changed<Interaction>>,
+) {
+    for (entity, interaction, failed) in query.iter() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        image_cache.retry(&failed.url);
+        commands.entity(failed.hint).despawn();
+        commands
+            .entity(entity)
+            .remove::<(WebtoonFailedSlot, Interaction)>()
+            .insert(LoadingShimmer::new(consts::SLOT_PLACEHOLDER));
     }
 }
 

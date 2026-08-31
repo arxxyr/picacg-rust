@@ -109,6 +109,19 @@ impl ImageCache {
         }
     }
 
+    /// 手动强制重试一个**终局失败**的 URL（计数归零，立即重新排队）
+    ///
+    /// 只对终局失败生效：等待退避的条目已有自动重试安排，加载中/已完成的
+    /// 更不该动。调用方（阅读器失败槽位的点击重试）负责恢复自己的占位 UI。
+    pub fn retry(&mut self, url: &str) {
+        if let Some(ImageLoadState::Failed { retry_at: None, .. }) = self.states.get(url) {
+            tracing::info!("手动重试图片（计数归零）: url={url}");
+            self.states
+                .insert(url.to_string(), ImageLoadState::Pending { attempts: 0 });
+            self.pending_queue.push_back(url.to_string());
+        }
+    }
+
     /// 把退避期已过的失败条目重新排队（队列泵每帧调用；无待重试项 O(1) 直返）
     pub fn requeue_ready_retries(&mut self) {
         if self.retrying_count == 0 {

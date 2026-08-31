@@ -112,6 +112,18 @@ pub struct ProxyHostInput;
 #[derive(Component, Default, Clone)]
 pub struct ProxyPortInput;
 
+/// 代理认证复选框
+#[derive(Component, Default, Clone)]
+pub struct ProxyAuthCheckbox;
+
+/// 代理用户名输入框
+#[derive(Component, Default, Clone)]
+pub struct ProxyUsernameInput;
+
+/// 代理密码输入框
+#[derive(Component, Default, Clone)]
+pub struct ProxyPasswordInput;
+
 /// 代理设置状态
 #[derive(Resource)]
 pub struct ProxySettingsInputState {
@@ -119,6 +131,9 @@ pub struct ProxySettingsInputState {
     pub proxy_type: ProxyType,
     pub host: String,
     pub port: String,
+    pub use_auth: bool,
+    pub username: String,
+    pub password: String,
 }
 
 impl Default for ProxySettingsInputState {
@@ -129,6 +144,9 @@ impl Default for ProxySettingsInputState {
             proxy_type: settings.proxy.proxy_type,
             host: settings.proxy.host.clone(),
             port: settings.proxy.port.to_string(),
+            use_auth: settings.proxy.use_auth,
+            username: settings.proxy.username.clone(),
+            password: settings.proxy.password.clone(),
         }
     }
 }
@@ -536,6 +554,9 @@ pub fn setup_settings_ui(
         proxy_type: settings.proxy.proxy_type,
         host: settings.proxy.host.clone(),
         port: settings.proxy.port.to_string(),
+        use_auth: settings.proxy.use_auth,
+        username: settings.proxy.username.clone(),
+        password: settings.proxy.password.clone(),
     });
 
     // 初始化日志等级状态
@@ -1935,6 +1956,41 @@ fn proxy_setting(settings: &AppSettings) -> impl Scene + use<> {
         AppColors::TEXT
     };
 
+    // 认证开关 + 凭据输入框（生效条件在 to_proxy_url：use_auth && username
+    // 非空）
+    let use_auth = settings.proxy.use_auth;
+    let auth_check_icon = if use_auth { ICON_CHECK } else { "" };
+    let auth_checkbox_style = ButtonStyle::segment(use_auth);
+    let auth_checkbox_bg = selectable_bg(use_auth);
+    let auth_checkbox_border = selectable_border(use_auth);
+
+    let username_input = TextInput::new("用户名").with_value(&settings.proxy.username);
+    let username_text = if settings.proxy.username.is_empty() {
+        "用户名".to_string()
+    } else {
+        settings.proxy.username.clone()
+    };
+    let username_color = if settings.proxy.username.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
+    let password_input = TextInput::new("密码")
+        .with_value(&settings.proxy.password)
+        .with_password();
+    // 初始渲染与共享层 display_value() 的掩码规则一致，避免明文闪现
+    let password_text = if settings.proxy.password.is_empty() {
+        "密码".to_string()
+    } else {
+        "*".repeat(settings.proxy.password.chars().count())
+    };
+    let password_color = if settings.proxy.password.is_empty() {
+        AppColors::TEXT_SECONDARY
+    } else {
+        AppColors::TEXT
+    };
+
     // 端口输入框
     let port_str = settings.proxy.port.to_string();
     let port_input = TextInput::new("7890").with_value(port_str.clone());
@@ -2094,6 +2150,130 @@ fn proxy_setting(settings: &AppSettings) -> impl Scene + use<> {
                                         Text({port_text})
                                         TextFont { font_size: FontSize::Px(13.0) }
                                         TextColor(port_color)
+                                    )
+                                ]
+                            ),
+                        ]
+                    ),
+                ]
+            ),
+            (
+                // 代理认证复选框
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                }
+                Children [
+                    (
+                        ProxyAuthCheckbox
+                        Button
+                        template_value(auth_checkbox_style)
+                        Node {
+                            width: Val::Px(20.0),
+                            height: Val::Px(20.0),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                        }
+                        BackgroundColor(auth_checkbox_bg)
+                        template_value(auth_checkbox_border)
+                        Children [
+                            (
+                                Text({auth_check_icon})
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            )
+                        ]
+                    ),
+                    (
+                        Text("代理需要认证")
+                        TextFont { font_size: FontSize::Px(14.0) }
+                        TextColor(AppColors::TEXT)
+                    ),
+                ]
+            ),
+            (
+                // 用户名和密码
+                Node {
+                    flex_direction: FlexDirection::Row,
+                    column_gap: Val::Px(10.0),
+                }
+                Children [
+                    (
+                        // 用户名
+                        Node {
+                            flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text("用户名")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            ),
+                            (
+                                ProxyUsernameInput
+                                template_value(username_input)
+                                Button
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(32.0),
+                                    padding: UiRect::horizontal(Val::Px(10.0)),
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                                }
+                                BackgroundColor(AppColors::SURFACE_SUNKEN)
+                                template_value(BorderColor::all(AppColors::BORDER))
+                                RelativeCursorPosition
+                                Children [
+                                    (
+                                        TextInputDisplay
+                                        Text({username_text})
+                                        TextFont { font_size: FontSize::Px(13.0) }
+                                        TextColor(username_color)
+                                    )
+                                ]
+                            ),
+                        ]
+                    ),
+                    (
+                        // 密码（共享层按 display_value() 渲染掩码）
+                        Node {
+                            flex_grow: 1.0,
+                            flex_direction: FlexDirection::Column,
+                            row_gap: Val::Px(4.0),
+                        }
+                        Children [
+                            (
+                                Text("密码")
+                                TextFont { font_size: FontSize::Px(14.0) }
+                                TextColor(AppColors::TEXT)
+                            ),
+                            (
+                                ProxyPasswordInput
+                                template_value(password_input)
+                                Button
+                                Node {
+                                    width: Val::Percent(100.0),
+                                    height: Val::Px(32.0),
+                                    padding: UiRect::horizontal(Val::Px(10.0)),
+                                    align_items: AlignItems::Center,
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(4.0)),
+                                }
+                                BackgroundColor(AppColors::SURFACE_SUNKEN)
+                                template_value(BorderColor::all(AppColors::BORDER))
+                                RelativeCursorPosition
+                                Children [
+                                    (
+                                        TextInputDisplay
+                                        Text({password_text})
+                                        TextFont { font_size: FontSize::Px(13.0) }
+                                        TextColor(password_color)
                                     )
                                 ]
                             ),
@@ -2805,6 +2985,9 @@ fn save_all_settings(
     settings.proxy.proxy_type = proxy_state.proxy_type;
     settings.proxy.host = proxy_state.host.clone();
     settings.proxy.port = proxy_state.port.parse().unwrap_or(7890);
+    settings.proxy.use_auth = proxy_state.use_auth;
+    settings.proxy.username = proxy_state.username.clone();
+    settings.proxy.password = proxy_state.password.clone();
     settings.log_level = log_state.level;
     settings.auto_resume_downloads = behavior_state.auto_resume;
     settings.exit_after_downloads = behavior_state.exit_after_all_done;
@@ -2980,6 +3163,25 @@ pub fn proxy_enabled_checkbox_interaction(
     }
 }
 
+/// 代理认证复选框交互（与启用复选框同款）
+pub fn proxy_auth_checkbox_interaction(
+    mut interaction_query: Query<
+        (&Interaction, &mut ButtonStyle, &mut BorderColor, &Children),
+        (Changed<Interaction>, With<ProxyAuthCheckbox>),
+    >,
+    mut proxy_state: ResMut<ProxySettingsInputState>,
+    mut text_query: Query<&mut Text>,
+) {
+    for (interaction, mut style, mut border_color, children) in interaction_query.iter_mut() {
+        if *interaction != Interaction::Pressed {
+            continue;
+        }
+        proxy_state.use_auth = !proxy_state.use_auth;
+        apply_selected(&mut style, &mut border_color, proxy_state.use_auth);
+        set_check_icon(children, &mut text_query, proxy_state.use_auth);
+    }
+}
+
 /// 代理类型按钮交互（单选组：选中态写入 `ButtonStyle.selected`）
 pub fn proxy_type_button_interaction(
     interaction_query: Query<(&Interaction, &ProxyTypeButton), Changed<Interaction>>,
@@ -3006,7 +3208,15 @@ pub fn proxy_type_button_interaction(
 pub fn proxy_input_keyboard(
     mut input_focus: ResMut<InputFocus>,
     mut keyboard_events: MessageReader<bevy::input::keyboard::KeyboardInput>,
-    input_query: Query<(), Or<(With<ProxyHostInput>, With<ProxyPortInput>)>>,
+    input_query: Query<
+        (),
+        Or<(
+            With<ProxyHostInput>,
+            With<ProxyPortInput>,
+            With<ProxyUsernameInput>,
+            With<ProxyPasswordInput>,
+        )>,
+    >,
 ) {
     use bevy::input::{ButtonState, keyboard::Key};
 
@@ -3044,6 +3254,8 @@ pub fn sync_proxy_input_values(
             Without<ProxyHostInput>,
         ),
     >,
+    username_query: Query<&TextInput, (Changed<TextInput>, With<ProxyUsernameInput>)>,
+    password_query: Query<&TextInput, (Changed<TextInput>, With<ProxyPasswordInput>)>,
 ) {
     for input in host_query.iter() {
         if proxy_state.host != input.value {
@@ -3053,6 +3265,16 @@ pub fn sync_proxy_input_values(
     for input in port_query.iter() {
         if proxy_state.port != input.value {
             proxy_state.port.clone_from(&input.value);
+        }
+    }
+    for input in username_query.iter() {
+        if proxy_state.username != input.value {
+            proxy_state.username.clone_from(&input.value);
+        }
+    }
+    for input in password_query.iter() {
+        if proxy_state.password != input.value {
+            proxy_state.password.clone_from(&input.value);
         }
     }
 }

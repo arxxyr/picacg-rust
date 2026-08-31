@@ -477,7 +477,13 @@ width:100% 独占整行）撑起总高度——引擎 `content_size()` 与上游
   （`api_plugin::process_image_queue` 每帧调 `requeue_ready_retries()`，无待重试项 O(1) 直返）
 - `is_failed()` 只对终局失败返回真——重试期间消费系统保持占位符存活，成功后图片正常落位；
   终局失败才摘除占位标记（实体退出每帧扫描集）
-- `enqueue()` 对任何已有状态的 URL 不重复入队（防重复请求）。曾有的手动 `retry()` 无任何调用者，2026-08-31 死代码清扫时已删——需要「强制重来」语义时再加回并接线
+- `enqueue()` 对任何已有状态的 URL 不重复入队（防重复请求）——**这意味着终局失败的
+  URL 不重启应用就永远加载不出来**，所以终局失败必须给用户留重试入口
+- `retry(url)` 手动强制重试（计数归零、立即重排队），只对终局失败生效。消费端：
+  条漫失败槽位显示「加载失败 · 点击重试」覆盖层（`WebtoonFailedSlot` 标记 +
+  `webtoon_failed_slot_retry` 系统），点击即赦免并恢复微光占位。
+  ⚠️ 曾因无调用者被死代码清扫删过一次；若再要删，先确认失败槽位的点击重试
+  已换了别的路径
 - 下载并发上限 15；解码走 `spawn_blocking`（不占 tokio worker）；显存单份（RENDER_WORLD）
 
 ### 瀑布式系统与 refresh 函数的职责分离
@@ -868,6 +874,21 @@ pub struct ChannelSettings {
 - 修改通道后自动重建 `ApiClient`，Token 保持不变
 
 ---
+
+## 代理认证
+
+`ProxySettings`（config 层）含 `use_auth/username/password`，`to_proxy_url()` 在
+`use_auth && username 非空` 时拼 `user:pass@host:port`。两处 UI 均可编辑：
+
+- 登录前代理页（`systems/proxy_settings.rs`）：认证开关行 + 用户名/密码输入行，
+  `ProxyFieldType::{Username, Password}` 汇入 `ProxySettingsState`，保存按钮落盘
+- 设置页代理分组（`systems/settings.rs`）：「代理需要认证」复选框 + 凭据输入行，
+  汇入 `ProxySettingsInputState`，自动保存机制落盘
+
+密码输入用共享层 `TextInput::with_password()`（`display_value()` 以 `*` 掩码）；
+**场景里的初始 Text 也要按同一规则掩码**，否则已存密码会在首帧明文闪现。
+历史：这三个字段曾以「UI 状态镜像」形态存在但无人消费（2026-08-31 死代码清扫
+中被删又带着真消费者补回）——`ProxySettingsState` 里的字段必须有读者才准存在。
 
 ## 内容过滤系统
 

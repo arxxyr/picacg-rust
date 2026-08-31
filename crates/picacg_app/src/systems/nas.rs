@@ -807,11 +807,9 @@ pub fn handle_nas_upload_progress(
         {
             task.uploaded_files = event.uploaded_files;
             task.total_files = event.total_files;
-            task.status = NasUploadStatus::Uploading;
         } else {
             nas_state.upload_tasks.push(NasUploadTask {
                 comic_title: event.comic_title.clone(),
-                status: NasUploadStatus::Uploading,
                 uploaded_files: event.uploaded_files,
                 total_files: event.total_files,
             });
@@ -829,10 +827,6 @@ pub fn handle_nas_upload_completed(
         nas_state.is_uploading = false;
         nas_state.success = Some(event.message.clone());
         nas_state.error = None;
-        // 标记所有任务为完成
-        for task in &mut nas_state.upload_tasks {
-            task.status = NasUploadStatus::Completed;
-        }
         nas_state.needs_rebuild = true;
     }
 }

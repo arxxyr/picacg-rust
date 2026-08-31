@@ -145,6 +145,7 @@ impl Plugin for UiPlugin {
                     back_button_interaction,
                     save_button_interaction,
                     proxy_toggle_interaction,
+                    proxy_auth_toggle_interaction,
                     proxy_type_interaction,
                     proxy_sync_text_values,
                 )
@@ -280,6 +281,7 @@ impl Plugin for UiPlugin {
                     // 条漫模式
                     // 顺序要紧：先按锚点定位滚动，再据当前页决定加载哪些图
                     (sync_webtoon_scroll, update_webtoon_window).chain(),
+                    webtoon_failed_slot_retry,
                     update_webtoon_images_from_cache,
                     update_webtoon_scale,
                     // 交互（元组超过 20 项会撞上 bevy 的 tuple impl 上限，故分组嵌套）
@@ -328,6 +330,7 @@ impl Plugin for UiPlugin {
                 (
                     // 代理设置交互
                     proxy_enabled_checkbox_interaction,
+                    proxy_auth_checkbox_interaction,
                     proxy_type_button_interaction,
                     proxy_input_keyboard,
                     sync_proxy_input_values,
