@@ -367,6 +367,16 @@ jobs:
             '</dict>' \
             '</plist>' > "${APP_DIR}/Contents/Info.plist"
 
+          # ad-hoc 签名整个 bundle（免费、无证书）。rust 链接器只给二进制
+          # 裸 ad-hoc（linker-signed），bundle 没有资源封印——浏览器下载打上
+          # 隔离标记后 Gatekeeper 判「已损坏」只给移到废纸篓；补上 bundle 级
+          # ad-hoc 后降级为「无法验证开发者」，用户可走 系统设置→仍要打开。
+          # 必须放在 Resources 全部就位（字体/图标/VERSION/Info.plist）之后，
+          # 否则封印对不上又回到「已损坏」。根治需 Developer ID + 公证。
+          codesign --force --deep --sign - "${APP_DIR}"
+          codesign --verify --deep --strict "${APP_DIR}"
+          echo "已完成 ad-hoc 签名"
+
           # 创建 DMG 临时目录
           DMG_STAGING="dmg_staging"
           mkdir -p "${DMG_STAGING}"
@@ -574,7 +584,9 @@ jobs:
             ## 说明
             - 已内置 Sarasa（更纱黑体）字体，无需额外安装
             - Linux/Windows: 解压后保持目录结构即可运行
-            - macOS: 双击 DMG → 拖拽 PicACG.app 到 Applications 文件夹
+            - macOS: 双击 DMG → 拖拽 PicACG.app 到 Applications 文件夹。
+              首次打开若提示「无法验证开发者」：系统设置 → 隐私与安全性 → 仍要打开；
+              或终端执行 `xattr -cr /Applications/PicACG.app`（应用未经 Apple 公证，属预期提示）
 
   # ============ 手动 Tag Release（保留兼容手动打 tag） ============
   release:
@@ -644,7 +656,9 @@ jobs:
             ## 说明
             - 已内置 Sarasa（更纱黑体）字体，无需额外安装
             - Linux/Windows: 解压后保持目录结构即可运行
-            - macOS: 双击 DMG → 拖拽 PicACG.app 到 Applications 文件夹
+            - macOS: 双击 DMG → 拖拽 PicACG.app 到 Applications 文件夹。
+              首次打开若提示「无法验证开发者」：系统设置 → 隐私与安全性 → 仍要打开；
+              或终端执行 `xattr -cr /Applications/PicACG.app`（应用未经 Apple 公证，属预期提示）
 
   # ============ Dev 构建通知 ============
   dev-build-summary:

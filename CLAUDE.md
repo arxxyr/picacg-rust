@@ -1014,6 +1014,29 @@ pub struct ChannelSettings {
   把系统钉在主线程，与上游 `changed_windows` 同款
 - 系统常驻 `Update`：合盖等场景窗口会被销毁重建，新窗口要重新贴图标（已处理的记在 `Local` 集合里）
 
+## macOS Gatekeeper 与签名
+
+**症状**：浏览器下载 dmg → 拖出的 app 双击提示「已损坏，无法打开，移到废纸篓」。
+
+**根因链**（v0.5.2 实测复现）：浏览器下载给 dmg 打隔离标记（`com.apple.quarantine`，
+从 dmg 传染到拖出的 app）→ Gatekeeper 审查签名 → rust 链接器只给二进制裸 ad-hoc
+（`flags=adhoc,linker-signed`），**bundle 没有资源封印**，spctl 报
+`code has no resources but signature indicates they must be present` → 判「已损坏」，
+只给「移到废纸篓」的死局。
+
+**现行缓解**（CI 已接，免费）：打包时 `codesign --force --deep --sign - PicACG.app`
+补 bundle 级 ad-hoc——签名结构完整后，裁决从「已损坏」降级为「无法验证开发者」，
+用户可走 系统设置 → 隐私与安全性 → **仍要打开**（或 `xattr -cr /Applications/PicACG.app`）。
+签名必须在 Resources **全部就位后**执行（字体/图标/VERSION/Info.plist），
+否则封印对不上又回到「已损坏」。
+
+**边界**：
+- **应用内更新那条路不受此影响**：reqwest 落盘不打隔离标记，自家 dmg 拖出的 app
+  直接能开——中招的只有「浏览器手动下载」
+- ad-hoc 只是结构完整，不是信任：隔离标记在就必然要过一次「仍要打开」。
+  根治 = Apple Developer ID（$99/年）+ notarytool 公证
+- release 说明里已写首次打开指引（两处 body，改一处要同步另一处）
+
 ## macOS dmg 安装窗口
 
 dmg 里「App → Applications」的箭头**是画在背景图上的**，不是控件；Finder 只负责
