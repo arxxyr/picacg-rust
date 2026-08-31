@@ -125,6 +125,8 @@ pub struct ComicDetailLoadedEvent {
 /// 漫画详情加载失败
 #[derive(Message)]
 pub struct ComicDetailLoadFailedEvent {
+    /// 请求的漫画 ID（回填前校验，防止过期结果污染已切换的页面）
+    pub comic_id: String,
     pub error: String,
 }
 
@@ -139,6 +141,8 @@ pub struct LoadEpisodesRequest {
 /// 章节列表加载完成
 #[derive(Message)]
 pub struct EpisodesLoadedEvent {
+    /// 请求的漫画 ID（回填前校验，防止过期结果污染已切换的页面）
+    pub comic_id: String,
     pub episodes: Vec<Episode>,
     pub total_pages: i32,
 }
@@ -151,23 +155,30 @@ pub struct EpisodesLoadFailedEvent {
 
 // ==================== 图片列表消息 ====================
 
-/// 加载图片列表请求
+/// 加载图片列表请求（一次取回整章：DB 缓存 → 本地下载目录 → 网络分页拉全）
 #[derive(Message)]
 pub struct LoadPicturesRequest {
     pub comic_id: String,
+    /// 漫画标题（探测本地下载目录用）
+    pub comic_title: String,
     pub episode_order: i32,
-    pub page: i32,
 }
 
 /// 图片列表加载完成
 #[derive(Message)]
 pub struct PicturesLoadedEvent {
+    /// 请求的漫画 ID（消费前校验：切书后飞行中的旧响应必须丢弃）
+    pub comic_id: String,
+    /// 请求的章节 order（消费前校验：切章后飞行中的旧响应必须丢弃）
+    pub episode_order: i32,
     pub pictures: Vec<Picture>,
 }
 
 /// 图片列表加载失败
 #[derive(Message)]
 pub struct PicturesLoadFailedEvent {
+    /// 请求的漫画 ID（消费前校验，过期失败不该弹进当前页面）
+    pub comic_id: String,
     pub error: String,
 }
 
@@ -177,6 +188,8 @@ pub struct PicturesLoadFailedEvent {
 #[derive(Message)]
 pub struct LoadAllChapterPicturesRequest {
     pub comic_id: String,
+    /// 漫画标题（探测本地下载目录用）
+    pub comic_title: String,
     pub episodes: Vec<Episode>,
 }
 
@@ -192,6 +205,8 @@ pub struct WebtoonPageMeta {
 /// 所有章节图片加载完成
 #[derive(Message)]
 pub struct AllChapterPicturesLoadedEvent {
+    /// 请求的漫画 ID（消费前校验：这是长任务，切书后回来的概率最高）
+    pub comic_id: String,
     /// 扁平化的图片列表（所有章节按 order 排列）
     pub pictures: Vec<Picture>,
     /// 每张图片的章节元数据（与 pictures 平行）
@@ -525,6 +540,20 @@ pub struct SaveHistoryRequest {
     pub last_eps_order: i32,
     pub last_eps_title: String,
     pub last_page: i32,
+}
+
+/// 加载单本漫画的历史记录请求（详情页「继续阅读」用）
+#[derive(Message)]
+pub struct LoadComicHistoryRequest {
+    pub comic_id: String,
+}
+
+/// 单本漫画历史记录加载完成（无记录时 history 为 None）
+#[derive(Message)]
+pub struct ComicHistoryLoadedEvent {
+    /// 查询的漫画 ID（回填前校验，防止导航切换后串页）
+    pub comic_id: String,
+    pub history: Option<picacg_db::DbHistory>,
 }
 
 /// 删除历史记录请求

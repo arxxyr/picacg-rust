@@ -10,7 +10,6 @@ picacg_core = { path = "../picacg_core" }
 picacg_api = { path = "../picacg_api" }
 
 sqlx.workspace = true
-moka.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true

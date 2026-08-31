@@ -614,6 +614,9 @@ pub struct ComicDetailState {
     pub is_favorite: bool,
     /// 是否已点赞
     pub is_liked: bool,
+    /// 本地阅读历史（「继续阅读」按钮与进度提示的数据源，
+    /// 每次进入详情页由 `trigger_load_comic_history` 异步刷新）
+    pub history: Option<picacg_db::DbHistory>,
 }
 
 /// 阅读模式
@@ -678,6 +681,10 @@ pub struct ReaderState {
     pub next_chapter_pictures: Vec<Picture>,
     /// 条漫模式是否正在加载全章节图片列表
     pub is_loading_all_chapters: bool,
+    /// 待恢复的章内页码（1-indexed，「继续阅读」进入时携带）
+    ///
+    /// 在当前章图片列表就位（Phase 1）时消费：换算成页码/锚点后清除。
+    pub pending_resume_page: Option<usize>,
 }
 
 impl Default for ReaderState {
@@ -701,6 +708,7 @@ impl Default for ReaderState {
             is_loading_next_chapter: false,
             next_chapter_pictures: Vec::new(),
             is_loading_all_chapters: false,
+            pending_resume_page: None,
         }
     }
 }

@@ -1,6 +1,6 @@
 # PicACG API 协议文档
 
-> 最后更新: 2025-12-02
+> 最后更新: 2026-08-31
 
 ## API 基础信息
 
@@ -130,6 +130,19 @@ fn sign(src: &str) -> String {
 例: https://s3.picacomic.com/static/path/to/image.jpg
 ```
 
+### 实测协议行为（踩坑记录）
+
+- ⚠️ **高级搜索的排序只认请求体**：`POST /comics/advanced-search` 必须把
+  `sort` 放在 JSON body（`{ "keyword": ..., "sort": ... }`）；查询串上的
+  `s=` 会被服务端静默忽略（只有 `GET /comics` 认 `s`）。历史实现只发查询串，
+  表现为四种排序返回完全相同的列表
+- ⚠️ **`epsCount` 是漂移的冗余计数**：与 `GET /comics/{id}/eps` 的真实条数
+  长期对不上且两个方向都会偏（实测 48↔49、46↔48、12↔15、55↔53）。不能拿它
+  与本地章节数直比；同一漫画的 epsCount 随时间自增，「今天的 epsCount >
+  历史快照」才是可靠的更新信号（同字段自比，系统偏差相消）
+- `GET /comics/{id}/order/{order}/pages` 按 40 张/页分页，取整章必须循环拉完
+  `pages` 页；章节列表接口返回顺序不可信，消费前按 `order` 显式排序
+
 ### 评论
 
 | 端点 | 方法 | 说明 |
@@ -252,8 +265,9 @@ pub struct ApiResponse<T> {
 
 ## 实现参考
 
-当前 Rust 实现位于 `src/api/` 目录：
-- `client.rs` - HTTP 客户端和签名逻辑
+当前 Rust 实现位于 `crates/picacg_api/src/`：
+- `client.rs` - HTTP 客户端（代理 / 分流路由接入）
 - `signer.rs` - 请求签名
+- `channel.rs` - 分流通道路由（CDN DNS 覆盖 / 反代 URL 重写，签名始终用原始域名）
 - `models.rs` - 数据模型
 - `endpoints/` - API 端点定义

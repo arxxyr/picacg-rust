@@ -25,6 +25,8 @@ pub struct NavigateToComicDetailEvent {
 pub struct NavigateToReaderEvent {
     pub comic_id: String,
     pub episode_order: i32,
+    /// 继续阅读：进入后恢复到该章内页码（1-indexed）；None = 从头开始
+    pub resume_page: Option<usize>,
 }
 
 /// 导航到代理设置

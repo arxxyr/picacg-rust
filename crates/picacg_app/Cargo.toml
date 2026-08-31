@@ -73,7 +73,6 @@ arboard.workspace = true
 sqlx.workspace = true
 
 # === 缓存 ===
-moka.workspace = true
 
 # === 图片处理 ===
 image.workspace = true

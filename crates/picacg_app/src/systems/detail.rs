@@ -593,8 +593,53 @@ fn tag_button(tag: &str) -> impl Scene + use<> {
     }
 }
 
+/// 操作区（阅读进度提示 + 按钮行）
+///
+/// 有本地阅读历史时按钮显示「继续阅读」，并在按钮行上方给出
+/// 「上次看到」提示；历史由 `trigger_load_comic_history` 异步加载，
+/// 回填后 `refresh_detail_ui` 全量重建，这里只管按当前状态渲染。
+fn actions_section(detail_state: &ComicDetailState) -> impl Scene + use<> {
+    let history = detail_state.history.as_ref().filter(|h| h.last_eps > 0);
+
+    let progress_hint: Box<dyn SceneList> = match history {
+        Some(h) => {
+            let fallback = format!("第{}章", h.last_eps);
+            let eps_title = h.last_eps_title.as_deref().unwrap_or(&fallback);
+            let text = format!("上次看到：{} 第{}页", eps_title, h.last_page);
+            Box::new(bsn_list![(
+                Text({text})
+                TextFont { font_size: FontSize::Px(12.0) }
+                TextColor(AppColors::TEXT_SECONDARY)
+                Node { margin: UiRect::bottom(Val::Px(8.0)) }
+            )])
+        }
+        None => Box::new(bsn_list![]),
+    };
+
+    let read_label = if history.is_some() {
+        "继续阅读"
+    } else {
+        "开始阅读"
+    };
+
+    bsn! {
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+        }
+        Children [
+            {progress_hint},
+            action_buttons_row(
+                read_label,
+                detail_state.is_liked,
+                detail_state.is_favorite
+            ),
+        ]
+    }
+}
+
 /// 操作按钮栏（开始阅读 / 点赞 / 收藏 / 下载）
-fn action_buttons_row(is_liked: bool, is_favorite: bool) -> impl Scene {
+fn action_buttons_row(read_label: &str, is_liked: bool, is_favorite: bool) -> impl Scene + use<> {
     // 点赞按钮：有选中态，走 segment（已点赞钉主色，未点赞为下沉底）
     let like_text = if is_liked { "已点赞" } else { "点赞" };
     let like_color = if is_liked {
@@ -621,9 +666,9 @@ fn action_buttons_row(is_liked: bool, is_favorite: bool) -> impl Scene {
             margin: UiRect::bottom(Val::Px(20.0)),
         }
         Children [
-            // 开始阅读按钮
+            // 开始/继续阅读按钮
             action_button(
-                "开始阅读",
+                read_label,
                 AppColors::PRIMARY,
                 ButtonStyle::primary(),
                 StartReadButton
@@ -786,8 +831,8 @@ fn detail_content_initial(
     Box::new(bsn_list![
         // 基本信息区域（封面 + 详情）
         info_row(cover, details),
-        // 操作按钮栏
-        action_buttons_row(detail_state.is_liked, detail_state.is_favorite),
+        // 操作区（进度提示 + 按钮栏）
+        actions_section(detail_state),
         // 章节列表标题
         episodes_title_row(
             detail_state.episodes.len(),
@@ -825,8 +870,8 @@ fn detail_content_full(
     Box::new(bsn_list![
         // 基本信息区域（封面 + 详情）
         info_row(cover, details),
-        // 操作按钮栏
-        action_buttons_row(detail_state.is_liked, detail_state.is_favorite),
+        // 操作区（进度提示 + 按钮栏）
+        actions_section(detail_state),
         // 章节列表标题
         episodes_title_row(
             detail_state.episodes.len(),
@@ -930,16 +975,19 @@ pub fn episode_card_interaction(
 ) {
     for (interaction, card) in &interaction_query {
         if *interaction == Interaction::Pressed {
-            // 导航到阅读器
+            // 导航到阅读器（点章节卡片 = 明确要从该章头开始，不带续读页码）
             navigate_messages.write(NavigateToReaderEvent {
                 comic_id: detail_state.comic_id.clone(),
                 episode_order: card.episode_order,
+                resume_page: None,
             });
         }
     }
 }
 
-/// 开始阅读按钮交互
+/// 开始/继续阅读按钮交互
+///
+/// 有本地阅读历史 → 自动继续上次的章节与页码；无 → 从第一章开始
 pub fn start_read_button_interaction(
     interaction_query: Query<&Interaction, (Changed<Interaction>, With<StartReadButton>)>,
     detail_state: Res<ComicDetailState>,
@@ -947,11 +995,46 @@ pub fn start_read_button_interaction(
 ) {
     for interaction in &interaction_query {
         if *interaction == Interaction::Pressed {
-            // 从第一章开始阅读
+            let (episode_order, resume_page) = match &detail_state.history {
+                Some(h) if h.last_eps > 0 => (h.last_eps as i32, Some(h.last_page.max(1) as usize)),
+                _ => (1, None),
+            };
             navigate_messages.write(NavigateToReaderEvent {
                 comic_id: detail_state.comic_id.clone(),
-                episode_order: 1,
+                episode_order,
+                resume_page,
             });
+        }
+    }
+}
+
+/// 触发加载本地阅读历史（进入详情页时，OnEnter 链上执行）
+///
+/// 每次进入都重查：从阅读器返回详情页时按钮上的进度才是最新的
+pub fn trigger_load_comic_history(
+    detail_state: Res<ComicDetailState>,
+    mut load_messages: MessageWriter<LoadComicHistoryRequest>,
+) {
+    if !detail_state.comic_id.is_empty() {
+        load_messages.write(LoadComicHistoryRequest {
+            comic_id: detail_state.comic_id.clone(),
+        });
+    }
+}
+
+/// 历史查询结果回填详情状态（驱动「继续阅读」按钮与进度提示刷新）
+pub fn handle_comic_history_loaded(
+    mut detail_state: ResMut<ComicDetailState>,
+    mut messages: MessageReader<ComicHistoryLoadedEvent>,
+) {
+    for event in messages.read() {
+        // 导航可能已切到别的漫画，过期结果直接丢弃
+        if event.comic_id != detail_state.comic_id {
+            continue;
+        }
+        // 比较后写：避免 None → None 也触发详情页全量重建
+        if detail_state.history != event.history {
+            detail_state.history = event.history.clone();
         }
     }
 }

@@ -110,6 +110,8 @@ impl Plugin for ApiPlugin {
             .add_message::<HistoryLoadedEvent>()
             .add_message::<HistoryLoadFailedEvent>()
             .add_message::<SaveHistoryRequest>()
+            .add_message::<LoadComicHistoryRequest>()
+            .add_message::<ComicHistoryLoadedEvent>()
             .add_message::<DeleteHistoryRequest>()
             .add_message::<ClearAllHistoryRequest>()
             // 点赞记录相关消息
@@ -271,6 +273,7 @@ impl Plugin for ApiPlugin {
                 (
                     handle_load_history,
                     handle_save_history,
+                    handle_load_comic_history,
                     handle_delete_history,
                     handle_clear_all_history,
                 ),
@@ -1029,7 +1032,9 @@ fn handle_load_comic_detail(
         runtime.spawn_background_task(move |mut ctx| async move {
             use picacg_api::endpoints::comic::GetComicDetailRequest;
 
-            let request = GetComicDetailRequest { comic_id };
+            let request = GetComicDetailRequest {
+                comic_id: comic_id.clone(),
+            };
 
             match client.request(request).await {
                 Ok(response) => {
@@ -1044,7 +1049,7 @@ fn handle_load_comic_detail(
                     let error = e.to_string();
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world
-                            .write_message(ComicDetailLoadFailedEvent { error });
+                            .write_message(ComicDetailLoadFailedEvent { comic_id, error });
                     })
                     .await;
                 }
@@ -1054,6 +1059,9 @@ fn handle_load_comic_detail(
 }
 
 /// 处理漫画详情加载响应
+///
+/// 回填前校验漫画 ID：请求飞行途中用户可能已切到别的漫画，
+/// 过期结果直接丢弃，不能覆盖当前页面的状态
 fn handle_comic_detail_response(
     mut loaded_messages: MessageReader<ComicDetailLoadedEvent>,
     mut failed_messages: MessageReader<ComicDetailLoadFailedEvent>,
@@ -1062,6 +1070,14 @@ fn handle_comic_detail_response(
     mut episodes_messages: MessageWriter<LoadEpisodesRequest>,
 ) {
     for event in loaded_messages.read() {
+        if event.comic.id != detail_state.comic_id {
+            tracing::debug!(
+                "丢弃过期的详情响应: 响应={}, 当前={}",
+                event.comic.id,
+                detail_state.comic_id
+            );
+            continue;
+        }
         detail_state.is_loading = false;
         detail_state.is_favorite = event.comic.is_favourite.unwrap_or(false);
         detail_state.is_liked = event.comic.is_liked.unwrap_or(false);
@@ -1079,6 +1095,9 @@ fn handle_comic_detail_response(
     }
 
     for event in failed_messages.read() {
+        if event.comic_id != detail_state.comic_id {
+            continue;
+        }
         detail_state.is_loading = false;
         detail_state.error = Some(event.error.clone());
     }
@@ -1137,6 +1156,7 @@ fn handle_load_episodes(
             let total_pages = page;
             ctx.run_on_main_thread(move |ctx| {
                 ctx.world.write_message(EpisodesLoadedEvent {
+                    comic_id,
                     episodes: all_episodes,
                     total_pages,
                 });
@@ -1153,6 +1173,15 @@ fn handle_episodes_response(
     mut detail_state: ResMut<ComicDetailState>,
 ) {
     for event in loaded_messages.read() {
+        // 过期结果丢弃：飞行途中可能已切到别的漫画
+        if event.comic_id != detail_state.comic_id {
+            tracing::debug!(
+                "丢弃过期的章节列表响应: 响应={}, 当前={}",
+                event.comic_id,
+                detail_state.comic_id
+            );
+            continue;
+        }
         detail_state.is_loading_episodes = false;
         detail_state.episodes = event.episodes.clone();
         detail_state.episodes_total_pages = event.total_pages;
@@ -1167,7 +1196,141 @@ fn handle_episodes_response(
 
 // ==================== 图片列表加载 ====================
 
-/// 处理图片列表加载请求
+/// 查询已完整下载的章节集合（本地目录重建列表的信任白名单）
+///
+/// 只有下载器标记完成的章才允许按目录内容重建——下载中断的半截目录
+/// 若被当成完整列表，缺的页永远不会去网络补。
+///
+/// 判据分两档：整本 `Completed` 时 `episode_orders` 全部可信（下载器
+/// 逐章下完才置 Completed）；进行中/暂停的任务只信 `completed_episodes`
+/// 增量标记。存量库里 `completed_episodes` 全空——逐章标记曾被 FSM 进度
+/// 保存的裸 upsert 冲掉（已修：upsert 对该列改 COALESCE 只增不清，见
+/// picacg_db database.rs），但历史数据不会回填，`Completed` 档对存量
+/// 已下载漫画仍是主要覆盖来源。
+async fn get_locally_completed_episodes(
+    pool: &picacg_db::SqlitePool,
+    comic_id: &str,
+) -> std::collections::HashSet<i32> {
+    match picacg_db::get_download_task_async(pool, comic_id).await {
+        Ok(Some(task)) => {
+            if task.state == "Completed" {
+                task.get_episode_orders().into_iter().collect()
+            } else {
+                task.get_completed_episodes().into_iter().collect()
+            }
+        }
+        _ => std::collections::HashSet::new(),
+    }
+}
+
+/// 从本地下载目录重建单章图片列表（存量旧下载没有 DB 缓存记录时的兜底）
+///
+/// 目录规则与下载器落盘一致：`{base}/image/{标题}/第{N}章/`。文件名即
+/// 服务端 `originalName`（或下载器补的序号名），按自然排序恢复页序。
+/// 构造出的 `Picture` 只有 `original_name` 有意义——阅读器的本地探测正是
+/// 按它找文件；`path` 填唯一伪值防止多张图在 ImageCache 撞同一个空 URL。
+async fn build_pictures_from_local_dir(
+    comic_title: &str,
+    episode_order: i32,
+) -> Option<Vec<picacg_api::models::Picture>> {
+    use picacg_api::models::{ImageInfo, Picture};
+
+    let ep_folder = get_images_download_path()
+        .join(crate::utils::sanitize_filename(comic_title))
+        .join(format!("第{}章", episode_order));
+
+    let files = get_local_filenames(&ep_folder).await;
+    if files.is_empty() {
+        return None;
+    }
+
+    let mut names: Vec<String> = files.into_iter().collect();
+    names.sort_by(|a, b| crate::utils::natural_sort::natural_cmp(a, b));
+
+    let pictures = names
+        .into_iter()
+        .map(|name| {
+            let pseudo_path = format!("local/{}/{}", episode_order, name);
+            Picture {
+                id: String::new(),
+                media: ImageInfo {
+                    original_name: name,
+                    path: pseudo_path,
+                    file_server: String::new(),
+                },
+            }
+        })
+        .collect();
+    Some(pictures)
+}
+
+/// 单章图片列表三级加载：DB 缓存 → 本地下载目录 → 网络分页拉全
+///
+/// - DB 缓存由下载器与首次网络拉取写入，保存的是服务端权威页序
+/// - 本地目录兜底覆盖「升级前下载的存量漫画」，零网络秒开；仅对
+///   `locally_completed` 白名单里的章生效（半截目录不可信）
+/// - 网络路径一次拉完该章全部 API 分页（此前只拉第 1 页，单章超过
+///   一页分页时单页模式会丢后面的图），成功后写回 DB 缓存
+async fn fetch_chapter_pictures(
+    client: &ApiClient,
+    pool: &picacg_db::SqlitePool,
+    comic_id: &str,
+    comic_title: &str,
+    episode_order: i32,
+    locally_completed: &std::collections::HashSet<i32>,
+) -> std::result::Result<Vec<picacg_api::models::Picture>, String> {
+    use picacg_api::{endpoints::comic::GetPicturesRequest, models::Picture};
+
+    // 1. DB 缓存
+    if let Some(json) = picacg_db::get_episode_pictures_async(pool, comic_id, episode_order).await
+        && let Ok(pics) = serde_json::from_str::<Vec<Picture>>(&json)
+        && !pics.is_empty()
+    {
+        return Ok(pics);
+    }
+
+    // 2. 本地下载目录（仅下载器标记完成的章）
+    if locally_completed.contains(&episode_order)
+        && let Some(pics) = build_pictures_from_local_dir(comic_title, episode_order).await
+    {
+        tracing::info!(
+            "第 {} 章图片列表由本地下载目录重建: {} 张",
+            episode_order,
+            pics.len()
+        );
+        return Ok(pics);
+    }
+
+    // 3. 网络分页拉全
+    let mut page = 1;
+    let mut pics: Vec<Picture> = Vec::new();
+    loop {
+        let request = GetPicturesRequest {
+            comic_id: comic_id.to_string(),
+            episode_order,
+            page,
+        };
+        match client.request(request).await {
+            Ok(response) => {
+                let total_api_pages = response.pages.pages;
+                pics.extend(response.pages.docs);
+                if page >= total_api_pages {
+                    break;
+                }
+                page += 1;
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+
+    if !pics.is_empty()
+        && let Ok(json) = serde_json::to_string(&pics)
+    {
+        picacg_db::save_episode_pictures_async(pool, comic_id, episode_order, &json).await;
+    }
+    Ok(pics)
+}
+
 fn handle_load_pictures(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<LoadPicturesRequest>,
@@ -1179,31 +1342,36 @@ fn handle_load_pictures(
 
         let client = api_client.0.clone();
         let comic_id = event.comic_id.clone();
+        let comic_title = event.comic_title.clone();
         let episode_order = event.episode_order;
-        let page = event.page;
 
         runtime.spawn_background_task(move |mut ctx| async move {
-            use picacg_api::endpoints::comic::GetPicturesRequest;
-
-            let request = GetPicturesRequest {
-                comic_id,
+            let pool = picacg_db::get_pool();
+            let locally_completed = get_locally_completed_episodes(&pool, &comic_id).await;
+            match fetch_chapter_pictures(
+                &client,
+                &pool,
+                &comic_id,
+                &comic_title,
                 episode_order,
-                page,
-            };
-
-            match client.request(request).await {
-                Ok(response) => {
+                &locally_completed,
+            )
+            .await
+            {
+                Ok(pictures) => {
                     ctx.run_on_main_thread(move |ctx| {
                         ctx.world.write_message(PicturesLoadedEvent {
-                            pictures: response.pages.docs,
+                            comic_id,
+                            episode_order,
+                            pictures,
                         });
                     })
                     .await;
                 }
-                Err(e) => {
-                    let error = e.to_string();
+                Err(error) => {
                     ctx.run_on_main_thread(move |ctx| {
-                        ctx.world.write_message(PicturesLoadFailedEvent { error });
+                        ctx.world
+                            .write_message(PicturesLoadFailedEvent { comic_id, error });
                     })
                     .await;
                 }
@@ -1212,99 +1380,96 @@ fn handle_load_pictures(
     }
 }
 
-/// 并发加载所有章节的图片列表（条漫模式用，DB 缓存优先）
+/// 并发加载所有章节的图片列表（条漫模式用）
+///
+/// 每章独立走三级加载（DB 缓存 → 本地目录 → 网络）。缓存/本地命中的章
+/// 几乎瞬间返回，只有真正走网络的章占并发额度；此前是逐章串行 await，
+/// 几十章的漫画在代理环境下要等几十次串行网络往返。
 fn handle_load_all_chapter_pictures(
     runtime: ResMut<TokioTasksRuntime>,
     mut messages: MessageReader<LoadAllChapterPicturesRequest>,
     api_client: Res<ApiClientResource>,
 ) {
+    /// 网络拉取并发上限（避免对 API 突发几十个请求）
+    const MAX_CONCURRENT_CHAPTERS: usize = 5;
+
     for event in messages.read() {
         let client = api_client.0.clone();
         let comic_id = event.comic_id.clone();
+        let comic_title = event.comic_title.clone();
         let episodes = event.episodes.clone();
 
         runtime.spawn_background_task(move |mut ctx| async move {
-            use picacg_api::{endpoints::comic::GetPicturesRequest, models::Picture};
-
             let pool = picacg_db::get_pool();
-            let mut all_pictures: Vec<Picture> = Vec::new();
+            // 白名单整本只查一次，Arc 分发给各章任务
+            let locally_completed =
+                std::sync::Arc::new(get_locally_completed_episodes(&pool, &comic_id).await);
+            let semaphore =
+                std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CHAPTERS));
+
+            // 先全部 spawn（信号量限流），再按章节顺序收割——组装顺序与
+            // episodes 一致，与完成先后无关
+            let handles: Vec<_> = episodes
+                .iter()
+                .map(|ep| {
+                    let semaphore = semaphore.clone();
+                    let client = client.clone();
+                    let pool = pool.clone();
+                    let comic_id = comic_id.clone();
+                    let comic_title = comic_title.clone();
+                    let locally_completed = locally_completed.clone();
+                    let order = ep.order;
+                    tokio::spawn(async move {
+                        let _permit = semaphore.acquire_owned().await;
+                        fetch_chapter_pictures(
+                            &client,
+                            &pool,
+                            &comic_id,
+                            &comic_title,
+                            order,
+                            &locally_completed,
+                        )
+                        .await
+                    })
+                })
+                .collect();
+
+            let mut all_pictures = Vec::new();
             let mut all_metas = Vec::new();
-            let mut cache_hit = 0_usize;
-            let mut cache_miss = 0_usize;
+            let mut failed_chapters = 0_usize;
 
-            for ep in &episodes {
-                // 1. 先查 DB 缓存
-                if let Some(json) =
-                    picacg_db::get_episode_pictures_async(&pool, &comic_id, ep.order).await
-                    && let Ok(pics) = serde_json::from_str::<Vec<Picture>>(&json)
-                {
-                    for (i, pic) in pics.into_iter().enumerate() {
-                        all_metas.push(crate::events::WebtoonPageMeta {
-                            episode_order: ep.order,
-                            page_in_chapter: i,
-                        });
-                        all_pictures.push(pic);
-                    }
-                    cache_hit += 1;
-                    continue;
-                }
-
-                // 2. 缓存未命中，从 API 加载
-                cache_miss += 1;
-                let mut page = 1;
-                let mut chapter_pics: Vec<Picture> = Vec::new();
-
-                loop {
-                    let request = GetPicturesRequest {
-                        comic_id: comic_id.clone(),
-                        episode_order: ep.order,
-                        page,
-                    };
-
-                    match client.request(request).await {
-                        Ok(response) => {
-                            let total_api_pages = response.pages.pages;
-                            chapter_pics.extend(response.pages.docs);
-                            if page >= total_api_pages {
-                                break;
-                            }
-                            page += 1;
-                        }
-                        Err(e) => {
-                            tracing::error!("加载第 {} 章图片列表失败: {}", ep.order, e);
-                            break;
+            for (ep, handle) in episodes.iter().zip(handles) {
+                match handle.await {
+                    Ok(Ok(pics)) => {
+                        for (i, pic) in pics.into_iter().enumerate() {
+                            all_metas.push(crate::events::WebtoonPageMeta {
+                                episode_order: ep.order,
+                                page_in_chapter: i,
+                            });
+                            all_pictures.push(pic);
                         }
                     }
-                }
-
-                // 3. 写入 DB 缓存
-                if !chapter_pics.is_empty()
-                    && let Ok(json) = serde_json::to_string(&chapter_pics)
-                {
-                    picacg_db::save_episode_pictures_async(&pool, &comic_id, ep.order, &json).await;
-                }
-
-                // 4. 追加到总列表
-                for (i, pic) in chapter_pics.into_iter().enumerate() {
-                    all_metas.push(crate::events::WebtoonPageMeta {
-                        episode_order: ep.order,
-                        page_in_chapter: i,
-                    });
-                    all_pictures.push(pic);
+                    Ok(Err(e)) => {
+                        failed_chapters += 1;
+                        tracing::error!("加载第 {} 章图片列表失败: {}", ep.order, e);
+                    }
+                    Err(e) => {
+                        failed_chapters += 1;
+                        tracing::error!("加载第 {} 章图片列表任务异常: {}", ep.order, e);
+                    }
                 }
             }
 
-            let total = all_pictures.len();
             tracing::info!(
-                "全章节图片列表加载完成: {} 章, {} 张图片（缓存命中 {}, API {} 章）",
+                "全章节图片列表加载完成: {} 章, {} 张图片（失败 {} 章）",
                 episodes.len(),
-                total,
-                cache_hit,
-                cache_miss,
+                all_pictures.len(),
+                failed_chapters,
             );
 
             ctx.run_on_main_thread(move |ctx| {
                 ctx.world.write_message(AllChapterPicturesLoadedEvent {
+                    comic_id,
                     pictures: all_pictures,
                     page_metas: all_metas,
                 });
@@ -1723,10 +1888,25 @@ fn handle_download_comic(
             continue;
         }
 
-        let save_path = get_images_download_path()
-            .join(sanitize_filename(&comic_title))
-            .to_string_lossy()
-            .to_string();
+        // 已有下载记录时继承单本自定义设置与实际保存路径——meta 用 `new()`
+        // 白手起家（custom 字段全 None），不继承的话 save() 落库会把用户
+        // 设置的自定义路径/CBZ 开关冲成 NULL（upsert 对这两列必须保持裸
+        // 覆盖：三态开关的「切回 None = 跟随全局」依赖显式写 NULL，不能
+        // 用 COALESCE 兜底），图片也会下到全局路径与旧文件分裂。
+        // redownload 路径的 old_meta 搬运就是同款语义，这里补齐
+        let old_meta = DownloadTaskMeta::load_by_comic_id(&comic_id)
+            .ok()
+            .map(|mut old| {
+                repair_save_path(&mut old);
+                old
+            });
+        let save_path = match &old_meta {
+            Some(old) => old.effective_download_path().to_string(),
+            None => get_images_download_path()
+                .join(sanitize_filename(&comic_title))
+                .to_string_lossy()
+                .to_string(),
+        };
 
         // 从漫画详情获取分类、标签与 epsCount 快照（详情未加载时为空）
         let (categories, tags, detail_eps_count) = if detail_state.comic_id == comic_id {
@@ -1739,7 +1919,8 @@ fn handle_download_comic(
             (vec![], vec![], None)
         };
         // 基准优先取请求自带的（列表右键下载走这条），再回落详情页；
-        // 两处都没有就留空 = 未知，角标只报已下载、不猜更新
+        // 两处都没有就留空 = 未知（DB 侧 COALESCE 会保住旧基准），
+        // 角标只报已下载、不猜更新
         let remote_eps_count = event
             .remote_eps_count
             .filter(|v| *v > 0)
@@ -1755,6 +1936,10 @@ fn handle_download_comic(
             tags,
         );
         meta.remote_eps_count = remote_eps_count;
+        if let Some(old) = &old_meta {
+            meta.custom_download_path = old.custom_download_path.clone();
+            meta.custom_auto_pack_cbz = old.custom_auto_pack_cbz;
+        }
 
         // 保存元数据到文件
         if let Err(e) = meta.save() {
@@ -1966,6 +2151,15 @@ async fn execute_download_task(
             total_episodes,
             total_pages
         );
+
+        // 顺手写入图片列表缓存（服务端权威页序）：下载完成后阅读器的
+        // 单章加载与条漫全章节加载都能零网络取列表
+        if !all_pictures.is_empty()
+            && let Ok(json) = serde_json::to_string(&all_pictures)
+        {
+            let pool = picacg_db::get_pool();
+            picacg_db::save_episode_pictures_async(&pool, &comic_id, episode_order, &json).await;
+        }
 
         // 收集 API 返回的所有 original_name
         let required_files: std::collections::HashSet<String> = all_pictures
@@ -4070,6 +4264,35 @@ fn handle_load_history(
                     .await;
                 }
             }
+        });
+    }
+}
+
+/// 处理加载单本漫画历史请求（详情页「继续阅读」按钮的数据源）
+fn handle_load_comic_history(
+    runtime: ResMut<TokioTasksRuntime>,
+    mut messages: MessageReader<LoadComicHistoryRequest>,
+) {
+    for event in messages.read() {
+        let comic_id = event.comic_id.clone();
+        let pool = picacg_db::get_pool();
+
+        runtime.spawn_background_task(|mut ctx| async move {
+            let history = match picacg_db::get_history_async(&pool, &comic_id).await {
+                Ok(history) => history,
+                Err(e) => {
+                    // 查询失败按「无历史」处理：详情页退化为「开始阅读」，
+                    // 不阻塞页面
+                    tracing::warn!("查询阅读历史失败: comic_id={}, err={}", comic_id, e);
+                    None
+                }
+            };
+
+            ctx.run_on_main_thread(move |ctx| {
+                ctx.world
+                    .write_message(ComicHistoryLoadedEvent { comic_id, history });
+            })
+            .await;
         });
     }
 }

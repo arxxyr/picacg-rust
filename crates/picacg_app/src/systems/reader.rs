@@ -176,19 +176,14 @@ mod consts {
 
 // ==================== 本地文件加载 ====================
 
-/// 清理文件名中的非法字符（与 api_plugin.rs 中的 sanitize_filename 保持一致）
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| match c {
-            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => c,
-        })
-        .collect()
-}
-
 /// 尝试获取本地图片路径
 ///
 /// 返回 Some(path) 如果本地文件存在，否则返回 None
+///
+/// ⚠️ 目录规则必须与下载器落盘完全一致：`{下载目录}/image/{标题}/第{N}章/`，
+/// 标题清洗用 `utils::sanitize_filename`（含全角标点替换）。历史实现少了
+/// `image` 一级、清洗函数也漂移成只处理 ASCII 的旧副本——本地探测因此
+/// 永远落空，已下载的图片全部走网络重下。
 fn try_get_local_image_path(
     comic_title: &str,
     episode_order: i32,
@@ -196,8 +191,9 @@ fn try_get_local_image_path(
     page_index: usize,
 ) -> Option<PathBuf> {
     let base_path = get_download_base_path();
-    let sanitized_title = sanitize_filename(comic_title);
+    let sanitized_title = crate::utils::sanitize_filename(comic_title);
     let ep_folder = base_path
+        .join("image")
         .join(&sanitized_title)
         .join(format!("第{}章", episode_order));
 
@@ -692,8 +688,8 @@ pub fn trigger_load_pictures(
     reader_state.is_loading = true;
     load_messages.write(LoadPicturesRequest {
         comic_id: reader_state.comic_id.clone(),
+        comic_title: reader_state.comic_title.clone(),
         episode_order: reader_state.episode_order,
-        page: 1,
     });
 }
 
@@ -714,13 +710,45 @@ pub fn handle_pictures_loaded(
     mut load_all_messages: MessageWriter<LoadAllChapterPicturesRequest>,
 ) {
     for event in pictures_events.read() {
-        // 单页模式的下一章预加载
+        // 过期响应丢弃：切书/切章后飞行中的旧请求回来不能灌进当前阅读器
+        if event.comic_id != reader_state.comic_id {
+            tracing::debug!(
+                "丢弃过期的图片列表响应: 响应={}, 当前={}",
+                event.comic_id,
+                reader_state.comic_id
+            );
+            continue;
+        }
+
+        // 单页模式的下一章预加载（预期章 = 当前章的下一章，其余为过期响应）
         if reader_state.is_loading_next_chapter {
+            let expected_next = reader_state
+                .episodes
+                .get(reader_state.current_episode_idx + 1)
+                .map(|ep| ep.order);
+            if expected_next != Some(event.episode_order) {
+                tracing::debug!(
+                    "丢弃过期的预加载响应: 响应第{}章, 预期{:?}",
+                    event.episode_order,
+                    expected_next
+                );
+                continue;
+            }
             reader_state.is_loading_next_chapter = false;
             reader_state.next_chapter_pictures = event.pictures.clone();
             tracing::info!(
                 "下一章图片预加载完成: {} 张",
                 reader_state.next_chapter_pictures.len()
+            );
+            continue;
+        }
+
+        // 非预加载路径：只接受当前章的响应（切章后旧章响应必须丢弃）
+        if event.episode_order != reader_state.episode_order {
+            tracing::debug!(
+                "丢弃过期的图片列表响应: 响应第{}章, 当前第{}章",
+                event.episode_order,
+                reader_state.episode_order
             );
             continue;
         }
@@ -744,7 +772,22 @@ pub fn handle_pictures_loaded(
         reader_state.pictures = event.pictures.clone();
         reader_state.page_metas = metas;
         reader_state.total_pages = reader_state.pictures.len();
-        reader_state.current_page = 0;
+
+        // 继续阅读：恢复到上次的章内页码（1-indexed →
+        // 0-indexed，钳位到本章范围） 只在首次进入时消费；条漫 Phase 2
+        // 重建按「章 + 章内偏移」保持，无需再管
+        reader_state.current_page = match reader_state.pending_resume_page.take() {
+            Some(page) if page > 0 => {
+                let resumed = (page - 1).min(reader_state.total_pages.saturating_sub(1));
+                tracing::info!(
+                    "继续阅读：第 {} 章第 {} 页",
+                    reader_state.episode_order,
+                    resumed + 1
+                );
+                resumed
+            }
+            _ => 0,
+        };
 
         for entity in loading_query.iter() {
             commands.entity(entity).despawn();
@@ -794,6 +837,7 @@ pub fn handle_pictures_loaded(
                     reader_state.is_loading_all_chapters = true;
                     load_all_messages.write(LoadAllChapterPicturesRequest {
                         comic_id: reader_state.comic_id.clone(),
+                        comic_title: reader_state.comic_title.clone(),
                         episodes: reader_state.episodes.clone(),
                     });
                 }
@@ -818,6 +862,15 @@ pub fn handle_all_pictures_loaded(
     mut load_image_messages: MessageWriter<LoadImageRequest>,
 ) {
     for event in events.read() {
+        // 过期响应丢弃：这是长任务（几十章并发拉取），切书后回来的概率最高
+        if event.comic_id != reader_state.comic_id {
+            tracing::debug!(
+                "丢弃过期的全章节响应: 响应={}, 当前={}",
+                event.comic_id,
+                reader_state.comic_id
+            );
+            continue;
+        }
         reader_state.is_loading_all_chapters = false;
 
         // 计算用户选择章节的起始页码 + 当前在章节内的偏移
@@ -883,6 +936,10 @@ pub fn handle_pictures_load_failed(
     container_query: Query<Entity, With<ReaderImageContainer>>,
 ) {
     for event in error_events.read() {
+        // 过期失败丢弃：旧请求的错误不该弹进当前正在读的漫画
+        if event.comic_id != reader_state.comic_id {
+            continue;
+        }
         tracing::error!("图片加载失败: {}", event.error);
 
         reader_state.is_loading = false;
@@ -1667,11 +1724,14 @@ fn try_switch_chapter(
         reader_state.current_page = usize::MAX; // 标记：加载完后跳到最后一页
     }
 
+    // 手动切章 = 明确要从该章头/尾开始，未消费的续读页码作废
+    reader_state.pending_resume_page = None;
+
     // 发起图片加载
     load_messages.write(LoadPicturesRequest {
         comic_id: reader_state.comic_id.clone(),
+        comic_title: reader_state.comic_title.clone(),
         episode_order: episode.order,
-        page: 1,
     });
 
     true
@@ -2132,7 +2192,18 @@ pub fn save_reading_history(
         return;
     }
 
-    let current = (reader_state.episode_order, reader_state.current_page);
+    // 统一存「章 + 章内页码」语义（继续阅读按这对坐标恢复）：
+    // - 条漫模式 current_page 是跨章节的全局页码，episode_order
+    //   也不随滚动更新， 直接存会在跨章后整体错位——必须经 page_metas
+    //   换算回章内坐标
+    // - 单页模式 current_page 本来就是章内页码
+    let (save_eps_order, page_in_chapter) = reader_state
+        .page_metas
+        .get(reader_state.current_page)
+        .map(|m| (m.episode_order, m.page_in_chapter))
+        .unwrap_or((reader_state.episode_order, reader_state.current_page));
+
+    let current = (save_eps_order, page_in_chapter);
     if *last_saved == current {
         return;
     }
@@ -2143,21 +2214,22 @@ pub fn save_reading_history(
         return;
     };
 
-    // 获取章节标题
+    // 获取章节标题（按实际所在章查，而非进入时的章）
     let eps_title = reader_state
         .episodes
-        .get(reader_state.current_episode_idx)
+        .iter()
+        .find(|ep| ep.order == save_eps_order)
         .map(|ep| ep.title.clone())
-        .unwrap_or_else(|| format!("第{}章", reader_state.episode_order));
+        .unwrap_or_else(|| format!("第{}章", save_eps_order));
 
-    // current_page 为 0-indexed，SaveHistoryRequest.last_page 为 1-indexed
+    // page_in_chapter 为 0-indexed，SaveHistoryRequest.last_page 为 1-indexed
     save_messages.write(SaveHistoryRequest {
         comic_id: reader_state.comic_id.clone(),
         comic_title: comic.title.clone(),
         thumb_url: comic.thumb.url(),
-        last_eps_order: reader_state.episode_order,
+        last_eps_order: save_eps_order,
         last_eps_title: eps_title,
-        last_page: (reader_state.current_page + 1) as i32,
+        last_page: (page_in_chapter + 1) as i32,
     });
 }
 

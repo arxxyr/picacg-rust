@@ -60,7 +60,6 @@ arboard = "3.6.1"
 sqlx = { version = "0.9.0", features = ["runtime-tokio", "sqlite", "chrono"] }
 
 # === 缓存 ===
-moka = { version = "0.12.16", features = ["future"] }
 
 # === 图片处理 ===
 image = "0.25.10"

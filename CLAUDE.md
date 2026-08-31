@@ -1,6 +1,6 @@
 # PicACG Rust 客户端开发笔记
 
-> 最后更新: 2026-08-29
+> 最后更新: 2026-08-31
 
 ## 其他
  - git commit 带emoji
@@ -9,6 +9,10 @@
 
 采用纯 Cargo Workspace 结构，根目录无 `[package]`，所有 crate 版本统一在根 `Cargo.toml` 管理。
 
+> 数据库迁移是**内嵌 SQL**（`database.rs` 的 `MIGRATION_*` 常量 + ALTER 列表，
+> `Database::new` 启动时执行）；曾存在的 `migrations/` 目录从未被代码引用，
+> 2026-08-31 已作为残留删除——改表结构请改内嵌常量。
+
 ```
 picacg-rust/
 ├── Cargo.toml                    # 纯 Workspace 配置（无 [package]）
@@ -16,7 +20,6 @@ picacg-rust/
 │   ├── fonts/SarasaTermSCNerd/   # 内置更纱黑体 CJK 字体
 │   └── icons/                    # 应用图标（官方素材 192 权威源 + 512/256 投放尺寸）
 ├── docs/                         # 文档
-├── migrations/                   # SQLite 数据库迁移脚本
 ├── scripts/                      # 部署脚本
 │   ├── deploy.sh                 # Bash 部署脚本
 │   ├── deploy-windows.ps1        # PowerShell 部署脚本
@@ -50,8 +53,7 @@ picacg-rust/
     ├── picacg_db/                # 数据库层
     │   └── src/
     │       ├── lib.rs
-    │       ├── database.rs       # SQLite 数据库
-    │       ├── cache.rs          # Moka 缓存
+    │       ├── database.rs       # SQLite 数据库（内嵌迁移 + 独立异步函数）
     │       └── models.rs         # 数据库模型
     ├── picacg_config/            # 配置管理
     │   └── src/
@@ -325,6 +327,50 @@ bsn! {
 
 **仍然有效的 DPI 常识**：`ComputedNode::size()`/`content_size()` 返回物理像素，
 换逻辑像素乘 `computed.inverse_scale_factor`；`Window::cursor_position()` 是逻辑像素。
+
+## 数据写入与异步回填架构约定（2026-08-31 确立）
+
+三条铁律，源自实际打穿过生产库的事故（详见各小节）。新增字段/新增异步查询时逐条对照。
+
+### 1. DB 字段单一写者：增量写者与全量 upsert 不准打架
+
+**事故**：`download_task.completed_episodes` 由 `add_completed_episode_async` 逐章
+读-改-写，但 FSM 的 `to_db_task()` 不携带该字段（恒 None），每次进度保存的全量
+upsert 都把标记冲成 NULL——实测生产库 114 本已完成漫画该列全空。
+
+**约定**：一个字段若存在独立写者（read-modify-write / 单列 UPDATE），全量 upsert
+对它二选一，**不准裸 `excluded` 覆盖**：
+
+| 策略 | 适用 | 现行案例 |
+|------|------|----------|
+| SQL 层 `COALESCE(excluded.x, table.x)` 只增不清 | 字段无「显式清空」语义 | `completed_episodes`、`remote_eps_count` |
+| 调用方继承旧记录（load → 改 → save） | 字段有「写 NULL = 清除」语义，COALESCE 会毁掉清除功能 | `custom_download_path`、`custom_auto_pack_cbz`（三态开关 `Some(false) → None` 是合法转移） |
+
+回归锁：`picacg_db` 的 `upsert_with_none_keeps_completed_episodes` 单测
+（内存 SQLite，mutation 验证过——还原 bug 该测试必挂）。
+
+### 2. DownloadTaskMeta 构造纪律：`new()` 白手起家的落库前必须继承
+
+`DownloadTaskMeta::new()` 的 custom 字段全 None。对**已有下载记录**的漫画走
+new() 再 `save()`，会把用户的单本设置冲掉（见上表第二行）。正确姿势按场景：
+
+- 改单本设置：直接改 `fsm.meta` 字段再 save（内存是唯一真相）
+- 后台回填：`load_by_comic_id` → 改 → save（从 DB 读全字段）
+- 重建任务（redownload / 重复下载）：从 old_meta 逐字段搬运，或 new() 后补
+  `custom_download_path` / `custom_auto_pack_cbz`（`handle_download_comic` 有样板，
+  save_path 也要用 `effective_download_path()` 保持与自定义目录一致）
+
+### 3. 异步回填必须带请求身份，消费端先验身份再写状态
+
+**事故面**：请求飞行途中用户切书/切章，过期响应回来直接覆盖当前页面状态
+（网络慢/走代理时切书必现；全章节列表是长任务，中招概率最高）。
+
+**约定**：请求-响应型事件必须携带请求标识（`comic_id`，章节粒度加
+`episode_order`），消费 handler 第一件事是与当前状态比对，不匹配
+`tracing::debug!` 后 `continue`。已接线：详情/章节列表/单章图片/全章节图片/
+单本历史（`ComicHistoryLoadedEvent`）的成功与失败事件。
+新增「按 ID 异步查询 → 回填页面状态」的链路时照此办理；
+列表页（搜索/分类/排行）暂未接线，改造时补上。
 
 ## 常见陷阱
 
@@ -918,6 +964,42 @@ pub struct ChannelSettings {
 
 ---
 
+## 阅读进度与继续阅读（2026-08-31）
+
+**保存**：`save_reading_history`（reader.rs）监听 ReaderState 变化，统一存
+「章 + 章内页码（1-indexed）」。⚠️ 条漫模式 `current_page` 是跨章全局页码、
+`episode_order` 不随滚动更新——**必须经 `page_metas` 换算回章内坐标再存**，
+直接存会在跨章后整体错位（历史 bug）。
+
+**恢复**：详情页 OnEnter 链上 `trigger_load_comic_history` 每次进入都重查本地
+历史（从阅读器返回时按钮进度才是新的），回填 `ComicDetailState.history`（比较
+后写，None→None 不触发重建）。有历史时按钮变「继续阅读」+ 按钮行上方进度提示；
+点击带 `resume_page` 走 `NavigateToReaderEvent` → `ReaderState.pending_resume_page`
+→ Phase 1 图片列表就位时消费（clamp 到本章范围，条漫同步锚点）。
+点章节卡片 = 明确从该章头开始，不带续读。历史章节已不存在（列表非空却找不到
+order）→ 回退第一章并作废续读页；章节列表为空只是没加载完，保留请求值。
+
+## 图片列表三级加载（已下载秒开，2026-08-31）
+
+单章图片列表统一走 `fetch_chapter_pictures`（api_plugin.rs）：
+**DB 缓存 → 本地下载目录 → 网络分页拉全**。
+
+- **DB 缓存**（`episode_pictures` 表）：下载器每章拉到列表后写入（服务端权威
+  页序）；网络路径成功后也写。此前下载器不写、条漫 Phase 2 才写，已下载漫画
+  首开列表全走网络
+- **本地目录重建**：`{下载目录}/image/{标题}/第N章/` 按文件名自然排序
+  （`utils/natural_sort.rs`，有单测）构建 Picture（只有 `original_name` 有意义，
+  `path` 填伪值防 ImageCache 空 URL 碰撞）。**仅信任下载任务标记完成的章**
+  （state=Completed 时 episode_orders 全信；否则只信 completed_episodes 增量
+  标记）——半截目录不可信，缺页永远不会去网络补。覆盖存量旧下载（无缓存记录）
+- **网络**：一次拉完该章全部 API 分页（此前只拉第 1 页，>40 张的章单页模式丢图）
+- 条漫 Phase 2 全章节：每章独立三级加载，网络章并发 5（Semaphore），按章节序
+  组装；此前逐章串行 await，几十章 = 几十次串行往返
+
+⚠️ **本地图片探测路径必须与下载器落盘一致**：`{base}/image/{标题}/第N章/`，
+标题清洗用 `utils::sanitize_filename`（含全角）。历史实现少了 `image` 一级 +
+清洗函数漂移成 ASCII 版，本地探测永远落空、已下载图片全部走网络重下。
+
 ## 下载更新：普通更新 vs 强制更新
 
 「已下载」项与标题栏各有两个按钮，走同一套下载流程，差别只在**要不要做前置检查**：
@@ -1459,14 +1541,42 @@ fn auto_resume_downloads_on_startup(
 
 ### 当前功能开发
 
+> 2026-08-31 全面评估后按优先级重排；每条附评估结论。
+
+**优先级高（用户可感的存量缺口）**
+
+- [ ] 错误页补分页/返回控件（games/fried/comments 加载失败后无法翻页返回——存量 UX 缺口，工作量小）
+- [ ] 条漫 Phase 2 失败章节的 UI 反馈：某章列表拉取失败目前只打日志，整章在条漫里静默缺失——补 Toast 提示 + 重试入口（2026-08-31 并发化时发现）
+- [ ] 列表页异步回填身份校验：搜索/分类/排行/收藏的响应事件未带请求参数身份，快速切换分类/翻页时旧响应可能覆盖新状态（详情/阅读器/历史已接线，见「数据写入与异步回填架构约定」§3；列表页影响轻——数据串到同页面不同参数，非跨页污染）
+
+**优先级中（重构与一致性）**
+
 - [ ] 控件库二期（rv-widgets 蓝图）：page_scaffold 页面骨架（22 页三段式收编）、input_row 输入行控件（16 份实现收编）、comic_card 卡片控件（12 份收编，前置：统一图片加载策略为一种）
 - [ ] Scale 尺度令牌全库替换（469 处字号 17→6 档、157 处圆角 9→3 档——全局视觉变更需专项+目测）
-- [ ] EditableText 迁移：等上游补 placeholder 与密码掩码（bevy_text editing.rs 的 planned 清单）后替换自研 TextInput
-- [ ] 错误页补分页/返回控件（games/fried/comments 加载失败后无法翻页返回——存量 UX 缺口）
-- [ ] i18n 接线（返回按钮等文案未走 i18n.rs）
-- [ ] 虚拟滚动推广评估：rankings/favorites 等分页页面数据量有界暂用瀑布流；若后续也转无限滚动则复用 comics 的虚拟滚动模式
+- [ ] i18n 接线（返回按钮等文案未走 i18n.rs；单语言用户为主，优先级不高）
+
+**阻塞中（等外部条件）**
+
+- [ ] EditableText 迁移：等上游补 placeholder 与密码掩码（bevy_text editing.rs 的 planned 清单）后替换自研 TextInput——0.19 上游仍未补齐，保持阻塞
+
+**已评估暂不做**
+
+- ~~虚拟滚动推广到 rankings/favorites~~：2026-08-31 评估结论——分页页面每页数据量有界（20-40 项），无实体数压力，瀑布流分帧已够；虚拟滚动的复杂度（窗口管理/节点复用/spacer）只在无限滚动场景值回票价。若未来某页改无限滚动再复用 comics 模式
+- ~~completed_episodes 存量回填~~：不需要——读取侧双档判据（Completed 看 episode_orders，进行中看增量标记）已覆盖存量；修复后的写入链路让进行中任务自然积累
+
+**优先级低（视觉 polish）**
 
 - [ ] 下载动画效果：右键下载漫画后，封面图从卡片位置飞向侧边栏下载按钮，边移动边缩小变为圆形，最终融入下载计数徽章
+
+### 已完成（2026-08-31）
+
+- [x] 阅读进度与继续阅读：详情页自动续读（继续阅读按钮 + 进度提示）、条漫保存语义修正（page_metas 换算章内坐标）
+- [x] 已下载漫画秒开：本地探测路径修复（补 image 一级 + sanitize 统一）、图片列表三级加载（DB 缓存/本地目录重建/网络拉全）、下载器写列表缓存、条漫全章节并发拉取
+- [x] 修复 completed_episodes 被进度保存冲空（upsert COALESCE 只增不清 + 内存 SQLite 回归锁单测，mutation 验证）
+- [x] 修复重复下载冲掉单本自定义设置（handle_download_comic 继承旧记录 custom 字段与 save_path）
+- [x] 异步回填串页防护：详情/章节/图片列表/全章节/单本历史事件携带请求身份，消费端先验后写
+- [x] picacg_db 死代码清扫：Database 方法层 33 个零调用方法、整个 cache.rs（Moka，连依赖）、DbBook/DbFavorite/DbCategoryCount 模型、migrations/ 目录（从未被引用，迁移是内嵌 SQL）
+- [x] 架构约定文档化（见「数据写入与异步回填架构约定」）
 
 ### 已完成（2026-08 下旬）
 

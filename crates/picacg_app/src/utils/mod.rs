@@ -3,6 +3,7 @@
 pub mod content_filter;
 pub mod i18n;
 pub mod icons;
+pub mod natural_sort;
 pub mod profiling;
 pub mod self_update;
 pub mod text_input;

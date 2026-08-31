@@ -4,31 +4,15 @@
 
 | 文档 | 说明 |
 |------|------|
-| [progress.md](progress.md) | 📊 项目进度报告（包含开发历史和待办事项） |
-| [00_architecture.md](00_architecture.md) | 🏗️ 系统架构设计 |
-| [01_api_protocol.md](01_api_protocol.md) | 🔌 PicACG API 协议文档 |
+| [01_api_protocol.md](01_api_protocol.md) | 🔌 PicACG API 协议文档（服务端协议，稳定外部事实） |
+| [02_cbz_packaging.md](02_cbz_packaging.md) | 📦 CBZ 打包设计文档（已实现） |
 
-## 快速入口
+## 权威入口
 
-- **当前框架**: Bevy 0.17.3 (ECS 架构)
-- **项目 CLAUDE.md**: 开发规范和常见陷阱
-- **进度概览**: 见 [progress.md](progress.md)
+- **架构与开发规范**：仓库根 `CLAUDE.md`——项目结构、Bevy 0.19 API 速查、
+  BSN 写法、常见陷阱、数据写入与异步回填架构约定、待办事项，全部以它为准
+- **功能概览与构建**：仓库根 `README.md`
 
-## 常见问题速查
-
-### Bevy 0.17 API
-
-| API | 说明 |
-|-----|------|
-| `#[derive(Message)]` | 定义消息/事件 |
-| `MessageWriter::write()` | 发送消息 |
-| `MessageReader<T>` | 接收消息 |
-| `ScrollPosition.y` | 滚动位置 |
-| `despawn()` | 删除实体（自动递归） |
-
-### 常见陷阱
-
-1. **Query 组件缺失**: UI 节点需显式添加 `Transform` 才有 `GlobalTransform`
-2. **DPI 缩放**: `ComputedNode::size()` 返回物理像素，需除以 `scale_factor`
-3. **坐标系**: 屏幕 Y 向下，Bevy UI Y 向上
-4. **API 数据顺序**: 不可信，需显式排序
+> 历史进度报告（progress.md）、旧架构设计（00_architecture.md）等快照型文档
+> 已于 2026-08-31 清理——内容停在 Bevy 0.17 时代且被 CLAUDE.md 全面取代，
+> 需要考古时走 git 历史。

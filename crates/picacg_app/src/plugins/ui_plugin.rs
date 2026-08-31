@@ -242,6 +242,7 @@ impl Plugin for UiPlugin {
                     ensure_main_layout,
                     setup_detail_ui,
                     trigger_load_comic_detail,
+                    trigger_load_comic_history,
                 )
                     .chain(),
             )
@@ -258,6 +259,7 @@ impl Plugin for UiPlugin {
                     download_button_interaction,
                     category_tag_interaction,
                     tag_button_interaction,
+                    handle_comic_history_loaded,
                     refresh_detail_ui,
                     update_cover_image,
                     // 滚动条系统

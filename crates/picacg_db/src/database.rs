@@ -11,9 +11,7 @@ use picacg_core::{PicacgError, Result};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use tracing::{debug, info};
 
-use crate::models::{
-    DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DbLikeRecord, DownloadStateData,
-};
+use crate::models::{DbDownloadTask, DbHistory, DbLikeRecord};
 
 // 数据库单例
 static DATABASE: OnceLock<RwLock<Database>> = OnceLock::new();
@@ -228,504 +226,6 @@ impl Database {
         info!("数据库初始化完成");
         Ok(Self { pool })
     }
-
-    // ==================== 漫画相关操作 ====================
-
-    pub async fn upsert_book(&self, book: &DbBook) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO book (
-                id, title, title2, author, chinese_team, description,
-                eps_count, pages, finished, categories, tags, likes_count,
-                created_at, updated_at, path, file_server, original_name,
-                creator, total_likes, total_views
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                title2 = excluded.title2,
-                author = excluded.author,
-                chinese_team = excluded.chinese_team,
-                description = excluded.description,
-                eps_count = excluded.eps_count,
-                pages = excluded.pages,
-                finished = excluded.finished,
-                categories = excluded.categories,
-                tags = excluded.tags,
-                likes_count = excluded.likes_count,
-                updated_at = excluded.updated_at,
-                path = excluded.path,
-                file_server = excluded.file_server,
-                original_name = excluded.original_name,
-                creator = excluded.creator,
-                total_likes = excluded.total_likes,
-                total_views = excluded.total_views
-            "#,
-        )
-        .bind(&book.id)
-        .bind(&book.title)
-        .bind(&book.title2)
-        .bind(&book.author)
-        .bind(&book.chinese_team)
-        .bind(&book.description)
-        .bind(book.eps_count)
-        .bind(book.pages)
-        .bind(book.finished)
-        .bind(&book.categories)
-        .bind(&book.tags)
-        .bind(book.likes_count)
-        .bind(book.created_at)
-        .bind(book.updated_at)
-        .bind(&book.path)
-        .bind(&book.file_server)
-        .bind(&book.original_name)
-        .bind(&book.creator)
-        .bind(book.total_likes)
-        .bind(book.total_views)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn get_book_by_id(&self, id: &str) -> Result<Option<DbBook>> {
-        let book = sqlx::query_as::<_, DbBook>("SELECT * FROM book WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(book)
-    }
-
-    pub async fn search_books(&self, keyword: &str, limit: i64) -> Result<Vec<DbBook>> {
-        let pattern = format!("%{}%", keyword);
-        let books = sqlx::query_as::<_, DbBook>(
-            "SELECT * FROM book WHERE title LIKE ? OR title2 LIKE ? ORDER BY updated_at DESC LIMIT ?",
-        )
-        .bind(&pattern)
-        .bind(&pattern)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(books)
-    }
-
-    pub async fn batch_upsert_books(&self, books: &[DbBook]) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        for book in books {
-            sqlx::query(
-                r#"
-                INSERT INTO book (
-                    id, title, title2, author, chinese_team, description,
-                    eps_count, pages, finished, categories, tags, likes_count,
-                    created_at, updated_at, path, file_server, original_name,
-                    creator, total_likes, total_views
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    title = excluded.title,
-                    updated_at = excluded.updated_at
-                "#,
-            )
-            .bind(&book.id)
-            .bind(&book.title)
-            .bind(&book.title2)
-            .bind(&book.author)
-            .bind(&book.chinese_team)
-            .bind(&book.description)
-            .bind(book.eps_count)
-            .bind(book.pages)
-            .bind(book.finished)
-            .bind(&book.categories)
-            .bind(&book.tags)
-            .bind(book.likes_count)
-            .bind(book.created_at)
-            .bind(book.updated_at)
-            .bind(&book.path)
-            .bind(&book.file_server)
-            .bind(&book.original_name)
-            .bind(&book.creator)
-            .bind(book.total_likes)
-            .bind(book.total_views)
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        Ok(())
-    }
-
-    // ==================== 收藏相关操作 ====================
-
-    pub async fn add_favorite(&self, book_id: &str) -> Result<()> {
-        let favorite = DbFavorite::new(book_id.to_string());
-        sqlx::query(
-            "INSERT INTO favorite (book_id, added_at) VALUES (?, ?) ON CONFLICT(book_id) DO NOTHING",
-        )
-        .bind(&favorite.book_id)
-        .bind(favorite.added_at)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn remove_favorite(&self, book_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM favorite WHERE book_id = ?")
-            .bind(book_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn is_favorited(&self, book_id: &str) -> Result<bool> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM favorite WHERE book_id = ?")
-            .bind(book_id)
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(count > 0)
-    }
-
-    pub async fn get_favorites(&self) -> Result<Vec<DbFavorite>> {
-        let favorites =
-            sqlx::query_as::<_, DbFavorite>("SELECT * FROM favorite ORDER BY added_at DESC")
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(favorites)
-    }
-
-    // ==================== 历史相关操作 ====================
-
-    pub async fn update_history(&self, history: &DbHistory) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO history (book_id, last_read, last_eps, last_page, comic_title, thumb_url, last_eps_title)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(book_id) DO UPDATE SET
-                last_read = excluded.last_read,
-                last_eps = excluded.last_eps,
-                last_page = excluded.last_page,
-                comic_title = excluded.comic_title,
-                thumb_url = excluded.thumb_url,
-                last_eps_title = excluded.last_eps_title
-            "#,
-        )
-        .bind(&history.book_id)
-        .bind(history.last_read)
-        .bind(history.last_eps)
-        .bind(history.last_page)
-        .bind(&history.comic_title)
-        .bind(&history.thumb_url)
-        .bind(&history.last_eps_title)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn get_history(&self, book_id: &str) -> Result<Option<DbHistory>> {
-        let history = sqlx::query_as::<_, DbHistory>("SELECT * FROM history WHERE book_id = ?")
-            .bind(book_id)
-            .fetch_optional(&self.pool)
-            .await?;
-        Ok(history)
-    }
-
-    pub async fn get_all_histories(&self) -> Result<Vec<DbHistory>> {
-        let histories =
-            sqlx::query_as::<_, DbHistory>("SELECT * FROM history ORDER BY last_read DESC")
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(histories)
-    }
-
-    /// 获取历史记录（分页）
-    pub async fn get_histories_paged(&self, limit: i64, offset: i64) -> Result<Vec<DbHistory>> {
-        let histories = sqlx::query_as::<_, DbHistory>(
-            "SELECT * FROM history ORDER BY last_read DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(histories)
-    }
-
-    /// 删除单条历史记录
-    pub async fn delete_history(&self, book_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM history WHERE book_id = ?")
-            .bind(book_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// 清空所有历史记录
-    pub async fn clear_all_history(&self) -> Result<()> {
-        sqlx::query("DELETE FROM history")
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// 获取历史记录总数
-    pub async fn get_history_count(&self) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(count)
-    }
-
-    // ==================== 点赞记录相关操作 ====================
-
-    /// 插入点赞记录（UPSERT：已存在则更新时间戳）
-    pub async fn insert_like_record(
-        &self,
-        comic_id: &str,
-        comic_title: &str,
-        thumb_url: Option<&str>,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO like_record (comic_id, comic_title, thumb_url, liked_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(comic_id) DO UPDATE SET
-                comic_title = excluded.comic_title,
-                thumb_url = excluded.thumb_url,
-                liked_at = excluded.liked_at
-            "#,
-        )
-        .bind(comic_id)
-        .bind(comic_title)
-        .bind(thumb_url)
-        .bind(chrono::Utc::now().timestamp())
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// 删除点赞记录
-    pub async fn delete_like_record(&self, comic_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM like_record WHERE comic_id = ?")
-            .bind(comic_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    /// 获取点赞记录（分页，按时间倒序）
-    pub async fn get_like_records(&self, limit: i64, offset: i64) -> Result<Vec<DbLikeRecord>> {
-        let records = sqlx::query_as::<_, DbLikeRecord>(
-            "SELECT * FROM like_record ORDER BY liked_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(records)
-    }
-
-    /// 获取点赞记录总数
-    pub async fn get_like_count(&self) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM like_record")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(count)
-    }
-
-    // ==================== 分类计数相关操作 ====================
-
-    pub async fn update_category_count(&self, category: &str, count: i64) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO category_count (category, count) VALUES (?, ?) ON CONFLICT(category) DO UPDATE SET count = excluded.count",
-        )
-        .bind(category)
-        .bind(count)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn get_category_count(&self, category: &str) -> Result<Option<i64>> {
-        let count: Option<i64> =
-            sqlx::query_scalar("SELECT count FROM category_count WHERE category = ?")
-                .bind(category)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(count)
-    }
-
-    pub async fn get_all_category_counts(&self) -> Result<Vec<DbCategoryCount>> {
-        let counts =
-            sqlx::query_as::<_, DbCategoryCount>("SELECT * FROM category_count ORDER BY category")
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(counts)
-    }
-
-    // ==================== 统计相关操作 ====================
-
-    pub async fn get_book_count(&self) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM book")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(count)
-    }
-
-    pub async fn get_favorite_count(&self) -> Result<i64> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM favorite")
-            .fetch_one(&self.pool)
-            .await?;
-        Ok(count)
-    }
-
-    // ==================== 下载任务相关操作 ====================
-
-    pub async fn upsert_download_task(&self, task: &DbDownloadTask) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO download_task (
-                comic_id, comic_title, total_episodes, episode_orders,
-                save_path, state, state_data, created_at, updated_at,
-                categories, tags, completed_episodes,
-                custom_download_path, custom_auto_pack_cbz, remote_eps_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(comic_id) DO UPDATE SET
-                comic_title = excluded.comic_title,
-                total_episodes = excluded.total_episodes,
-                episode_orders = excluded.episode_orders,
-                save_path = excluded.save_path,
-                state = excluded.state,
-                state_data = excluded.state_data,
-                updated_at = excluded.updated_at,
-                categories = excluded.categories,
-                tags = excluded.tags,
-                completed_episodes = excluded.completed_episodes,
-                custom_download_path = excluded.custom_download_path,
-                custom_auto_pack_cbz = excluded.custom_auto_pack_cbz,
-                -- 快照只增不清：新值为 NULL（调用方没拿到 epsCount）时保留旧快照
-                remote_eps_count = COALESCE(excluded.remote_eps_count, download_task.remote_eps_count)
-            "#,
-        )
-        .bind(&task.comic_id)
-        .bind(&task.comic_title)
-        .bind(task.total_episodes)
-        .bind(&task.episode_orders)
-        .bind(&task.save_path)
-        .bind(&task.state)
-        .bind(&task.state_data)
-        .bind(task.created_at)
-        .bind(task.updated_at)
-        .bind(&task.categories)
-        .bind(&task.tags)
-        .bind(&task.completed_episodes)
-        .bind(&task.custom_download_path)
-        .bind(task.custom_auto_pack_cbz)
-        .bind(task.remote_eps_count)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn update_download_task_state(
-        &self,
-        comic_id: &str,
-        state: &str,
-        state_data: Option<&DownloadStateData>,
-    ) -> Result<()> {
-        let state_data_json = state_data.and_then(|d| serde_json::to_string(d).ok());
-        let now = chrono::Utc::now().timestamp();
-
-        sqlx::query(
-            "UPDATE download_task SET state = ?, state_data = ?, updated_at = ? WHERE comic_id = ?",
-        )
-        .bind(state)
-        .bind(&state_data_json)
-        .bind(now)
-        .bind(comic_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn add_completed_episode(&self, comic_id: &str, episode: i32) -> Result<()> {
-        let task = self.get_download_task(comic_id).await?;
-        let mut completed = task
-            .as_ref()
-            .map(|t| t.get_completed_episodes())
-            .unwrap_or_default();
-
-        if !completed.contains(&episode) {
-            completed.push(episode);
-            completed.sort();
-        }
-
-        let completed_json = serde_json::to_string(&completed).ok();
-        let now = chrono::Utc::now().timestamp();
-
-        sqlx::query(
-            "UPDATE download_task SET completed_episodes = ?, updated_at = ? WHERE comic_id = ?",
-        )
-        .bind(&completed_json)
-        .bind(now)
-        .bind(comic_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn is_episode_completed(&self, comic_id: &str, episode: i32) -> Result<bool> {
-        let task = self.get_download_task(comic_id).await?;
-        Ok(task
-            .map(|t| t.get_completed_episodes().contains(&episode))
-            .unwrap_or(false))
-    }
-
-    pub async fn get_download_task(&self, comic_id: &str) -> Result<Option<DbDownloadTask>> {
-        let task =
-            sqlx::query_as::<_, DbDownloadTask>("SELECT * FROM download_task WHERE comic_id = ?")
-                .bind(comic_id)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(task)
-    }
-
-    pub async fn get_incomplete_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
-        let tasks = sqlx::query_as::<_, DbDownloadTask>(
-            "SELECT * FROM download_task WHERE state != 'Completed' ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(tasks)
-    }
-
-    pub async fn get_completed_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
-        let tasks = sqlx::query_as::<_, DbDownloadTask>(
-            "SELECT * FROM download_task WHERE state = 'Completed' ORDER BY updated_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(tasks)
-    }
-
-    pub async fn get_all_download_tasks(&self) -> Result<Vec<DbDownloadTask>> {
-        let tasks = sqlx::query_as::<_, DbDownloadTask>(
-            "SELECT * FROM download_task ORDER BY created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(tasks)
-    }
-
-    pub async fn delete_download_task(&self, comic_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM download_task WHERE comic_id = ?")
-            .bind(comic_id)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
-    }
-
-    pub async fn download_task_exists(&self, comic_id: &str) -> Result<bool> {
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM download_task WHERE comic_id = ?")
-                .bind(comic_id)
-                .fetch_one(&self.pool)
-                .await?;
-        Ok(count > 0)
-    }
 }
 
 // ==================== 独立异步函数（避免跨 await 持有锁）====================
@@ -751,7 +251,10 @@ pub async fn upsert_download_task_async(pool: &SqlitePool, task: &DbDownloadTask
             updated_at = excluded.updated_at,
             categories = excluded.categories,
             tags = excluded.tags,
-            completed_episodes = excluded.completed_episodes,
+            -- 完成标记只增不清：FSM 侧 to_db_task() 不携带该列（恒 NULL），
+            -- 逐章标记由 add_completed_episode_async 独立写入——裸 excluded
+            -- 覆盖会让每次进度保存都把标记冲掉（实测生产库因此全空）
+            completed_episodes = COALESCE(excluded.completed_episodes, download_task.completed_episodes),
             custom_download_path = excluded.custom_download_path,
             custom_auto_pack_cbz = excluded.custom_auto_pack_cbz,
             -- 快照只增不清：新值为 NULL（调用方没拿到 epsCount）时保留旧快照
@@ -916,6 +419,15 @@ pub async fn upsert_history_async(pool: &SqlitePool, history: &DbHistory) -> Res
     Ok(())
 }
 
+/// 获取单条历史记录（详情页「继续阅读」用）
+pub async fn get_history_async(pool: &SqlitePool, book_id: &str) -> Result<Option<DbHistory>> {
+    let history = sqlx::query_as::<_, DbHistory>("SELECT * FROM history WHERE book_id = ?")
+        .bind(book_id)
+        .fetch_optional(pool)
+        .await?;
+    Ok(history)
+}
+
 /// 获取所有历史记录（按最后阅读时间降序）
 pub async fn get_all_histories_async(pool: &SqlitePool) -> Result<Vec<DbHistory>> {
     let histories = sqlx::query_as::<_, DbHistory>("SELECT * FROM history ORDER BY last_read DESC")
@@ -1043,4 +555,140 @@ pub async fn save_episode_pictures_async(
     .bind(now)
     .execute(pool)
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::*;
+
+    /// 内存库 + download_task 表（列清单须与生产 schema 一致，
+    /// 少列会让 upsert 的 15 个 bind 直接报错，漂移能被测试暴露）
+    async fn memory_pool_with_download_task() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            // sqlite::memory: 每条连接是独立的库，必须限制单连接
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("创建内存 SQLite 失败");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE download_task (
+                comic_id TEXT PRIMARY KEY,
+                comic_title TEXT NOT NULL,
+                total_episodes INTEGER DEFAULT 0,
+                episode_orders TEXT NOT NULL,
+                save_path TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT 'Queued',
+                state_data TEXT,
+                created_at INTEGER DEFAULT 0,
+                updated_at INTEGER DEFAULT 0,
+                categories TEXT,
+                tags TEXT,
+                completed_episodes TEXT,
+                custom_download_path TEXT,
+                custom_auto_pack_cbz INTEGER,
+                remote_eps_count INTEGER
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("创建 download_task 表失败");
+
+        pool
+    }
+
+    fn sample_task(comic_id: &str) -> DbDownloadTask {
+        DbDownloadTask::new(
+            comic_id.to_string(),
+            "测试漫画".to_string(),
+            vec![1, 2, 3],
+            "/tmp/test".to_string(),
+        )
+    }
+
+    /// 回归锁：不携带完成标记的 upsert（新值为 NULL）不得清掉已有标记
+    ///
+    /// 历史 bug：upsert 对 completed_episodes 裸 `excluded` 覆盖，而 FSM 的
+    /// `to_db_task()` 从不携带该列——下载中每次进度保存都把
+    /// `add_completed_episode_async` 刚写的标记冲成 NULL，
+    /// 实测生产库 114 本已完成漫画该列全空
+    #[tokio::test]
+    async fn upsert_with_none_keeps_completed_episodes() {
+        let pool = memory_pool_with_download_task().await;
+
+        upsert_download_task_async(&pool, &sample_task("comic1"))
+            .await
+            .expect("首次插入失败");
+        add_completed_episode_async(&pool, "comic1", 1)
+            .await
+            .expect("标记第 1 章失败");
+        add_completed_episode_async(&pool, "comic1", 2)
+            .await
+            .expect("标记第 2 章失败");
+
+        // 模拟下载过程中的进度落库：completed_episodes 为 None
+        let mut progress_task = sample_task("comic1");
+        progress_task.state = "Downloading".to_string();
+        upsert_download_task_async(&pool, &progress_task)
+            .await
+            .expect("进度保存失败");
+
+        let stored = get_download_task_async(&pool, "comic1")
+            .await
+            .expect("查询失败")
+            .expect("任务不存在");
+        assert_eq!(stored.get_completed_episodes(), vec![1, 2]);
+        // 其余字段照常更新，COALESCE 只护这一列
+        assert_eq!(stored.state, "Downloading");
+    }
+
+    /// 显式携带值的 upsert 仍可覆盖标记（COALESCE 只挡 NULL，不挡显式写）
+    #[tokio::test]
+    async fn upsert_with_value_overwrites_completed_episodes() {
+        let pool = memory_pool_with_download_task().await;
+
+        upsert_download_task_async(&pool, &sample_task("comic1"))
+            .await
+            .expect("首次插入失败");
+        add_completed_episode_async(&pool, "comic1", 1)
+            .await
+            .expect("标记第 1 章失败");
+
+        let mut task = sample_task("comic1");
+        task.set_completed_episodes(&[5]);
+        upsert_download_task_async(&pool, &task)
+            .await
+            .expect("显式覆盖失败");
+
+        let stored = get_download_task_async(&pool, "comic1")
+            .await
+            .expect("查询失败")
+            .expect("任务不存在");
+        assert_eq!(stored.get_completed_episodes(), vec![5]);
+    }
+
+    /// 重复标记同一章幂等，结果保持升序
+    #[tokio::test]
+    async fn add_completed_episode_is_idempotent_and_sorted() {
+        let pool = memory_pool_with_download_task().await;
+
+        upsert_download_task_async(&pool, &sample_task("comic1"))
+            .await
+            .expect("首次插入失败");
+        for episode in [2, 1, 2, 1] {
+            add_completed_episode_async(&pool, "comic1", episode)
+                .await
+                .expect("标记章节失败");
+        }
+
+        let stored = get_download_task_async(&pool, "comic1")
+            .await
+            .expect("查询失败")
+            .expect("任务不存在");
+        assert_eq!(stored.get_completed_episodes(), vec![1, 2]);
+    }
 }

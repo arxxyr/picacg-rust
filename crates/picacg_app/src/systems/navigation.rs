@@ -177,6 +177,7 @@ pub fn handle_navigation_messages(
         detail_state.episodes.clear();
         detail_state.is_loading = false;
         detail_state.error = None;
+        detail_state.history = None;
         next_route.set(AppRoute::ComicDetail);
     }
 
@@ -195,18 +196,25 @@ pub fn handle_navigation_messages(
         let mut episodes = detail_state.episodes.clone();
         episodes.sort_by_key(|ep| ep.order);
 
-        // 查找当前章节在排序后列表中的索引
-        let current_episode_idx = episodes
+        // 查找目标章节在排序后列表中的索引。历史进度指向的章可能已不存在
+        // （漫画删章/重排）——此时回退到第一章，且续读页码一并作废，
+        // 不能让 idx 指向第一章而 order 还挂着旧值。
+        // 列表为空只说明章节尚未加载完，保留请求值照常进入
+        let (current_episode_idx, episode_order, resume_page) = match episodes
             .iter()
             .position(|ep| ep.order == event.episode_order)
-            .unwrap_or(0);
+        {
+            Some(idx) => (idx, event.episode_order, event.resume_page),
+            None if episodes.is_empty() => (0, event.episode_order, event.resume_page),
+            None => (0, episodes.first().map_or(1, |ep| ep.order), None),
+        };
 
         // 设置阅读器状态
         reader_state.comic_id = event.comic_id.clone();
         reader_state.comic_title = comic_title;
         reader_state.episodes = episodes;
         reader_state.current_episode_idx = current_episode_idx;
-        reader_state.episode_order = event.episode_order;
+        reader_state.episode_order = episode_order;
         reader_state.current_page = 0;
         reader_state.total_pages = 0;
         reader_state.pictures.clear();
@@ -216,6 +224,7 @@ pub fn handle_navigation_messages(
         reader_state.is_loading_next_chapter = false;
         reader_state.next_chapter_pictures.clear();
         reader_state.is_loading_all_chapters = false;
+        reader_state.pending_resume_page = resume_page;
         next_route.set(AppRoute::ReadView);
     }
 

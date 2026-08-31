@@ -1,14 +1,10 @@
 //! PicACG 数据库层
 //!
-//! 本地数据库和缓存管理
+//! 本地 SQLite 数据库（连接池初始化 + 独立异步操作函数）
 
-#![allow(unused_imports)]
-
-pub mod cache;
 pub mod database;
 pub mod models;
 
-pub use cache::{CACHE_MANAGER, CacheManager, CacheStats};
 pub use database::{
     Database,
     // 独立异步函数（避免跨 await 持有锁）
@@ -25,6 +21,7 @@ pub use database::{
     get_completed_download_tasks_async,
     get_download_task_async,
     get_episode_pictures_async,
+    get_history_async,
     get_history_count_async,
     get_incomplete_download_tasks_async,
     get_like_count_async,
@@ -35,9 +32,7 @@ pub use database::{
     upsert_download_task_async,
     upsert_history_async,
 };
-pub use models::{
-    DbBook, DbCategoryCount, DbDownloadTask, DbFavorite, DbHistory, DbLikeRecord, DownloadStateData,
-};
+pub use models::{DbDownloadTask, DbHistory, DbLikeRecord, DownloadStateData};
 // 重新导出
 pub use picacg_core::{PicacgError, Result};
 pub use sqlx::sqlite::SqlitePool;
