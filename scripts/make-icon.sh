@@ -43,7 +43,21 @@ if [[ ! -f "$SRC" ]]; then
     exit 1
 fi
 
-magick "$SRC" -filter Catrom -resize 512x512 "$ROOT/assets/icons/icon.png"
+# macOS 图标网格：1024 画布里主体约占 824（≈80.5%），四周留透明边。
+# 官方素材是满幅圆角方形，直接铺满画布会在 dock 里显得比别的 app 大一圈
+# （实测截图对比明显）。凡 macOS 用途（dock 的 icon.png、bundle 的 icns）
+# 都按此比例缩进；Windows/Linux 的 icon-256 保持满幅——那边的惯例就是满的。
+MACOS_ICON_SCALE_PERMILLE=805
+
+# 生成 macOS 风格图标：主体缩到画布的 80.5% 居中，四周透明
+make_macos_icon() {
+    local size="$1" out="$2"
+    local inner=$((size * MACOS_ICON_SCALE_PERMILLE / 1000))
+    magick "$SRC" -filter Catrom -resize "${inner}x${inner}" \
+        -background none -gravity center -extent "${size}x${size}" "$out"
+}
+
+make_macos_icon 512 "$ROOT/assets/icons/icon.png"
 magick "$SRC" -filter Catrom -resize 256x256 "$ROOT/assets/icons/icon-256.png"
 
 echo "已生成: $ROOT/assets/icons/icon.png"
@@ -65,7 +79,7 @@ for spec in "16 icon_16x16" "32 icon_16x16@2x" "32 icon_32x32" "64 icon_32x32@2x
             "512 icon_256x256@2x" "512 icon_512x512" "1024 icon_512x512@2x"; do
     size="${spec%% *}"
     name="${spec#* }"
-    magick "$SRC" -filter Catrom -resize "${size}x${size}" "$ICONSET/${name}.png"
+    make_macos_icon "$size" "$ICONSET/${name}.png"
 done
 
 iconutil -c icns "$ICONSET" -o "$ROOT/assets/icons/icon.icns"
