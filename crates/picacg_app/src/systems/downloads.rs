@@ -1261,6 +1261,31 @@ fn task_progress(task: &crate::resources::ComicDownloadTask) -> f32 {
     (episode_progress + page_progress).clamp(0.0, 1.0)
 }
 
+/// 进行中进度条的亮度渐变端点（Hsla lightness；PRIMARY 基准亮度 0.5）
+///
+/// 刚开始浅（淡蓝），临近完成深（比基准色再沉一点）——色相/饱和度不动，
+/// 只走亮度，一眼能读出进度段位
+const PROGRESS_LIGHTNESS_START: f32 = 0.72;
+const PROGRESS_LIGHTNESS_END: f32 = 0.42;
+
+/// 进度条填充色（建卡与刷新共用同一映射）
+///
+/// 终态（完成/失败/暂停）用各自的固定状态色；进行中保持 PRIMARY 色相，
+/// 按进度在 Hsla 亮度上从浅到深线性渐变
+fn progress_fill_color(status: &ComicDownloadStatus, progress: f32) -> Color {
+    match status {
+        ComicDownloadStatus::Completed => COMPLETED_COLOR,
+        ComicDownloadStatus::Failed(_) => AppColors::ERROR,
+        ComicDownloadStatus::Paused => PAUSED_COLOR,
+        _ => {
+            let base = Hsla::from(AppColors::PRIMARY);
+            let lightness = PROGRESS_LIGHTNESS_START
+                + (PROGRESS_LIGHTNESS_END - PROGRESS_LIGHTNESS_START) * progress.clamp(0.0, 1.0);
+            Color::from(Hsla { lightness, ..base })
+        }
+    }
+}
+
 /// 下载任务项场景
 ///
 /// 页面初建（各区域列表）与动态新增任务（`add_new_task_ui`）共用同一实现，
@@ -1268,13 +1293,9 @@ fn task_progress(task: &crate::resources::ComicDownloadTask) -> f32 {
 fn download_task_item(task: &crate::resources::ComicDownloadTask) -> impl Scene + use<> {
     let (status_text, status_color) = task_status_label(task);
 
-    let progress_width = Val::Percent(task_progress(task) * 100.0);
-    let progress_color = match &task.status {
-        ComicDownloadStatus::Completed => COMPLETED_COLOR,
-        ComicDownloadStatus::Failed(_) => AppColors::ERROR,
-        ComicDownloadStatus::Paused => PAUSED_COLOR,
-        _ => AppColors::PRIMARY,
-    };
+    let progress = task_progress(task);
+    let progress_width = Val::Percent(progress * 100.0);
+    let progress_color = progress_fill_color(&task.status, progress);
 
     // 判断是否可以暂停/继续/重试
     let can_pause = matches!(
@@ -1807,7 +1828,7 @@ pub fn update_download_stats(
 /// 状态文本和按钮可见性）（FSM 架构）
 pub fn refresh_downloads_ui(
     download_state: Res<DownloadManagerState>,
-    mut progress_bar_query: Query<(&DownloadProgressBar, &mut Node)>,
+    mut progress_bar_query: Query<(&DownloadProgressBar, &mut Node, &mut BackgroundColor)>,
     mut status_text_query: Query<(&DownloadStatusText, &mut Text, &mut TextColor)>,
     mut pause_btn_query: Query<(&PauseDownloadButton, &mut Node), Without<DownloadProgressBar>>,
     mut resume_btn_query: Query<
@@ -1842,11 +1863,12 @@ pub fn refresh_downloads_ui(
 
     // 更新每个任务的进度条、状态文本和按钮可见性
     for task in &tasks {
-        // 更新进度条宽度
+        // 更新进度条宽度与填充色（进行中按进度做亮度渐变：开始浅、临完成深）
         let progress = task_progress(task);
-        for (bar, mut node) in progress_bar_query.iter_mut() {
+        for (bar, mut node, mut bg_color) in progress_bar_query.iter_mut() {
             if bar.comic_id == task.comic_id {
                 node.width = Val::Percent(progress * 100.0);
+                *bg_color = BackgroundColor(progress_fill_color(&task.status, progress));
             }
         }
 
@@ -4382,6 +4404,54 @@ pub fn move_all_downloads_button_interaction(
                 })
                 .await;
             });
+        }
+    }
+}
+
+#[cfg(test)]
+mod progress_color_tests {
+    use bevy::prelude::*;
+
+    use super::{
+        COMPLETED_COLOR, PAUSED_COLOR, PROGRESS_LIGHTNESS_END, PROGRESS_LIGHTNESS_START,
+        progress_fill_color,
+    };
+    use crate::resources::ComicDownloadStatus;
+
+    /// 进行中：进度越大亮度越低（开始浅、临完成深），端点精确命中配置值
+    #[test]
+    fn downloading_darkens_with_progress() {
+        let at = |p: f32| Hsla::from(progress_fill_color(&ComicDownloadStatus::Downloading, p));
+        assert!((at(0.0).lightness - PROGRESS_LIGHTNESS_START).abs() < 1e-5);
+        assert!((at(1.0).lightness - PROGRESS_LIGHTNESS_END).abs() < 1e-5);
+        assert!(at(0.2).lightness > at(0.8).lightness);
+        // 越界进度钳位，不产生离谱颜色
+        assert!((at(1.5).lightness - PROGRESS_LIGHTNESS_END).abs() < 1e-5);
+    }
+
+    /// 色相/饱和度必须与 PRIMARY 一致——只动亮度，不动色调
+    #[test]
+    fn downloading_keeps_primary_hue() {
+        let base = Hsla::from(crate::systems::login::AppColors::PRIMARY);
+        for p in [0.0, 0.5, 1.0] {
+            let fill = Hsla::from(progress_fill_color(&ComicDownloadStatus::Downloading, p));
+            assert!((fill.hue - base.hue).abs() < 0.5);
+            assert!((fill.saturation - base.saturation).abs() < 1e-3);
+        }
+    }
+
+    /// 终态颜色不随进度变化，仍是各自的固定状态色
+    #[test]
+    fn terminal_states_use_fixed_colors() {
+        for p in [0.0, 0.5, 1.0] {
+            assert_eq!(
+                progress_fill_color(&ComicDownloadStatus::Completed, p),
+                COMPLETED_COLOR
+            );
+            assert_eq!(
+                progress_fill_color(&ComicDownloadStatus::Paused, p),
+                PAUSED_COLOR
+            );
         }
     }
 }
